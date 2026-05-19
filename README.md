@@ -26,7 +26,7 @@ Sources/
   CSwiftGetXLibtorrent/      可选 libtorrent C/C++ wrapper
 Tests/SwiftGetXTests/        Swift Testing 测试
 Docs/                        浏览器集成、BT 引擎和完成状态说明
-Scripts/                     native host 安装、libtorrent 构建、DMG 打包提示脚本
+Scripts/                     native host 安装、libtorrent 构建、app/DMG 打包脚本
 Native/CSwiftGetXLibtorrent/ CMake 构建入口
 Vendor/libtorrent/           vendored arvidn/libtorrent 源码
 ```
@@ -150,20 +150,18 @@ Sources/SwiftGetX/Resources/SafariWebExtension
 
 ## 打包与发布状态
 
-`Scripts/package-dmg.sh` 目前是发布流程提示脚本，不是完整自动打包器。正式发布需要：
-
-1. 维护 bundle identifier 为 `com.swiftgetx.app` 的 Xcode app target。
-2. 以 `Sources/SwiftGetX/Resources/AppInfo.plist` 作为 Info.plist 基线。
-3. 使用 Developer ID Application 证书归档和签名。
-4. 把 `SwiftGetX.app` 和 `SwiftGetXNativeHost` 放入发布产物。
-5. 使用 `hdiutil` 创建 DMG。
-6. 使用 `xcrun notarytool` notarize，并用 `xcrun stapler` staple。
-
-可以查看脚本输出了解当前建议流程：
+`Scripts/package-dmg.sh` 可以从 SwiftPM 构建产物组装本地可运行的 `SwiftGetX.app`：
 
 ```sh
-Scripts/package-dmg.sh
+Scripts/package-dmg.sh debug dist
+Scripts/package-dmg.sh release dist --dmg
 ```
+
+脚本会把主 app、`SwiftGetXNativeHost`、SwiftPM 资源 bundle 和 app 图标复制进 bundle，并使用 ad-hoc 签名，便于本地查看和调试。正式发布仍需要：
+
+1. 使用 Developer ID Application 证书签名。
+2. 确认 Safari/Chrome 扩展 ID 和 Native Messaging manifest。
+3. 使用 `xcrun notarytool` notarize，并用 `xcrun stapler` staple。
 
 ## 测试
 

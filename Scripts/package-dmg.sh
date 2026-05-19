@@ -1,31 +1,82 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_PATH="${1:-.build/arm64-apple-macosx/debug/SwiftGetX}"
+CONFIGURATION="${1:-debug}"
 OUTPUT_DIR="${2:-dist}"
-DMG_NAME="SwiftGetX.dmg"
+CREATE_DMG="${3:-}"
+APP_NAME="SwiftGetX"
+APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"
+STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/swiftgetx-package.XXXXXX")"
+STAGED_APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
+INFO_PLIST="Sources/SwiftGetX/Resources/AppInfo.plist"
+ICON_FILE="Sources/SwiftGetX/Resources/Assets/AppIcon.icns"
 
+cleanup() {
+    rm -rf "$STAGING_DIR"
+}
+trap cleanup EXIT
+
+case "$CONFIGURATION" in
+    debug|release)
+        ;;
+    *)
+        printf 'Usage: %s [debug|release] [output-dir] [--dmg]\n' "$0" >&2
+        exit 64
+        ;;
+esac
+
+if [[ "$CONFIGURATION" == "release" ]]; then
+    swift build --configuration release
+    BUILD_DIR="$(swift build --configuration release --show-bin-path)"
+else
+    swift build
+    BUILD_DIR="$(swift build --show-bin-path)"
+fi
+EXECUTABLE="$BUILD_DIR/$APP_NAME"
+NATIVE_HOST="$BUILD_DIR/SwiftGetXNativeHost"
+RESOURCE_BUNDLE="$BUILD_DIR/${APP_NAME}_${APP_NAME}.bundle"
+
+if [[ ! -x "$EXECUTABLE" ]]; then
+    printf 'Missing executable: %s\n' "$EXECUTABLE" >&2
+    exit 66
+fi
+
+rm -rf "$APP_BUNDLE"
+mkdir -p "$STAGED_APP_BUNDLE/Contents/MacOS" "$STAGED_APP_BUNDLE/Contents/Resources"
+
+cp "$EXECUTABLE" "$STAGED_APP_BUNDLE/Contents/MacOS/$APP_NAME"
+if [[ -x "$NATIVE_HOST" ]]; then
+    cp "$NATIVE_HOST" "$STAGED_APP_BUNDLE/Contents/MacOS/SwiftGetXNativeHost"
+fi
+
+cp "$INFO_PLIST" "$STAGED_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $APP_NAME" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string $APP_NAME" "$STAGED_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundlePackageType APPL" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$STAGED_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist"
+
+cp "$ICON_FILE" "$STAGED_APP_BUNDLE/Contents/Resources/AppIcon.icns"
+
+if [[ -d "$RESOURCE_BUNDLE" ]]; then
+    cp -R "$RESOURCE_BUNDLE" "$STAGED_APP_BUNDLE/Contents/Resources/"
+fi
+
+xattr -cr "$STAGED_APP_BUNDLE" 2>/dev/null || true
+codesign --force --deep --sign - "$STAGED_APP_BUNDLE"
 mkdir -p "$OUTPUT_DIR"
+ditto --noextattr --noqtn "$STAGED_APP_BUNDLE" "$APP_BUNDLE"
 
-cat <<'MSG'
-SwiftGetX package placeholder
+if [[ "$CREATE_DMG" == "--dmg" ]]; then
+    hdiutil create \
+        -volname "$APP_NAME" \
+        -srcfolder "$APP_BUNDLE" \
+        -ov \
+        -format UDZO \
+        "$OUTPUT_DIR/$APP_NAME.dmg"
+fi
 
-This Swift Package currently builds a command-style macOS executable target.
-For a production DMG:
-
-1. Generate or maintain an Xcode app project with bundle identifier com.swiftgetx.app.
-2. Use Sources/SwiftGetX/Resources/AppInfo.plist as the app Info.plist baseline.
-3. Archive with Developer ID Application signing.
-4. Export SwiftGetX.app and SwiftGetXNativeHost into dist/.
-5. Run:
-   hdiutil create -volname SwiftGetX -srcfolder dist/SwiftGetX.app -ov -format UDZO dist/SwiftGetX.dmg
-6. Notarize:
-   xcrun notarytool submit dist/SwiftGetX.dmg --keychain-profile <profile> --wait
-7. Staple:
-   xcrun stapler staple dist/SwiftGetX.dmg
-
-The current build artifact is:
-MSG
-
-printf '%s\n' "$APP_PATH"
-printf 'Planned output: %s/%s\n' "$OUTPUT_DIR" "$DMG_NAME"
+printf 'Packaged %s\n' "$APP_BUNDLE"

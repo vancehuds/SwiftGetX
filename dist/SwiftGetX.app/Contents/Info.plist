@@ -6,6 +6,8 @@
 	<string>SwiftGetX</string>
 	<key>CFBundleExecutable</key>
 	<string>SwiftGetX</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.swiftgetx.app</string>
 	<key>CFBundleName</key>

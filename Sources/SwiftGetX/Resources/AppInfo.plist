@@ -8,6 +8,8 @@
     <string>SwiftGetX</string>
     <key>CFBundleDisplayName</key>
     <string>SwiftGetX</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

@@ -74,11 +74,16 @@ let package = Package(
         .executableTarget(
             name: "SwiftGetX",
             dependencies: swiftGetXDependencies,
+            exclude: [
+                "Resources/Assets/AppIcon.iconset"
+            ],
             resources: [
                 .copy("Resources/SafariWebExtension"),
                 .copy("Resources/ChromeExtension"),
                 .copy("Resources/NativeMessaging"),
-                .copy("Resources/AppInfo.plist")
+                .copy("Resources/AppInfo.plist"),
+                .copy("Resources/Assets/AppIcon.icns"),
+                .copy("Resources/Assets/AppIcon.png")
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")
