@@ -46,17 +46,17 @@ jobs:
           cp -R Scripts "$artifact_root/"
 
           cat > "$artifact_root/INSTALL.txt" <<'EOF'
-SwiftGetX macOS artifact
+          SwiftGetX macOS artifact
 
-Contents:
-- bin/SwiftGetX: SwiftGetX executable.
-- bin/SwiftGetXNativeHost: Chrome Native Messaging host executable.
-- resources/SwiftGetX_SwiftGetX.bundle: bundled app resources used by SwiftPM.
-- Docs and Scripts: setup notes and helper scripts.
+          Contents:
+          - bin/SwiftGetX: SwiftGetX executable.
+          - bin/SwiftGetXNativeHost: Chrome Native Messaging host executable.
+          - resources/SwiftGetX_SwiftGetX.bundle: bundled app resources used by SwiftPM.
+          - Docs and Scripts: setup notes and helper scripts.
 
-This artifact is unsigned and not notarized. macOS may require explicit approval
-before running downloaded binaries.
-EOF
+          This artifact is unsigned and not notarized. macOS may require explicit approval
+          before running downloaded binaries.
+          EOF
 
           (cd dist && zip -qry SwiftGetX-macos.zip SwiftGetX)
 
