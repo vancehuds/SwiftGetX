@@ -1,3 +1,4 @@
+import SwiftData
 import SwiftUI
 
 struct ToolbarView: View {
@@ -6,11 +7,19 @@ struct ToolbarView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Binding var showingNewTask: Bool
 
+    @Query private var allTasks: [DownloadTask]
+    @FocusState private var isSearchFocused: Bool
+
+    private var totalDownloadSpeed: Int64 {
+        allTasks.filter { $0.status == .running }.reduce(0) { $0 + $1.speedBytesPerSecond }
+    }
+
     var body: some View {
         @Bindable var coordinator = coordinator
 
         GlassSurface(level: .floating, cornerRadius: 20) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
+                // MARK: - Action Group
                 HStack(spacing: 8) {
                     Button {
                         showingNewTask = true
@@ -46,43 +55,98 @@ struct ToolbarView: View {
                 }
 
                 Divider()
-                    .frame(height: 24)
+                    .frame(height: 20)
+                    .opacity(0.28)
 
+                // MARK: - Animated Expanding Search Bar
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("搜索任务、链接或文件名", text: $coordinator.searchText)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(isSearchFocused ? Color.blue : Color.secondary)
+                        .scaleEffect(isSearchFocused ? 1.1 : 1.0)
+                        .animation(.spring(response: 0.25, dampingFraction: 0.65), value: isSearchFocused)
+
+                    TextField("搜索任务、链接或文件名...", text: $coordinator.searchText)
                         .textFieldStyle(.plain)
-                        .frame(maxWidth: 320)
+                        .focused($isSearchFocused)
+                        .font(.system(size: 13))
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 34)
+                .frame(width: isSearchFocused ? 280 : 200) // Smooth width expansion!
                 .background {
                     Capsule()
-                        .fill(.thinMaterial)
+                        .fill(isSearchFocused ? .regularMaterial : .thinMaterial)
                         .overlay {
                             Capsule()
                                 .fill(Color.primary.opacity(colorScheme == .dark ? 0.05 : 0.035))
                         }
                         .overlay {
                             Capsule()
-                                .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.15 : 0.45), lineWidth: 0.8)
+                                .strokeBorder(
+                                    isSearchFocused
+                                        ? Color.blue.opacity(0.8)
+                                        : Color.white.opacity(colorScheme == .dark ? 0.15 : 0.45),
+                                    lineWidth: isSearchFocused ? 1.5 : 0.8
+                                )
+                                .shadow(color: isSearchFocused ? Color.blue.opacity(0.25) : Color.clear, radius: 4)
                         }
                 }
+                .animation(.spring(response: 0.32, dampingFraction: 0.75), value: isSearchFocused)
 
                 Spacer()
 
-                SpeedLimitMenu()
+                // MARK: - Overall Speed Monitor Dashboard
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(totalDownloadSpeed > 0 ? Color.green : Color.secondary.opacity(0.4))
+                        .frame(width: 7, height: 7)
+                        .shadow(color: totalDownloadSpeed > 0 ? Color.green.opacity(0.8) : Color.clear, radius: 3)
+                        .overlay {
+                            if totalDownloadSpeed > 0 {
+                                Circle()
+                                    .stroke(Color.green.opacity(0.4), lineWidth: 1.5)
+                                    .scaleEffect(1.8)
+                            }
+                        }
 
-                Button {
-                    openSettings()
-                } label: {
-                    Image(systemName: "gearshape")
+                    Text("⬇️ " + (totalDownloadSpeed > 0 ? ByteCountFormatter.downloadFormatter.string(fromByteCount: totalDownloadSpeed) + "/s" : "0 KB/s"))
+                        .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(totalDownloadSpeed > 0 ? Color.green : Color.secondary)
                 }
-                .buttonStyle(IconButtonStyle())
-                .help("设置")
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Color.primary.opacity(totalDownloadSpeed > 0 ? 0.06 : 0.03),
+                    in: Capsule()
+                )
+                .overlay {
+                    Capsule()
+                        .strokeBorder(
+                            totalDownloadSpeed > 0 ? Color.green.opacity(0.25) : Color.white.opacity(0.12),
+                            lineWidth: 0.8
+                        )
+                }
+                .animation(.spring, value: totalDownloadSpeed)
+
+                Divider()
+                    .frame(height: 20)
+                    .opacity(0.28)
+
+                // MARK: - Speed Limit Menu & Settings
+                HStack(spacing: 8) {
+                    SpeedLimitMenu()
+                    
+                    Button {
+                        openSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .buttonStyle(IconButtonStyle())
+                    .help("设置")
+                }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 14)
             .padding(.vertical, 10)
         }
     }

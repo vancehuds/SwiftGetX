@@ -446,3 +446,44 @@ struct IconButtonStyle: ButtonStyle {
             .opacity(isEnabled ? 1 : 0.45)
     }
 }
+
+// MARK: - Breathing Glow Modifier
+struct BreathingGlowModifier: ViewModifier {
+    let color: Color
+    let isAnimating: Bool
+    var cornerRadius: CGFloat = 16
+    @State private var pulse: CGFloat = 0.0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(color, lineWidth: 2.0)
+                    .opacity(isAnimating ? 0.35 + 0.35 * pulse : 0.0)
+                    .blur(radius: isAnimating ? 3.5 + 3.5 * pulse : 0)
+            }
+            .onAppear {
+                if isAnimating {
+                    withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                        pulse = 1.0
+                    }
+                }
+            }
+            .onChange(of: isAnimating) { _, newValue in
+                if newValue {
+                    withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                        pulse = 1.0
+                    }
+                } else {
+                    pulse = 0.0
+                }
+            }
+    }
+}
+
+extension View {
+    func breathingGlow(color: Color, isAnimating: Bool, cornerRadius: CGFloat = 16) -> some View {
+        self.modifier(BreathingGlowModifier(color: color, isAnimating: isAnimating, cornerRadius: cornerRadius))
+    }
+}
+
