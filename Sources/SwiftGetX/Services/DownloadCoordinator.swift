@@ -117,6 +117,7 @@ final class DownloadCoordinator {
     func start(_ task: DownloadTask) {
         task.status = .running
         task.errorMessage = nil
+        task.retryCount = 0
         task.appendLog("开始下载")
         let request = DownloadRequest(task: task)
         save()
@@ -252,6 +253,9 @@ final class DownloadCoordinator {
         task.supportsResume = snapshot.supportsResume
         task.eTag = snapshot.eTag
         task.lastModified = snapshot.lastModified
+        if let retryCount = snapshot.retryCount {
+            task.retryCount = retryCount
+        }
         if !snapshot.torrentFiles.isEmpty {
             task.torrentFiles = snapshot.torrentFiles
             if task.selectedFileIndexes.isEmpty {

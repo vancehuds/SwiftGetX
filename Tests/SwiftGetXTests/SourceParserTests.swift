@@ -20,6 +20,32 @@ struct SourceParserTests {
         #expect(sources[2].hasSuffix(".torrent"))
     }
 
+    @Test("extracts markdown links and trims punctuation")
+    func extractsMarkdownLinksAndTrimsPunctuation() {
+        let sources = SourceParser.extractSources(
+            from: """
+            [release](https://example.com/releases/app.zip), and
+            <https://example.com/build.tar.gz>.
+            """
+        )
+
+        #expect(sources == [
+            "https://example.com/releases/app.zip",
+            "https://example.com/build.tar.gz"
+        ])
+    }
+
+    @Test("normalizes GitHub Actions artifact page links")
+    func normalizesGitHubActionsArtifactPageLinks() {
+        let sources = SourceParser.extractSources(
+            from: "[vancehuds/SwiftGetX](https://github.com/vancehuds/SwiftGetX/actions/runs/26096865299/artifacts/7083295315)"
+        )
+
+        #expect(sources == [
+            "https://api.github.com/repos/vancehuds/SwiftGetX/actions/artifacts/7083295315/zip"
+        ])
+    }
+
     @Test("detects task kinds")
     func detectsKinds() {
         #expect(SourceParser.kind(for: "https://example.com/file.zip") == .http)
@@ -45,5 +71,15 @@ struct SourceParserTests {
         )
 
         #expect(name == "bad-name-file")
+    }
+
+    @Test("names GitHub Actions artifact archives")
+    func namesGitHubActionsArtifactArchives() {
+        let name = SourceParser.displayName(
+            for: "https://api.github.com/repos/vancehuds/SwiftGetX/actions/artifacts/7083295315/zip",
+            kind: .http
+        )
+
+        #expect(name == "SwiftGetX-artifact-7083295315.zip")
     }
 }

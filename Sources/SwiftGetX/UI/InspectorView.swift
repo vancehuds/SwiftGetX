@@ -131,6 +131,9 @@ private struct OverviewPanel: View {
             DetailRow(title: "速度", value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond) + "/s")
             DetailRow(title: "剩余时间", value: task.etaSeconds.map(TimeFormatter.eta) ?? "--")
             DetailRow(title: "断点续传", value: task.supportsResume ? "支持" : "未知/不支持")
+            if let connectionSummary = task.connectionSummary {
+                DetailRow(title: "连接", value: connectionSummary)
+            }
             if let errorMessage = task.errorMessage {
                 DetailRow(title: "错误", value: errorMessage)
             }

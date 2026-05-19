@@ -4,8 +4,7 @@ import Foundation
 final class HTTPDownloadEngine: DownloadEngine {
     var onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
 
-    private var activeTaskIDs = Set<UUID>()
-    private var speedLimitBytesPerSecond: Int64 = 0
+    private let runState = HTTPDownloadRunState()
     private var segmentCount = 8
     private var retryLimit = 3
 
@@ -20,38 +19,18 @@ final class HTTPDownloadEngine: DownloadEngine {
             return
         }
 
-        activeTaskIDs.insert(request.id)
-
-        var lastError: Error?
-        for attempt in 0...retryLimit {
-            guard activeTaskIDs.contains(request.id) else {
-                emitPaused(request)
-                return
-            }
-
-            do {
-                try await download(url: url, request: request)
-                activeTaskIDs.remove(request.id)
-                return
-            } catch is CancellationError {
-                activeTaskIDs.remove(request.id)
-                emitPaused(request)
-                return
-            } catch {
-                lastError = error
-                if attempt < retryLimit {
-                    emitRetry(request, error: error, attempt: attempt + 1)
-                    try? await Task.sleep(for: .seconds(min(6, attempt + 1)))
-                }
-            }
-        }
-
-        activeTaskIDs.remove(request.id)
-        emitFailure(request, message: lastError?.localizedDescription ?? "下载失败")
+        await runState.activate(request.id)
+        let worker = HTTPDownloadWorker(
+            segmentCount: segmentCount,
+            retryLimit: retryLimit,
+            runState: runState,
+            onSnapshot: onSnapshot
+        )
+        await worker.start(request, url: url)
     }
 
     func pause(_ request: DownloadRequest) async {
-        activeTaskIDs.remove(request.id)
+        await runState.deactivate(request.id)
         emitPaused(request)
     }
 
@@ -60,24 +39,20 @@ final class HTTPDownloadEngine: DownloadEngine {
     }
 
     func cancel(_ request: DownloadRequest) async {
-        activeTaskIDs.remove(request.id)
+        await runState.deactivate(request.id)
     }
 
     func remove(_ request: DownloadRequest, deletingFiles: Bool) async {
         await cancel(request)
         if deletingFiles {
             try? FileManager.default.removeItem(atPath: request.savePath)
-            try? FileManager.default.removeItem(atPath: partPath(for: request))
-            for index in 0..<segmentCount {
-                try? FileManager.default.removeItem(atPath: segmentPath(for: request, index: index))
-            }
-            try? FileManager.default.removeItem(atPath: segmentProgressPath(for: request))
+            HTTPTemporaryLayout(savePath: request.savePath).removeTemporaryFiles(maxSegments: segmentScanLimit)
         }
     }
 
     func recheck(_ request: DownloadRequest) async {
         let fileURL = URL(fileURLWithPath: request.savePath)
-        let size = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+        let size = HTTPTemporaryLayout.localSize(at: fileURL)
         let status: DownloadStatus = request.totalBytes > 0 && size == request.totalBytes ? .completed : .failed
         emit(
             DownloadSnapshot(
@@ -90,7 +65,8 @@ final class HTTPDownloadEngine: DownloadEngine {
                 errorMessage: status == .failed ? "文件大小与任务记录不一致" : nil,
                 supportsResume: request.supportsResume,
                 eTag: request.eTag,
-                lastModified: request.lastModified
+                lastModified: request.lastModified,
+                connectionSummary: request.supportsResume ? "HTTP · 可续传" : "HTTP · 不支持续传"
             )
         )
     }
@@ -98,41 +74,221 @@ final class HTTPDownloadEngine: DownloadEngine {
     func setFileSelection(_ request: DownloadRequest, selectedFileIndexes: [Int]) async {}
 
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async {
-        speedLimitBytesPerSecond = max(0, downloadBytesPerSecond)
+        await runState.setSpeedLimit(max(0, downloadBytesPerSecond))
+    }
+
+    private func emitPaused(_ request: DownloadRequest) {
+        emit(HTTPDownloadWorker.pausedSnapshot(for: request))
+    }
+
+    private func emitFailure(_ request: DownloadRequest, message: String) {
+        emit(HTTPDownloadWorker.failureSnapshot(for: request, message: message))
+    }
+
+    private func emit(_ snapshot: DownloadSnapshot) {
+        onSnapshot?(snapshot)
+    }
+}
+
+private let segmentScanLimit = 128
+
+private actor HTTPDownloadRunState {
+    private var activeTaskIDs = Set<UUID>()
+    private var speedLimitBytesPerSecond: Int64 = 0
+    private var nextDownloadSlot = Date()
+
+    func activate(_ id: UUID) {
+        activeTaskIDs.insert(id)
+    }
+
+    func deactivate(_ id: UUID) {
+        activeTaskIDs.remove(id)
+    }
+
+    func isActive(_ id: UUID) -> Bool {
+        activeTaskIDs.contains(id)
+    }
+
+    func setSpeedLimit(_ bytesPerSecond: Int64) {
+        speedLimitBytesPerSecond = max(0, bytesPerSecond)
+        nextDownloadSlot = Date()
+    }
+
+    func waitForDownloadCapacity(bytes: Int64) async {
+        guard speedLimitBytesPerSecond > 0, bytes > 0 else { return }
+
+        let now = Date()
+        if nextDownloadSlot < now {
+            nextDownloadSlot = now
+        }
+
+        let delay = nextDownloadSlot.timeIntervalSince(now)
+        nextDownloadSlot = nextDownloadSlot.addingTimeInterval(
+            Double(bytes) / Double(speedLimitBytesPerSecond)
+        )
+
+        guard delay > 0 else { return }
+        try? await Task.sleep(for: .seconds(delay))
+    }
+}
+
+private struct HTTPDownloadWorker: Sendable {
+    private static let bufferSize = 64 * 1024
+
+    let segmentCount: Int
+    let retryLimit: Int
+    let runState: HTTPDownloadRunState
+    let onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
+
+    func start(_ request: DownloadRequest, url: URL) async {
+        var lastError: Error?
+
+        for attempt in 0...retryLimit {
+            guard await runState.isActive(request.id) else {
+                await runState.deactivate(request.id)
+                emit(Self.pausedSnapshot(for: request))
+                return
+            }
+
+            do {
+                try await download(url: url, request: request)
+                await runState.deactivate(request.id)
+                return
+            } catch is CancellationError {
+                await runState.deactivate(request.id)
+                emit(Self.pausedSnapshot(for: request))
+                return
+            } catch {
+                lastError = error
+                guard await runState.isActive(request.id) else {
+                    await runState.deactivate(request.id)
+                    emit(Self.pausedSnapshot(for: request))
+                    return
+                }
+
+                guard attempt < retryLimit, Self.isRetryable(error) else {
+                    break
+                }
+
+                emitRetry(request, error: error, attempt: attempt + 1)
+                try? await Task.sleep(for: .seconds(min(6, attempt + 1)))
+            }
+        }
+
+        await runState.deactivate(request.id)
+        emit(Self.failureSnapshot(
+            for: request,
+            message: lastError?.localizedDescription ?? "下载失败"
+        ))
     }
 
     private func download(url: URL, request: DownloadRequest) async throws {
         let destination = URL(fileURLWithPath: request.savePath)
+        let layout = HTTPTemporaryLayout(savePath: request.savePath)
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
 
-        let partURL = URL(fileURLWithPath: partPath(for: request))
-        let segmentProgressURL = URL(fileURLWithPath: segmentProgressPath(for: request))
-        let existingBytes = max(localSize(at: partURL), segmentProgressSize(for: request))
-        let metadata = await probe(url: url, existingBytes: existingBytes)
+        var metadata = await probe(url: url)
+            .filled(from: request)
 
-        if metadata.supportsResume, metadata.contentLength > 0, segmentCount > 1 {
-            try await downloadSegmented(
+        let singlePartBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
+        let segmentedBytes = layout.segmentProgress(maxSegments: segmentScanLimit)
+
+        if singlePartBytes > 0 {
+            try await downloadSingle(
                 url: url,
                 request: request,
                 metadata: metadata,
-                destination: destination,
-                segmentProgressURL: segmentProgressURL
+                layout: layout,
+                destination: destination
             )
             return
         }
 
-        if !FileManager.default.fileExists(atPath: partURL.path) {
-            FileManager.default.createFile(atPath: partURL.path, contents: nil)
+        if segmentedBytes > 0 {
+            let manifest = try layout.loadManifest()
+                ?? legacyManifest(for: request, layout: layout, metadata: metadata)
+            metadata = metadata.filled(from: manifest)
+            try validate(manifest: manifest, request: request, against: metadata)
+            try layout.writeManifest(manifest)
+            try await downloadSegmented(
+                url: url,
+                request: request,
+                metadata: metadata,
+                manifest: manifest,
+                layout: layout,
+                destination: destination
+            )
+            return
+        }
+
+        if metadata.supportsResume, metadata.contentLength > 0, segmentCount > 1 {
+            let manifest = HTTPDownloadManifest(
+                source: request.source,
+                totalBytes: metadata.contentLength,
+                eTag: metadata.eTag,
+                lastModified: metadata.lastModified,
+                segments: SegmentPlan
+                    .make(totalBytes: metadata.contentLength, segmentCount: segmentCount)
+                    .segments
+                    .map(HTTPManifestSegment.init)
+            )
+            try layout.writeManifest(manifest)
+            try await downloadSegmented(
+                url: url,
+                request: request,
+                metadata: metadata,
+                manifest: manifest,
+                layout: layout,
+                destination: destination
+            )
+            return
+        }
+
+        try await downloadSingle(
+            url: url,
+            request: request,
+            metadata: metadata,
+            layout: layout,
+            destination: destination
+        )
+    }
+
+    private func downloadSingle(
+        url: URL,
+        request: DownloadRequest,
+        metadata: HTTPMetadata,
+        layout: HTTPTemporaryLayout,
+        destination: URL
+    ) async throws {
+        try await ensureActive(request.id)
+
+        if !FileManager.default.fileExists(atPath: layout.singlePartURL.path) {
+            FileManager.default.createFile(atPath: layout.singlePartURL.path, contents: nil)
+        }
+
+        var metadata = metadata
+        var existingBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
+        if existingBytes > 0,
+           metadata.contentLength > 0,
+           existingBytes == metadata.contentLength
+        {
+            try finalizeSinglePart(
+                request: request,
+                metadata: metadata,
+                layout: layout,
+                destination: destination,
+                downloadedBytes: existingBytes
+            )
+            return
         }
 
         let shouldResume = metadata.supportsResume && existingBytes > 0
-        let startOffset = shouldResume ? existingBytes : 0
-
-        if !shouldResume && existingBytes > 0 {
-            try Data().write(to: partURL)
+        if existingBytes > 0 && !shouldResume {
+            try Data().write(to: layout.singlePartURL)
+            existingBytes = 0
         }
 
         emit(
@@ -140,108 +296,156 @@ final class HTTPDownloadEngine: DownloadEngine {
                 taskID: request.id,
                 status: .running,
                 totalBytes: metadata.contentLength,
-                downloadedBytes: startOffset,
+                downloadedBytes: shouldResume ? existingBytes : 0,
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
                 errorMessage: nil,
                 supportsResume: metadata.supportsResume,
                 eTag: metadata.eTag,
-                lastModified: metadata.lastModified
+                lastModified: metadata.lastModified,
+                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume)
             )
         )
 
-        var urlRequest = URLRequest(url: url)
-        urlRequest.timeoutInterval = 30
+        var urlRequest = makeRequest(url: url, method: "GET", timeoutInterval: 30)
         if shouldResume {
-            urlRequest.setValue("bytes=\(startOffset)-", forHTTPHeaderField: "Range")
-            if let eTag = request.eTag ?? metadata.eTag {
-                urlRequest.setValue(eTag, forHTTPHeaderField: "If-Range")
-            } else if let lastModified = request.lastModified ?? metadata.lastModified {
-                urlRequest.setValue(lastModified, forHTTPHeaderField: "If-Range")
-            }
+            urlRequest.setValue("bytes=\(existingBytes)-", forHTTPHeaderField: "Range")
+            applyIfRange(to: &urlRequest, metadata: metadata, request: request)
         }
 
         let (stream, response) = try await URLSession.shared.bytes(for: urlRequest)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode)
-        else {
-            throw HTTPDownloadError.invalidResponse
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw HTTPDownloadError.invalidResponse("服务器响应无效")
         }
 
-        let responseMetadata = metadata.merging(response: httpResponse, resumedFrom: startOffset)
-        let fileHandle = try FileHandle(forWritingTo: partURL)
+        var appendExistingBytes = shouldResume
+        switch httpResponse.statusCode {
+        case 206:
+            try validateRangeResponse(
+                httpResponse,
+                expectedStart: existingBytes,
+                expectedEnd: nil,
+                expectedTotal: metadata.contentLength,
+                expectedETag: request.eTag ?? metadata.eTag,
+                expectedLastModified: request.lastModified ?? metadata.lastModified
+            )
+            metadata = metadata.merging(response: httpResponse, resumedFrom: existingBytes)
+        case 200...299:
+            if shouldResume {
+                try Data().write(to: layout.singlePartURL)
+                appendExistingBytes = false
+                existingBytes = 0
+            }
+            metadata = metadata.merging(response: httpResponse, resumedFrom: 0)
+        default:
+            throw HTTPDownloadError.serverStatus(httpResponse.statusCode)
+        }
+
+        let fileHandle = try FileHandle(forWritingTo: layout.singlePartURL)
         defer {
             try? fileHandle.close()
         }
-        try fileHandle.seekToEnd()
 
-        var downloadedBytes = startOffset
-        var bytesSinceLastTick: Int64 = 0
-        var lastTick = Date()
+        if appendExistingBytes {
+            try fileHandle.seekToEnd()
+        } else {
+            try fileHandle.truncate(atOffset: 0)
+        }
+
+        var downloadedBytes = appendExistingBytes ? existingBytes : 0
+        var bytesSinceLastEmit: Int64 = 0
         var lastEmit = Date()
+        var buffer = [UInt8]()
+        buffer.reserveCapacity(Self.bufferSize)
 
-        for try await byte in stream {
-            guard activeTaskIDs.contains(request.id) else {
-                throw CancellationError()
-            }
+        func flushBuffer() async throws {
+            guard !buffer.isEmpty else { return }
+            try await ensureActive(request.id)
 
-            try fileHandle.write(contentsOf: [byte])
-            downloadedBytes += 1
-            bytesSinceLastTick += 1
+            let bytes = Int64(buffer.count)
+            try fileHandle.write(contentsOf: Data(buffer))
+            downloadedBytes += bytes
+            bytesSinceLastEmit += bytes
+            buffer.removeAll(keepingCapacity: true)
 
-            if speedLimitBytesPerSecond > 0 {
-                await throttle(bytesSinceLastTick, since: lastTick)
-            }
+            await runState.waitForDownloadCapacity(bytes: bytes)
 
             let now = Date()
-            if now.timeIntervalSince(lastEmit) >= 0.35 {
-                let elapsed = max(now.timeIntervalSince(lastTick), 0.001)
-                let speed = Int64(Double(bytesSinceLastTick) / elapsed)
-                let remaining = responseMetadata.contentLength > 0
-                    ? max(0, responseMetadata.contentLength - downloadedBytes)
-                    : 0
-                let eta = speed > 0 && remaining > 0 ? TimeInterval(remaining / speed) : nil
+            guard now.timeIntervalSince(lastEmit) >= 0.35 else { return }
 
-                emit(
-                    DownloadSnapshot(
-                        taskID: request.id,
-                        status: .running,
-                        totalBytes: responseMetadata.contentLength,
-                        downloadedBytes: downloadedBytes,
-                        speedBytesPerSecond: speed,
-                        etaSeconds: eta,
-                        errorMessage: nil,
-                        supportsResume: responseMetadata.supportsResume,
-                        eTag: responseMetadata.eTag,
-                        lastModified: responseMetadata.lastModified
-                    )
+            let elapsed = max(now.timeIntervalSince(lastEmit), 0.001)
+            let speed = Int64(Double(bytesSinceLastEmit) / elapsed)
+            let remaining = metadata.contentLength > 0
+                ? max(0, metadata.contentLength - downloadedBytes)
+                : 0
+            let eta = speed > 0 && remaining > 0 ? TimeInterval(remaining / speed) : nil
+
+            emit(
+                DownloadSnapshot(
+                    taskID: request.id,
+                    status: .running,
+                    totalBytes: metadata.contentLength,
+                    downloadedBytes: downloadedBytes,
+                    speedBytesPerSecond: speed,
+                    etaSeconds: eta,
+                    errorMessage: nil,
+                    supportsResume: metadata.supportsResume,
+                    eTag: metadata.eTag,
+                    lastModified: metadata.lastModified,
+                    connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume)
                 )
+            )
 
-                lastEmit = now
-                lastTick = now
-                bytesSinceLastTick = 0
+            lastEmit = now
+            bytesSinceLastEmit = 0
+        }
+
+        for try await byte in stream {
+            buffer.append(byte)
+            if buffer.count >= Self.bufferSize {
+                try await flushBuffer()
             }
         }
+        try await flushBuffer()
 
-        let finalURL = FileManager.default.uniqueFileURL(for: destination)
-        if FileManager.default.fileExists(atPath: finalURL.path) {
-            try FileManager.default.removeItem(at: finalURL)
+        if metadata.contentLength > 0, downloadedBytes != metadata.contentLength {
+            throw HTTPDownloadError.incompleteSegment
         }
-        try FileManager.default.moveItem(at: partURL, to: finalURL)
+
+        try finalizeSinglePart(
+            request: request,
+            metadata: metadata,
+            layout: layout,
+            destination: destination,
+            downloadedBytes: downloadedBytes
+        )
+    }
+
+    private func finalizeSinglePart(
+        request: DownloadRequest,
+        metadata: HTTPMetadata,
+        layout: HTTPTemporaryLayout,
+        destination: URL,
+        downloadedBytes: Int64
+    ) throws {
+        let finalURL = FileManager.default.uniqueFileURL(for: destination)
+        try FileManager.default.moveItem(at: layout.singlePartURL, to: finalURL)
+        layout.removeTemporaryFiles(maxSegments: segmentScanLimit)
 
         emit(
             DownloadSnapshot(
                 taskID: request.id,
                 status: .completed,
                 savePath: finalURL.path,
-                totalBytes: max(responseMetadata.contentLength, downloadedBytes),
+                totalBytes: max(metadata.contentLength, downloadedBytes),
                 downloadedBytes: downloadedBytes,
                 speedBytesPerSecond: 0,
                 etaSeconds: 0,
                 errorMessage: nil,
-                supportsResume: responseMetadata.supportsResume,
-                eTag: responseMetadata.eTag,
-                lastModified: responseMetadata.lastModified
+                supportsResume: metadata.supportsResume,
+                eTag: metadata.eTag,
+                lastModified: metadata.lastModified,
+                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume)
             )
         )
     }
@@ -250,30 +454,39 @@ final class HTTPDownloadEngine: DownloadEngine {
         url: URL,
         request: DownloadRequest,
         metadata: HTTPMetadata,
-        destination: URL,
-        segmentProgressURL: URL
+        manifest: HTTPDownloadManifest,
+        layout: HTTPTemporaryLayout,
+        destination: URL
     ) async throws {
-        let plan = SegmentPlan.make(totalBytes: metadata.contentLength, segmentCount: segmentCount)
-        let progress = SegmentProgress(initialBytes: segmentProgressSize(for: request))
+        try await ensureActive(request.id)
+
+        let plan = manifest.segmentPlan
+        let initialBytes = try layout.segmentProgress(for: plan)
+        let progress = SegmentProgress(initialBytes: initialBytes)
+        let summary = connectionSummary(segmentCount: plan.segments.count, supportsResume: true)
+
         emit(
             DownloadSnapshot(
                 taskID: request.id,
                 status: .running,
-                totalBytes: metadata.contentLength,
-                downloadedBytes: segmentProgressSize(for: request),
+                totalBytes: manifest.totalBytes,
+                downloadedBytes: initialBytes,
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
                 errorMessage: nil,
                 supportsResume: true,
                 eTag: metadata.eTag,
-                lastModified: metadata.lastModified
+                lastModified: metadata.lastModified,
+                connectionSummary: summary
             )
         )
 
-        let progressReporter = Task { [weak self] in
-            await self?.reportSegmentProgress(
+        let progressReporter = Task { [self] in
+            await reportSegmentProgress(
                 request: request,
                 metadata: metadata,
+                totalBytes: manifest.totalBytes,
+                summary: summary,
                 progress: progress
             )
         }
@@ -282,11 +495,12 @@ final class HTTPDownloadEngine: DownloadEngine {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for segment in plan.segments {
                     group.addTask {
-                        try await self.downloadSegment(
+                        try await downloadSegment(
                             segment,
                             url: url,
                             request: request,
                             metadata: metadata,
+                            layout: layout,
                             progress: progress
                         )
                     }
@@ -301,38 +515,57 @@ final class HTTPDownloadEngine: DownloadEngine {
 
         progressReporter.cancel()
         let downloaded = await progress.downloadedBytes()
+        guard downloaded == manifest.totalBytes else {
+            throw HTTPDownloadError.incompleteSegment
+        }
+
         emit(
             DownloadSnapshot(
                 taskID: request.id,
                 status: .running,
-                totalBytes: metadata.contentLength,
+                totalBytes: manifest.totalBytes,
                 downloadedBytes: downloaded,
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
                 errorMessage: nil,
                 supportsResume: true,
                 eTag: metadata.eTag,
-                lastModified: metadata.lastModified
+                lastModified: metadata.lastModified,
+                connectionSummary: summary
             )
         )
 
         let finalURL = FileManager.default.uniqueFileURL(for: destination)
-        try mergeSegments(for: request, plan: plan, destination: finalURL)
-        try? FileManager.default.removeItem(at: segmentProgressURL)
+        let mergeURL = layout.mergeURL(for: finalURL)
+        try? FileManager.default.removeItem(at: mergeURL)
+
+        do {
+            try mergeSegments(plan: plan, layout: layout, destination: mergeURL)
+            guard HTTPTemporaryLayout.localSize(at: mergeURL) == manifest.totalBytes else {
+                throw HTTPDownloadError.incompleteSegment
+            }
+            try FileManager.default.moveItem(at: mergeURL, to: finalURL)
+        } catch {
+            try? FileManager.default.removeItem(at: mergeURL)
+            throw error
+        }
+
+        layout.removeTemporaryFiles(maxSegments: segmentScanLimit)
 
         emit(
             DownloadSnapshot(
                 taskID: request.id,
                 status: .completed,
                 savePath: finalURL.path,
-                totalBytes: metadata.contentLength,
-                downloadedBytes: metadata.contentLength,
+                totalBytes: manifest.totalBytes,
+                downloadedBytes: manifest.totalBytes,
                 speedBytesPerSecond: 0,
                 etaSeconds: 0,
                 errorMessage: nil,
                 supportsResume: true,
                 eTag: metadata.eTag,
-                lastModified: metadata.lastModified
+                lastModified: metadata.lastModified,
+                connectionSummary: summary
             )
         )
     }
@@ -340,28 +573,33 @@ final class HTTPDownloadEngine: DownloadEngine {
     private func reportSegmentProgress(
         request: DownloadRequest,
         metadata: HTTPMetadata,
+        totalBytes: Int64,
+        summary: String,
         progress: SegmentProgress
     ) async {
         while !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(350))
-            guard activeTaskIDs.contains(request.id) else { return }
+            guard await runState.isActive(request.id) else { return }
+
             let sample = await progress.sample()
-            let remaining = max(0, metadata.contentLength - sample.downloadedBytes)
+            let remaining = max(0, totalBytes - sample.downloadedBytes)
             let eta = sample.speedBytesPerSecond > 0 && remaining > 0
                 ? TimeInterval(remaining / sample.speedBytesPerSecond)
                 : nil
+
             emit(
                 DownloadSnapshot(
                     taskID: request.id,
                     status: .running,
-                    totalBytes: metadata.contentLength,
+                    totalBytes: totalBytes,
                     downloadedBytes: sample.downloadedBytes,
                     speedBytesPerSecond: sample.speedBytesPerSecond,
                     etaSeconds: eta,
                     errorMessage: nil,
                     supportsResume: true,
                     eTag: metadata.eTag,
-                    lastModified: metadata.lastModified
+                    lastModified: metadata.lastModified,
+                    connectionSummary: summary
                 )
             )
         }
@@ -372,32 +610,46 @@ final class HTTPDownloadEngine: DownloadEngine {
         url: URL,
         request: DownloadRequest,
         metadata: HTTPMetadata,
+        layout: HTTPTemporaryLayout,
         progress: SegmentProgress
     ) async throws {
-        let segmentURL = URL(fileURLWithPath: segmentPath(for: request, index: segment.index))
+        try await ensureActive(request.id)
+
+        let segmentURL = layout.segmentURL(index: segment.index)
         if !FileManager.default.fileExists(atPath: segmentURL.path) {
             FileManager.default.createFile(atPath: segmentURL.path, contents: nil)
         }
 
-        let localBytes = localSize(at: segmentURL)
+        let localBytes = HTTPTemporaryLayout.localSize(at: segmentURL)
+        guard localBytes <= segment.length else {
+            throw HTTPDownloadError.invalidLocalData("分片 \(segment.index) 大小超过预期")
+        }
         guard localBytes < segment.length else { return }
 
-        var urlRequest = URLRequest(url: url)
-        urlRequest.timeoutInterval = 30
         let start = segment.start + localBytes
+        var urlRequest = makeRequest(url: url, method: "GET", timeoutInterval: 30)
         urlRequest.setValue("bytes=\(start)-\(segment.end)", forHTTPHeaderField: "Range")
-        if let eTag = request.eTag ?? metadata.eTag {
-            urlRequest.setValue(eTag, forHTTPHeaderField: "If-Range")
-        } else if let lastModified = request.lastModified ?? metadata.lastModified {
-            urlRequest.setValue(lastModified, forHTTPHeaderField: "If-Range")
-        }
+        applyIfRange(to: &urlRequest, metadata: metadata, request: request)
 
         let (stream, response) = try await URLSession.shared.bytes(for: urlRequest)
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 206 || (segment.start == 0 && httpResponse.statusCode == 200)
-        else {
-            throw HTTPDownloadError.invalidResponse
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw HTTPDownloadError.invalidResponse("服务器响应无效")
         }
+        guard httpResponse.statusCode == 206 else {
+            if (400...599).contains(httpResponse.statusCode) {
+                throw HTTPDownloadError.serverStatus(httpResponse.statusCode)
+            }
+            throw HTTPDownloadError.invalidResponse("服务器未按 Range 返回分片")
+        }
+
+        try validateRangeResponse(
+            httpResponse,
+            expectedStart: start,
+            expectedEnd: segment.end,
+            expectedTotal: metadata.contentLength,
+            expectedETag: request.eTag ?? metadata.eTag,
+            expectedLastModified: request.lastModified ?? metadata.lastModified
+        )
 
         let fileHandle = try FileHandle(forWritingTo: segmentURL)
         defer {
@@ -405,68 +657,81 @@ final class HTTPDownloadEngine: DownloadEngine {
         }
         try fileHandle.seekToEnd()
 
-        var bytesSinceLastTick: Int64 = 0
-        var lastTick = Date()
+        var buffer = [UInt8]()
+        buffer.reserveCapacity(Self.bufferSize)
+
+        func flushBuffer() async throws {
+            guard !buffer.isEmpty else { return }
+            try await ensureActive(request.id)
+
+            let bytes = Int64(buffer.count)
+            try fileHandle.write(contentsOf: Data(buffer))
+            await progress.add(bytes)
+            buffer.removeAll(keepingCapacity: true)
+            await runState.waitForDownloadCapacity(bytes: bytes)
+        }
 
         for try await byte in stream {
-            guard activeTaskIDs.contains(request.id) else {
-                throw CancellationError()
+            buffer.append(byte)
+            if buffer.count >= Self.bufferSize {
+                try await flushBuffer()
             }
+        }
+        try await flushBuffer()
 
-            try fileHandle.write(contentsOf: [byte])
-            await progress.add(1)
-            bytesSinceLastTick += 1
-
-            if speedLimitBytesPerSecond > 0 {
-                await throttle(bytesSinceLastTick, since: lastTick)
-                if Date().timeIntervalSince(lastTick) >= 0.35 {
-                    lastTick = Date()
-                    bytesSinceLastTick = 0
-                }
-            }
+        guard HTTPTemporaryLayout.localSize(at: segmentURL) == segment.length else {
+            throw HTTPDownloadError.incompleteSegment
         }
     }
 
-    private func mergeSegments(for request: DownloadRequest, plan: SegmentPlan, destination: URL) throws {
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
-        }
+    private func mergeSegments(
+        plan: SegmentPlan,
+        layout: HTTPTemporaryLayout,
+        destination: URL
+    ) throws {
         FileManager.default.createFile(atPath: destination.path, contents: nil)
-
         let output = try FileHandle(forWritingTo: destination)
         defer {
             try? output.close()
         }
 
         for segment in plan.segments {
-            let segmentURL = URL(fileURLWithPath: segmentPath(for: request, index: segment.index))
-            guard localSize(at: segmentURL) == segment.length else {
+            let segmentURL = layout.segmentURL(index: segment.index)
+            guard HTTPTemporaryLayout.localSize(at: segmentURL) == segment.length else {
                 throw HTTPDownloadError.incompleteSegment
             }
+
             let input = try FileHandle(forReadingFrom: segmentURL)
             defer {
                 try? input.close()
             }
-            try output.write(contentsOf: input.readDataToEndOfFile())
-            try? FileManager.default.removeItem(at: segmentURL)
+
+            while true {
+                let data = try input.read(upToCount: Self.bufferSize) ?? Data()
+                guard !data.isEmpty else { break }
+                try output.write(contentsOf: data)
+            }
         }
     }
 
-    private func probe(url: URL, existingBytes: Int64) async -> HTTPMetadata {
-        var request = URLRequest(url: url)
-        request.httpMethod = "HEAD"
-        request.timeoutInterval = 20
+    private func probe(url: URL) async -> HTTPMetadata {
+        let request = makeRequest(url: url, method: "HEAD", timeoutInterval: 20)
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode)
+            else {
                 return .unknown
             }
 
             let length = Int64(httpResponse.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
-            let acceptRanges = httpResponse.value(forHTTPHeaderField: "Accept-Ranges")?.localizedCaseInsensitiveContains("bytes") ?? false
+            let acceptRanges = httpResponse
+                .value(forHTTPHeaderField: "Accept-Ranges")?
+                .localizedCaseInsensitiveContains("bytes") ?? false
+
             return HTTPMetadata(
-                contentLength: existingBytes > 0 && acceptRanges ? length : max(length, existingBytes),
+                contentLength: max(0, length),
                 supportsResume: acceptRanges,
                 eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
                 lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
@@ -476,12 +741,117 @@ final class HTTPDownloadEngine: DownloadEngine {
         }
     }
 
-    private func throttle(_ bytesSinceTick: Int64, since date: Date) async {
-        guard speedLimitBytesPerSecond > 0 else { return }
-        let expected = Double(bytesSinceTick) / Double(speedLimitBytesPerSecond)
-        let elapsed = Date().timeIntervalSince(date)
-        guard expected > elapsed else { return }
-        try? await Task.sleep(for: .seconds(expected - elapsed))
+    private func makeRequest(url: URL, method: String, timeoutInterval: TimeInterval) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = timeoutInterval
+        request.setValue("SwiftGetX", forHTTPHeaderField: "User-Agent")
+        if url.host?.localizedCaseInsensitiveCompare("api.github.com") == .orderedSame {
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("2026-03-10", forHTTPHeaderField: "X-GitHub-Api-Version")
+        }
+        return request
+    }
+
+    private func applyIfRange(
+        to urlRequest: inout URLRequest,
+        metadata: HTTPMetadata,
+        request: DownloadRequest
+    ) {
+        if let eTag = request.eTag ?? metadata.eTag {
+            urlRequest.setValue(eTag, forHTTPHeaderField: "If-Range")
+        } else if let lastModified = request.lastModified ?? metadata.lastModified {
+            urlRequest.setValue(lastModified, forHTTPHeaderField: "If-Range")
+        }
+    }
+
+    private func legacyManifest(
+        for request: DownloadRequest,
+        layout: HTTPTemporaryLayout,
+        metadata: HTTPMetadata
+    ) throws -> HTTPDownloadManifest {
+        let totalBytes = metadata.contentLength > 0 ? metadata.contentLength : request.totalBytes
+        guard totalBytes > 0 else {
+            throw HTTPDownloadError.invalidLocalData("缺少分片任务的总大小，无法安全恢复")
+        }
+
+        let indexes = layout.existingSegmentIndexes(maxSegments: segmentScanLimit)
+        let legacySegmentCount = max(indexes.last.map { $0 + 1 } ?? segmentCount, segmentCount)
+        return HTTPDownloadManifest(
+            source: request.source,
+            totalBytes: totalBytes,
+            eTag: metadata.eTag ?? request.eTag,
+            lastModified: metadata.lastModified ?? request.lastModified,
+            segments: SegmentPlan
+                .make(totalBytes: totalBytes, segmentCount: legacySegmentCount)
+                .segments
+                .map(HTTPManifestSegment.init)
+        )
+    }
+
+    private func validate(
+        manifest: HTTPDownloadManifest,
+        request: DownloadRequest,
+        against metadata: HTTPMetadata
+    ) throws {
+        if manifest.source != request.source {
+            throw HTTPDownloadError.validatorChanged
+        }
+        if metadata.contentLength > 0, manifest.totalBytes != metadata.contentLength {
+            throw HTTPDownloadError.validatorChanged
+        }
+        if let oldETag = manifest.eTag, let newETag = metadata.eTag, oldETag != newETag {
+            throw HTTPDownloadError.validatorChanged
+        }
+        if let oldLastModified = manifest.lastModified,
+           let newLastModified = metadata.lastModified,
+           oldLastModified != newLastModified
+        {
+            throw HTTPDownloadError.validatorChanged
+        }
+    }
+
+    private func validateRangeResponse(
+        _ response: HTTPURLResponse,
+        expectedStart: Int64,
+        expectedEnd: Int64?,
+        expectedTotal: Int64,
+        expectedETag: String?,
+        expectedLastModified: String?
+    ) throws {
+        guard let rawRange = response.value(forHTTPHeaderField: "Content-Range"),
+              let contentRange = HTTPContentRange(rawRange)
+        else {
+            throw HTTPDownloadError.invalidResponse("缺少 Content-Range")
+        }
+
+        guard contentRange.start == expectedStart else {
+            throw HTTPDownloadError.invalidResponse("Content-Range 起点不匹配")
+        }
+        if let expectedEnd, contentRange.end != expectedEnd {
+            throw HTTPDownloadError.invalidResponse("Content-Range 终点不匹配")
+        }
+        if expectedTotal > 0, let total = contentRange.total, total != expectedTotal {
+            throw HTTPDownloadError.validatorChanged
+        }
+        if let expectedETag,
+           let responseETag = response.value(forHTTPHeaderField: "ETag"),
+           responseETag != expectedETag
+        {
+            throw HTTPDownloadError.validatorChanged
+        }
+        if let expectedLastModified,
+           let responseLastModified = response.value(forHTTPHeaderField: "Last-Modified"),
+           responseLastModified != expectedLastModified
+        {
+            throw HTTPDownloadError.validatorChanged
+        }
+    }
+
+    private func ensureActive(_ taskID: UUID) async throws {
+        guard await runState.isActive(taskID) else {
+            throw CancellationError()
+        }
     }
 
     private func emitRetry(_ request: DownloadRequest, error: Error, attempt: Int) {
@@ -490,55 +860,15 @@ final class HTTPDownloadEngine: DownloadEngine {
                 taskID: request.id,
                 status: .running,
                 totalBytes: request.totalBytes,
-                downloadedBytes: localSize(at: URL(fileURLWithPath: partPath(for: request))),
+                downloadedBytes: HTTPTemporaryLayout(savePath: request.savePath)
+                    .temporaryProgress(maxSegments: segmentScanLimit),
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
                 errorMessage: "第 \(attempt) 次重试：\(error.localizedDescription)",
                 supportsResume: request.supportsResume,
                 eTag: request.eTag,
-                lastModified: request.lastModified
-            )
-        )
-    }
-
-    private func emitPaused(_ request: DownloadRequest) {
-        emit(
-            DownloadSnapshot(
-                taskID: request.id,
-                status: .paused,
-                totalBytes: request.totalBytes,
-                downloadedBytes: max(
-                    request.downloadedBytes,
-                    localSize(at: URL(fileURLWithPath: partPath(for: request))),
-                    segmentProgressSize(for: request)
-                ),
-                speedBytesPerSecond: 0,
-                etaSeconds: nil,
-                errorMessage: nil,
-                supportsResume: request.supportsResume,
-                eTag: request.eTag,
-                lastModified: request.lastModified
-            )
-        )
-    }
-
-    private func emitFailure(_ request: DownloadRequest, message: String) {
-        emit(
-            DownloadSnapshot(
-                taskID: request.id,
-                status: .failed,
-                totalBytes: request.totalBytes,
-                downloadedBytes: max(
-                    request.downloadedBytes,
-                    localSize(at: URL(fileURLWithPath: partPath(for: request))),
-                    segmentProgressSize(for: request)
-                ),
-                speedBytesPerSecond: 0,
-                etaSeconds: nil,
-                errorMessage: message,
-                supportsResume: request.supportsResume,
-                eTag: request.eTag,
-                lastModified: request.lastModified
+                lastModified: request.lastModified,
+                retryCount: attempt
             )
         )
     }
@@ -547,26 +877,202 @@ final class HTTPDownloadEngine: DownloadEngine {
         onSnapshot?(snapshot)
     }
 
-    private func partPath(for request: DownloadRequest) -> String {
-        request.savePath + ".part"
+    private func connectionSummary(segmentCount: Int, supportsResume: Bool) -> String {
+        let streamDescription = segmentCount > 1 ? "\(segmentCount) 分片" : "单流"
+        let resumeDescription = supportsResume ? "可续传" : "不支持续传"
+        return "HTTP · \(streamDescription) · \(resumeDescription)"
     }
 
-    private func segmentPath(for request: DownloadRequest, index: Int) -> String {
-        request.savePath + ".part\(index)"
+    private static func isRetryable(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return false
+        }
+        if let httpError = error as? HTTPDownloadError {
+            return httpError.isRetryable
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut,
+                 .networkConnectionLost,
+                 .cannotConnectToHost,
+                 .cannotFindHost,
+                 .dnsLookupFailed,
+                 .notConnectedToInternet:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 
-    private func segmentProgressPath(for request: DownloadRequest) -> String {
-        request.savePath + ".segments"
+    static func pausedSnapshot(for request: DownloadRequest) -> DownloadSnapshot {
+        DownloadSnapshot(
+            taskID: request.id,
+            status: .paused,
+            totalBytes: request.totalBytes,
+            downloadedBytes: max(
+                request.downloadedBytes,
+                HTTPTemporaryLayout(savePath: request.savePath).temporaryProgress(maxSegments: segmentScanLimit)
+            ),
+            speedBytesPerSecond: 0,
+            etaSeconds: nil,
+            errorMessage: nil,
+            supportsResume: request.supportsResume,
+            eTag: request.eTag,
+            lastModified: request.lastModified
+        )
     }
 
-    private func segmentProgressSize(for request: DownloadRequest) -> Int64 {
-        (0..<segmentCount).reduce(Int64(0)) { partialResult, index in
-            partialResult + localSize(at: URL(fileURLWithPath: segmentPath(for: request, index: index)))
+    static func failureSnapshot(for request: DownloadRequest, message: String) -> DownloadSnapshot {
+        DownloadSnapshot(
+            taskID: request.id,
+            status: .failed,
+            totalBytes: request.totalBytes,
+            downloadedBytes: max(
+                request.downloadedBytes,
+                HTTPTemporaryLayout(savePath: request.savePath).temporaryProgress(maxSegments: segmentScanLimit)
+            ),
+            speedBytesPerSecond: 0,
+            etaSeconds: nil,
+            errorMessage: message,
+            supportsResume: request.supportsResume,
+            eTag: request.eTag,
+            lastModified: request.lastModified
+        )
+    }
+}
+
+private struct HTTPTemporaryLayout: Sendable {
+    let savePath: String
+
+    var singlePartURL: URL {
+        URL(fileURLWithPath: savePath + ".part")
+    }
+
+    var manifestURL: URL {
+        URL(fileURLWithPath: savePath + ".segments")
+    }
+
+    func segmentURL(index: Int) -> URL {
+        URL(fileURLWithPath: savePath + ".part\(index)")
+    }
+
+    func mergeURL(for finalURL: URL) -> URL {
+        URL(fileURLWithPath: finalURL.path + ".merge")
+    }
+
+    func temporaryProgress(maxSegments: Int) -> Int64 {
+        max(Self.localSize(at: singlePartURL), segmentProgress(maxSegments: maxSegments))
+    }
+
+    func segmentProgress(maxSegments: Int) -> Int64 {
+        (0..<maxSegments).reduce(Int64(0)) { partialResult, index in
+            partialResult + Self.localSize(at: segmentURL(index: index))
         }
     }
 
-    private func localSize(at url: URL) -> Int64 {
+    func segmentProgress(for plan: SegmentPlan) throws -> Int64 {
+        try plan.segments.reduce(Int64(0)) { partialResult, segment in
+            let size = Self.localSize(at: segmentURL(index: segment.index))
+            guard size <= segment.length else {
+                throw HTTPDownloadError.invalidLocalData("分片 \(segment.index) 大小超过预期")
+            }
+            return partialResult + size
+        }
+    }
+
+    func existingSegmentIndexes(maxSegments: Int) -> [Int] {
+        (0..<maxSegments).filter { index in
+            FileManager.default.fileExists(atPath: segmentURL(index: index).path)
+        }
+    }
+
+    func loadManifest() throws -> HTTPDownloadManifest? {
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else { return nil }
+        let data = try Data(contentsOf: manifestURL)
+        guard !data.isEmpty else { return nil }
+        return try JSONDecoder().decode(HTTPDownloadManifest.self, from: data)
+    }
+
+    func writeManifest(_ manifest: HTTPDownloadManifest) throws {
+        let data = try JSONEncoder().encode(manifest)
+        try data.write(to: manifestURL, options: .atomic)
+    }
+
+    func removeTemporaryFiles(maxSegments: Int) {
+        try? FileManager.default.removeItem(at: singlePartURL)
+        try? FileManager.default.removeItem(at: manifestURL)
+        try? FileManager.default.removeItem(atPath: savePath + ".merge")
+        for index in 0..<maxSegments {
+            try? FileManager.default.removeItem(at: segmentURL(index: index))
+        }
+    }
+
+    static func localSize(at url: URL) -> Int64 {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? 0
+    }
+}
+
+private struct HTTPDownloadManifest: Codable, Sendable {
+    var version = 1
+    var source: String
+    var totalBytes: Int64
+    var eTag: String?
+    var lastModified: String?
+    var segments: [HTTPManifestSegment]
+
+    var segmentPlan: SegmentPlan {
+        SegmentPlan(
+            totalBytes: totalBytes,
+            segments: segments.map {
+                DownloadSegment(index: $0.index, start: $0.start, end: $0.end)
+            }
+        )
+    }
+}
+
+private struct HTTPManifestSegment: Codable, Sendable {
+    var index: Int
+    var start: Int64
+    var end: Int64
+
+    init(index: Int, start: Int64, end: Int64) {
+        self.index = index
+        self.start = start
+        self.end = end
+    }
+
+    init(_ segment: DownloadSegment) {
+        self.init(index: segment.index, start: segment.start, end: segment.end)
+    }
+}
+
+private struct HTTPContentRange: Sendable {
+    let start: Int64
+    let end: Int64
+    let total: Int64?
+
+    init?(_ rawValue: String) {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("bytes ") else { return nil }
+
+        let value = trimmed.dropFirst("bytes ".count)
+        let parts = value.split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+
+        let rangeParts = parts[0].split(separator: "-", maxSplits: 1).map(String.init)
+        guard rangeParts.count == 2,
+              let start = Int64(rangeParts[0]),
+              let end = Int64(rangeParts[1]),
+              start <= end
+        else {
+            return nil
+        }
+
+        self.start = start
+        self.end = end
+        self.total = parts[1] == "*" ? nil : Int64(parts[1])
     }
 }
 
@@ -583,11 +1089,31 @@ struct HTTPMetadata: Sendable {
         lastModified: nil
     )
 
+    func filled(from request: DownloadRequest) -> HTTPMetadata {
+        HTTPMetadata(
+            contentLength: contentLength > 0 ? contentLength : request.totalBytes,
+            supportsResume: supportsResume || request.supportsResume,
+            eTag: eTag ?? request.eTag,
+            lastModified: lastModified ?? request.lastModified
+        )
+    }
+
+    fileprivate func filled(from manifest: HTTPDownloadManifest) -> HTTPMetadata {
+        HTTPMetadata(
+            contentLength: contentLength > 0 ? contentLength : manifest.totalBytes,
+            supportsResume: true,
+            eTag: eTag ?? manifest.eTag,
+            lastModified: lastModified ?? manifest.lastModified
+        )
+    }
+
     func merging(response: HTTPURLResponse, resumedFrom offset: Int64) -> HTTPMetadata {
         let responseLength = response.expectedContentLength > 0 ? response.expectedContentLength : 0
-        let totalLength = response.statusCode == 206
-            ? offset + responseLength
-            : max(contentLength, responseLength)
+        let contentRange = response
+            .value(forHTTPHeaderField: "Content-Range")
+            .flatMap(HTTPContentRange.init)
+        let totalLength = contentRange?.total
+            ?? (response.statusCode == 206 ? offset + responseLength : max(contentLength, responseLength))
 
         return HTTPMetadata(
             contentLength: totalLength,
@@ -598,16 +1124,36 @@ struct HTTPMetadata: Sendable {
     }
 }
 
-enum HTTPDownloadError: LocalizedError {
-    case invalidResponse
+enum HTTPDownloadError: LocalizedError, Equatable {
+    case invalidResponse(String)
+    case serverStatus(Int)
     case incompleteSegment
+    case invalidLocalData(String)
+    case validatorChanged
+
+    var isRetryable: Bool {
+        switch self {
+        case .serverStatus(let status):
+            status == 408 || status == 429 || (500...599).contains(status)
+        case .incompleteSegment:
+            true
+        case .invalidResponse, .invalidLocalData, .validatorChanged:
+            false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
-        case .invalidResponse:
-            "服务器响应无效"
+        case .invalidResponse(let message):
+            message
+        case .serverStatus(let status):
+            "服务器返回 HTTP \(status)"
         case .incompleteSegment:
             "下载分片不完整"
+        case .invalidLocalData(let message):
+            message
+        case .validatorChanged:
+            "服务器文件已变化，已保留临时文件以避免合并错误数据"
         }
     }
 }

@@ -207,6 +207,7 @@ struct DownloadSnapshot: Sendable {
     let lastModified: String?
     let torrentFiles: [TorrentFile]
     let connectionSummary: String?
+    let retryCount: Int?
 
     init(
         taskID: UUID,
@@ -221,7 +222,8 @@ struct DownloadSnapshot: Sendable {
         eTag: String?,
         lastModified: String?,
         torrentFiles: [TorrentFile] = [],
-        connectionSummary: String? = nil
+        connectionSummary: String? = nil,
+        retryCount: Int? = nil
     ) {
         self.taskID = taskID
         self.status = status
@@ -236,6 +238,7 @@ struct DownloadSnapshot: Sendable {
         self.lastModified = lastModified
         self.torrentFiles = torrentFiles
         self.connectionSummary = connectionSummary
+        self.retryCount = retryCount
     }
 }
 
