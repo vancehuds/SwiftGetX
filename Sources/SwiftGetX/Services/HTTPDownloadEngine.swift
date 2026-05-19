@@ -5,12 +5,30 @@ final class HTTPDownloadEngine: DownloadEngine {
     var onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
 
     private let runState = HTTPDownloadRunState()
+    private var multithreadingEnabled = true
     private var segmentCount = 8
+    private var hidesTemporaryFiles = true
     private var retryLimit = 3
 
-    func configure(segmentCount: Int, retryLimit: Int) {
-        self.segmentCount = max(1, segmentCount)
+    func configure(
+        multithreadingEnabled: Bool,
+        segmentCount: Int,
+        hidesTemporaryFiles: Bool,
+        retryLimit: Int
+    ) {
+        self.multithreadingEnabled = multithreadingEnabled
+        self.segmentCount = multithreadingEnabled ? max(1, segmentCount) : 1
+        self.hidesTemporaryFiles = hidesTemporaryFiles
         self.retryLimit = max(0, retryLimit)
+    }
+
+    func configure(segmentCount: Int, retryLimit: Int) {
+        configure(
+            multithreadingEnabled: segmentCount > 1,
+            segmentCount: segmentCount,
+            hidesTemporaryFiles: true,
+            retryLimit: retryLimit
+        )
     }
 
     func start(_ request: DownloadRequest) async {
@@ -21,7 +39,8 @@ final class HTTPDownloadEngine: DownloadEngine {
 
         await runState.activate(request.id)
         let worker = HTTPDownloadWorker(
-            segmentCount: segmentCount,
+            segmentCount: multithreadingEnabled ? segmentCount : 1,
+            hidesTemporaryFiles: hidesTemporaryFiles,
             retryLimit: retryLimit,
             runState: runState,
             onSnapshot: onSnapshot
@@ -44,7 +63,7 @@ final class HTTPDownloadEngine: DownloadEngine {
 
     func remove(_ request: DownloadRequest, deletingFiles: Bool) async {
         await cancel(request)
-        if deletingFiles {
+        if deletingFiles || request.status != .completed {
             try? FileManager.default.removeItem(atPath: request.savePath)
             HTTPTemporaryLayout(savePath: request.savePath).removeTemporaryFiles(maxSegments: segmentScanLimit)
         }
@@ -137,6 +156,7 @@ private struct HTTPDownloadWorker: Sendable {
     private static let minimumSplitSize: Int64 = 1024 * 1024
 
     let segmentCount: Int
+    let hidesTemporaryFiles: Bool
     let retryLimit: Int
     let runState: HTTPDownloadRunState
     let onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
@@ -212,8 +232,8 @@ private struct HTTPDownloadWorker: Sendable {
                 ?? legacyManifest(for: request, layout: layout, metadata: metadata)
             metadata = metadata.filled(from: manifest)
             try validate(manifest: manifest, request: request, against: metadata)
-            try layout.writeManifest(manifest)
-            try await downloadSegmented(
+            try layout.writeManifest(manifest, hidden: hidesTemporaryFiles)
+            try await downloadSegmentedWithSingleStreamFallback(
                 url: url,
                 request: request,
                 metadata: metadata,
@@ -248,8 +268,8 @@ private struct HTTPDownloadWorker: Sendable {
                 lastModified: metadata.lastModified,
                 segments: plan.segments.map(HTTPManifestSegment.init)
             )
-            try layout.writeManifest(manifest)
-            try await downloadSegmented(
+            try layout.writeManifest(manifest, hidden: hidesTemporaryFiles)
+            try await downloadSegmentedWithSingleStreamFallback(
                 url: url,
                 request: request,
                 metadata: metadata,
@@ -269,6 +289,39 @@ private struct HTTPDownloadWorker: Sendable {
         )
     }
 
+    private func downloadSegmentedWithSingleStreamFallback(
+        url: URL,
+        request: DownloadRequest,
+        metadata: HTTPMetadata,
+        manifest: HTTPDownloadManifest,
+        layout: HTTPTemporaryLayout,
+        destination: URL
+    ) async throws {
+        do {
+            try await downloadSegmented(
+                url: url,
+                request: request,
+                metadata: metadata,
+                manifest: manifest,
+                layout: layout,
+                destination: destination
+            )
+        } catch HTTPDownloadError.rangeNotSupported {
+            try await ensureActive(request.id)
+            layout.removeTemporaryFiles(maxSegments: segmentScanLimit)
+
+            var singleStreamMetadata = metadata
+            singleStreamMetadata.supportsResume = false
+            try await downloadSingle(
+                url: url,
+                request: request,
+                metadata: singleStreamMetadata,
+                layout: layout,
+                destination: destination
+            )
+        }
+    }
+
     private func downloadSingle(
         url: URL,
         request: DownloadRequest,
@@ -281,6 +334,7 @@ private struct HTTPDownloadWorker: Sendable {
         if !FileManager.default.fileExists(atPath: layout.singlePartURL.path) {
             FileManager.default.createFile(atPath: layout.singlePartURL.path, contents: nil)
         }
+        layout.setFileHidden(at: layout.singlePartURL, hidden: hidesTemporaryFiles)
 
         var metadata = metadata
         var existingBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
@@ -443,6 +497,7 @@ private struct HTTPDownloadWorker: Sendable {
     ) throws {
         let finalURL = FileManager.default.uniqueFileURL(for: destination)
         try FileManager.default.moveItem(at: layout.singlePartURL, to: finalURL)
+        layout.setFileHidden(at: finalURL, hidden: false)
         layout.removeTemporaryFiles(maxSegments: segmentScanLimit)
 
         emit(
@@ -553,11 +608,17 @@ private struct HTTPDownloadWorker: Sendable {
         try? FileManager.default.removeItem(at: mergeURL)
 
         do {
-            try mergeSegments(plan: plan, layout: layout, destination: mergeURL)
+            try mergeSegments(
+                plan: plan,
+                layout: layout,
+                destination: mergeURL,
+                hidesTemporaryFiles: hidesTemporaryFiles
+            )
             guard HTTPTemporaryLayout.localSize(at: mergeURL) == manifest.totalBytes else {
                 throw HTTPDownloadError.incompleteSegment
             }
             try FileManager.default.moveItem(at: mergeURL, to: finalURL)
+            layout.setFileHidden(at: finalURL, hidden: false)
         } catch {
             try? FileManager.default.removeItem(at: mergeURL)
             throw error
@@ -674,6 +735,7 @@ private struct HTTPDownloadWorker: Sendable {
         if !FileManager.default.fileExists(atPath: segmentURL.path) {
             FileManager.default.createFile(atPath: segmentURL.path, contents: nil)
         }
+        layout.setFileHidden(at: segmentURL, hidden: hidesTemporaryFiles)
 
         let localBytes = HTTPTemporaryLayout.localSize(at: segmentURL)
         guard localBytes <= segment.length else {
@@ -691,6 +753,9 @@ private struct HTTPDownloadWorker: Sendable {
             throw HTTPDownloadError.invalidResponse("服务器响应无效")
         }
         guard httpResponse.statusCode == 206 else {
+            if (200...299).contains(httpResponse.statusCode) {
+                throw HTTPDownloadError.rangeNotSupported
+            }
             if (400...599).contains(httpResponse.statusCode) {
                 throw HTTPDownloadError.serverStatus(httpResponse.statusCode)
             }
@@ -742,9 +807,11 @@ private struct HTTPDownloadWorker: Sendable {
     private func mergeSegments(
         plan: SegmentPlan,
         layout: HTTPTemporaryLayout,
-        destination: URL
+        destination: URL,
+        hidesTemporaryFiles: Bool
     ) throws {
         FileManager.default.createFile(atPath: destination.path, contents: nil)
+        layout.setFileHidden(at: destination, hidden: hidesTemporaryFiles)
         let output = try FileHandle(forWritingTo: destination)
         defer {
             try? output.close()
@@ -1103,9 +1170,18 @@ private struct HTTPTemporaryLayout: Sendable {
         return try JSONDecoder().decode(HTTPDownloadManifest.self, from: data)
     }
 
-    func writeManifest(_ manifest: HTTPDownloadManifest) throws {
+    func writeManifest(_ manifest: HTTPDownloadManifest, hidden: Bool) throws {
         let data = try JSONEncoder().encode(manifest)
         try data.write(to: manifestURL, options: .atomic)
+        setFileHidden(at: manifestURL, hidden: hidden)
+    }
+
+    func setFileHidden(at url: URL, hidden: Bool) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        var resourceValues = URLResourceValues()
+        resourceValues.isHidden = hidden
+        var mutableURL = url
+        try? mutableURL.setResourceValues(resourceValues)
     }
 
     func removeTemporaryFiles(maxSegments: Int) {
@@ -1246,6 +1322,7 @@ enum HTTPDownloadError: LocalizedError, Equatable {
     case serverStatus(Int)
     case incompleteSegment
     case invalidLocalData(String)
+    case rangeNotSupported
     case validatorChanged
 
     var isRetryable: Bool {
@@ -1254,7 +1331,7 @@ enum HTTPDownloadError: LocalizedError, Equatable {
             status == 408 || status == 429 || (500...599).contains(status)
         case .incompleteSegment:
             true
-        case .invalidResponse, .invalidLocalData, .validatorChanged:
+        case .invalidResponse, .invalidLocalData, .rangeNotSupported, .validatorChanged:
             false
         }
     }
@@ -1269,6 +1346,8 @@ enum HTTPDownloadError: LocalizedError, Equatable {
             "下载分片不完整"
         case .invalidLocalData(let message):
             message
+        case .rangeNotSupported:
+            "服务器不支持断点续传"
         case .validatorChanged:
             "服务器文件已变化，已保留临时文件以避免合并错误数据"
         }

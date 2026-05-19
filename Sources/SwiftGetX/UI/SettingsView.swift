@@ -26,7 +26,10 @@ struct SettingsView: View {
                         }
                     }
                     Stepper("同时下载任务：\(settings.concurrentTaskLimit)", value: $settings.concurrentTaskLimit, in: 1...12)
-                    Stepper("HTTP 分片数：\(settings.httpSegmentCount)", value: $settings.httpSegmentCount, in: 1...32)
+                    Toggle("启用 HTTP 多线程下载", isOn: $settings.httpMultithreadingEnabled)
+                    Stepper("HTTP 线程数：\(settings.httpSegmentCount)", value: $settings.httpSegmentCount, in: 1...32)
+                        .disabled(!settings.httpMultithreadingEnabled)
+                    Toggle("隐藏 HTTP 分块临时文件", isOn: $settings.hideHTTPTemporaryFiles)
                     Stepper("失败重试次数：\(settings.retryLimit)", value: $settings.retryLimit, in: 0...10)
                     SpeedLimitSettingsRow(
                         title: "下载限速",
@@ -60,7 +63,9 @@ struct SettingsView: View {
         .padding(1)
         .onChange(of: settings.defaultDownloadDirectory) { _, _ in persistSettings() }
         .onChange(of: settings.concurrentTaskLimit) { _, _ in persistSettings() }
+        .onChange(of: settings.httpMultithreadingEnabled) { _, _ in persistSettings() }
         .onChange(of: settings.httpSegmentCount) { _, _ in persistSettings() }
+        .onChange(of: settings.hideHTTPTemporaryFiles) { _, _ in persistSettings() }
         .onChange(of: settings.retryLimit) { _, _ in persistSettings() }
         .onChange(of: settings.globalDownloadLimitBytes) { _, _ in persistSettings() }
         .onChange(of: settings.globalUploadLimitBytes) { _, _ in persistSettings() }

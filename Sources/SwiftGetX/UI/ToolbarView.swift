@@ -35,8 +35,7 @@ struct ToolbarView: View {
                     .help("开始或暂停选中任务")
 
                     Button {
-                        guard let task = coordinator.selectedTask else { return }
-                        coordinator.remove(task, deletingFiles: false)
+                        NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
                     } label: {
                         Image(systemName: "trash")
                     }

@@ -17,6 +17,7 @@ struct DownloadRequest: Sendable {
     let name: String
     let source: String
     let kind: DownloadKind
+    let status: DownloadStatus
     let savePath: String
     let totalBytes: Int64
     let downloadedBytes: Int64
@@ -30,6 +31,7 @@ struct DownloadRequest: Sendable {
         name: String,
         source: String,
         kind: DownloadKind,
+        status: DownloadStatus = .queued,
         savePath: String,
         totalBytes: Int64,
         downloadedBytes: Int64,
@@ -42,6 +44,7 @@ struct DownloadRequest: Sendable {
         self.name = name
         self.source = source
         self.kind = kind
+        self.status = status
         self.savePath = savePath
         self.totalBytes = totalBytes
         self.downloadedBytes = downloadedBytes
@@ -56,6 +59,7 @@ struct DownloadRequest: Sendable {
         name = task.name
         source = task.source
         kind = task.kind
+        status = task.status
         savePath = task.savePath
         totalBytes = task.totalBytes
         downloadedBytes = task.downloadedBytes

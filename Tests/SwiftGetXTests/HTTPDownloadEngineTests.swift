@@ -27,6 +27,39 @@ struct HTTPDownloadEngineTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
     }
 
+    @Test("keeps HTTP on one stream when multithreading is disabled")
+    func keepsHTTPOnOneStreamWhenMultithreadingIsDisabled() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(
+            multithreadingEnabled: false,
+            segmentCount: 8,
+            hidesTemporaryFiles: true,
+            retryLimit: 0
+        )
+        await engine.start(Self.request(source: server.url, destination: destination))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
+        #expect(recorder.snapshots.contains {
+            $0.connectionSummary == "HTTP · 单流 · 可续传"
+        })
+    }
+
     @Test("keeps small ranged downloads on a single stream")
     func keepsSmallRangedDownloadsSingleStream() async throws {
         let payload = Self.payload()
@@ -171,8 +204,8 @@ struct HTTPDownloadEngineTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
     }
 
-    @Test("fails safely when segmented server ignores range")
-    func failsSafelyWhenSegmentedServerIgnoresRange() async throws {
+    @Test("falls back to single stream when segmented server ignores range")
+    func fallsBackToSingleStreamWhenSegmentedServerIgnoresRange() async throws {
         let payload = Self.largePayload()
         let server = try RangeTestServer(payload: payload, behavior: .ignoreRange)
         try await server.start()
@@ -190,9 +223,13 @@ struct HTTPDownloadEngineTests {
         engine.configure(segmentCount: 4, retryLimit: 0)
         await engine.start(Self.request(source: server.url, destination: destination))
 
-        #expect(!FileManager.default.fileExists(atPath: destination.path))
-        #expect(FileManager.default.fileExists(atPath: destination.path + ".segments"))
-        #expect(recorder.snapshots.last?.status == .failed)
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
+        #expect(recorder.snapshots.contains {
+            $0.connectionSummary == "HTTP · 单流 · 不支持续传"
+        })
     }
 
     @Test("fails safely when content range mismatches")
@@ -293,6 +330,33 @@ struct HTTPDownloadEngineTests {
         #expect(recorder.snapshots.contains { $0.retryCount == 1 })
     }
 
+    @Test("removes partial HTTP data when deleting unfinished task")
+    func removesPartialHTTPDataWhenDeletingUnfinishedTask() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        try Data("{}".utf8)
+            .write(to: URL(fileURLWithPath: destination.path + ".segments"))
+        try Data(repeating: 1, count: 1024)
+            .write(to: URL(fileURLWithPath: destination.path + ".part0"))
+        try Data(repeating: 2, count: 1024)
+            .write(to: URL(fileURLWithPath: destination.path + ".part1"))
+
+        let engine = HTTPDownloadEngine()
+        await engine.remove(Self.request(
+            source: URL(string: "http://example.com/payload.bin")!,
+            destination: destination,
+            status: .paused,
+            totalBytes: 4_096,
+            downloadedBytes: 2_048
+        ), deletingFiles: false)
+
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part1"))
+    }
+
     private static func payload() -> Data {
         Data((0..<32_768).map { UInt8($0 % 251) })
     }
@@ -311,6 +375,7 @@ struct HTTPDownloadEngineTests {
     private static func request(
         source: URL,
         destination: URL,
+        status: DownloadStatus = .queued,
         totalBytes: Int64 = 0,
         downloadedBytes: Int64 = 0,
         supportsResume: Bool = false,
@@ -322,6 +387,7 @@ struct HTTPDownloadEngineTests {
             name: destination.lastPathComponent,
             source: source.absoluteString,
             kind: .http,
+            status: status,
             savePath: destination.path,
             totalBytes: totalBytes,
             downloadedBytes: downloadedBytes,

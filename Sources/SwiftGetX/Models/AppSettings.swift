@@ -11,7 +11,9 @@ final class AppSettings {
     ).first ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
 
     var concurrentTaskLimit: Int = 3
+    var httpMultithreadingEnabled = true
     var httpSegmentCount: Int = 8
+    var hideHTTPTemporaryFiles = true
     var retryLimit: Int = 3
     var globalDownloadLimitBytes: Int64 = 0
     var globalUploadLimitBytes: Int64 = 0
@@ -22,7 +24,9 @@ final class AppSettings {
     func apply(_ record: AppSettingsRecord) {
         defaultDownloadDirectory = URL(fileURLWithPath: record.defaultDownloadDirectoryPath)
         concurrentTaskLimit = record.concurrentTaskLimit
+        httpMultithreadingEnabled = record.httpMultithreadingEnabled
         httpSegmentCount = record.httpSegmentCount
+        hideHTTPTemporaryFiles = record.hideHTTPTemporaryFiles
         retryLimit = record.retryLimit
         globalDownloadLimitBytes = record.globalDownloadLimitBytes
         globalUploadLimitBytes = record.globalUploadLimitBytes
@@ -35,7 +39,9 @@ final class AppSettings {
         AppSettingsRecord(
             defaultDownloadDirectoryPath: defaultDownloadDirectory.path,
             concurrentTaskLimit: concurrentTaskLimit,
+            httpMultithreadingEnabled: httpMultithreadingEnabled,
             httpSegmentCount: httpSegmentCount,
+            hideHTTPTemporaryFiles: hideHTTPTemporaryFiles,
             retryLimit: retryLimit,
             globalDownloadLimitBytes: globalDownloadLimitBytes,
             globalUploadLimitBytes: globalUploadLimitBytes,
@@ -48,7 +54,9 @@ final class AppSettings {
     func update(_ record: AppSettingsRecord) {
         record.defaultDownloadDirectoryPath = defaultDownloadDirectory.path
         record.concurrentTaskLimit = concurrentTaskLimit
+        record.httpMultithreadingEnabled = httpMultithreadingEnabled
         record.httpSegmentCount = httpSegmentCount
+        record.hideHTTPTemporaryFiles = hideHTTPTemporaryFiles
         record.retryLimit = retryLimit
         record.globalDownloadLimitBytes = globalDownloadLimitBytes
         record.globalUploadLimitBytes = globalUploadLimitBytes
@@ -63,7 +71,9 @@ final class AppSettingsRecord {
     @Attribute(.unique) var id: String
     var defaultDownloadDirectoryPath: String
     var concurrentTaskLimit: Int
+    var httpMultithreadingEnabled: Bool = true
     var httpSegmentCount: Int
+    var hideHTTPTemporaryFiles: Bool = true
     var retryLimit: Int
     var globalDownloadLimitBytes: Int64
     var globalUploadLimitBytes: Int64
@@ -75,7 +85,9 @@ final class AppSettingsRecord {
         id: String = "default",
         defaultDownloadDirectoryPath: String,
         concurrentTaskLimit: Int = 3,
+        httpMultithreadingEnabled: Bool = true,
         httpSegmentCount: Int = 8,
+        hideHTTPTemporaryFiles: Bool = true,
         retryLimit: Int = 3,
         globalDownloadLimitBytes: Int64 = 0,
         globalUploadLimitBytes: Int64 = 0,
@@ -86,7 +98,9 @@ final class AppSettingsRecord {
         self.id = id
         self.defaultDownloadDirectoryPath = defaultDownloadDirectoryPath
         self.concurrentTaskLimit = concurrentTaskLimit
+        self.httpMultithreadingEnabled = httpMultithreadingEnabled
         self.httpSegmentCount = httpSegmentCount
+        self.hideHTTPTemporaryFiles = hideHTTPTemporaryFiles
         self.retryLimit = retryLimit
         self.globalDownloadLimitBytes = globalDownloadLimitBytes
         self.globalUploadLimitBytes = globalUploadLimitBytes

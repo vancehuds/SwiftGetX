@@ -35,7 +35,12 @@ final class DownloadCoordinator {
         torrentEngine.onSnapshot = { [weak self] snapshot in
             Task { @MainActor in self?.apply(snapshot) }
         }
-        httpEngine.configure(segmentCount: settings.httpSegmentCount, retryLimit: settings.retryLimit)
+        httpEngine.configure(
+            multithreadingEnabled: settings.httpMultithreadingEnabled,
+            segmentCount: settings.httpSegmentCount,
+            hidesTemporaryFiles: settings.hideHTTPTemporaryFiles,
+            retryLimit: settings.retryLimit
+        )
         setSpeedLimit(
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
@@ -44,7 +49,12 @@ final class DownloadCoordinator {
 
     func reloadSettings(_ settings: AppSettings) {
         self.settings = settings
-        httpEngine.configure(segmentCount: settings.httpSegmentCount, retryLimit: settings.retryLimit)
+        httpEngine.configure(
+            multithreadingEnabled: settings.httpMultithreadingEnabled,
+            segmentCount: settings.httpSegmentCount,
+            hidesTemporaryFiles: settings.hideHTTPTemporaryFiles,
+            retryLimit: settings.retryLimit
+        )
         setSpeedLimit(
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
@@ -158,12 +168,13 @@ final class DownloadCoordinator {
 
     func remove(_ task: DownloadTask, deletingFiles: Bool) {
         guard let modelContext else { return }
+        let shouldDeleteLocalData = deletingFiles || task.status != .completed
         let request = DownloadRequest(task: task)
         Task {
-            await engine(for: request.kind).remove(request, deletingFiles: deletingFiles)
+            await engine(for: request.kind).remove(request, deletingFiles: shouldDeleteLocalData)
         }
 
-        if deletingFiles {
+        if shouldDeleteLocalData {
             try? FileManager.default.removeItem(atPath: task.savePath)
         }
         modelContext.delete(task)

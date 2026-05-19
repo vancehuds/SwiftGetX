@@ -71,18 +71,36 @@ struct TaskListView: View {
             )
         ) {
             if let taskToDelete {
-                Button("仅删除任务", role: .destructive) {
-                    coordinator.remove(taskToDelete, deletingFiles: false)
-                    self.taskToDelete = nil
-                }
-                Button("删除任务和本地文件", role: .destructive) {
-                    coordinator.remove(taskToDelete, deletingFiles: true)
-                    self.taskToDelete = nil
+                if taskToDelete.status == .completed {
+                    Button("仅删除任务", role: .destructive) {
+                        coordinator.remove(taskToDelete, deletingFiles: false)
+                        self.taskToDelete = nil
+                    }
+                    Button("删除任务和本地文件", role: .destructive) {
+                        coordinator.remove(taskToDelete, deletingFiles: true)
+                        self.taskToDelete = nil
+                    }
+                } else {
+                    Button("删除任务和已下载部分", role: .destructive) {
+                        coordinator.remove(taskToDelete, deletingFiles: true)
+                        self.taskToDelete = nil
+                    }
                 }
             }
             Button("取消", role: .cancel) {
                 taskToDelete = nil
             }
+        } message: {
+            if let taskToDelete {
+                if taskToDelete.status == .completed {
+                    Text("可以只删除任务记录，也可以同时删除本地文件。")
+                } else {
+                    Text("未完成的下载会自动删除已下载部分和临时分块，避免残留。")
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .confirmSelectedTaskRemoval)) { _ in
+            taskToDelete = coordinator.selectedTask
         }
     }
 
@@ -91,6 +109,10 @@ struct TaskListView: View {
         let completed = tasks.filter { $0.status == .completed }.count
         return "\(tasks.count) 个任务 · \(running) 下载中 · \(completed) 已完成"
     }
+}
+
+extension Notification.Name {
+    static let confirmSelectedTaskRemoval = Notification.Name("SwiftGetX.confirmSelectedTaskRemoval")
 }
 
 private struct TaskRowView: View {
