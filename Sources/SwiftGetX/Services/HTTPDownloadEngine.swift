@@ -134,6 +134,7 @@ private actor HTTPDownloadRunState {
 
 private struct HTTPDownloadWorker: Sendable {
     private static let bufferSize = 64 * 1024
+    private static let minimumSplitSize: Int64 = 1024 * 1024
 
     let segmentCount: Int
     let retryLimit: Int
@@ -190,8 +191,7 @@ private struct HTTPDownloadWorker: Sendable {
             withIntermediateDirectories: true
         )
 
-        var metadata = await probe(url: url)
-            .filled(from: request)
+        var metadata = await probe(url: url, request: request)
 
         let singlePartBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
         let segmentedBytes = layout.segmentProgress(maxSegments: segmentScanLimit)
@@ -225,15 +225,28 @@ private struct HTTPDownloadWorker: Sendable {
         }
 
         if metadata.supportsResume, metadata.contentLength > 0, segmentCount > 1 {
+            let plan = SegmentPlan.make(
+                totalBytes: metadata.contentLength,
+                segmentCount: segmentCount,
+                minSplitSize: Self.minimumSplitSize
+            )
+            guard plan.segments.count > 1 else {
+                try await downloadSingle(
+                    url: url,
+                    request: request,
+                    metadata: metadata,
+                    layout: layout,
+                    destination: destination
+                )
+                return
+            }
+
             let manifest = HTTPDownloadManifest(
                 source: request.source,
                 totalBytes: metadata.contentLength,
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
-                segments: SegmentPlan
-                    .make(totalBytes: metadata.contentLength, segmentCount: segmentCount)
-                    .segments
-                    .map(HTTPManifestSegment.init)
+                segments: plan.segments.map(HTTPManifestSegment.init)
             )
             try layout.writeManifest(manifest)
             try await downloadSegmented(
@@ -495,7 +508,7 @@ private struct HTTPDownloadWorker: Sendable {
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for segment in plan.segments {
                     group.addTask {
-                        try await downloadSegment(
+                        try await downloadSegmentWithRetries(
                             segment,
                             url: url,
                             request: request,
@@ -603,6 +616,48 @@ private struct HTTPDownloadWorker: Sendable {
                 )
             )
         }
+    }
+
+    private func downloadSegmentWithRetries(
+        _ segment: DownloadSegment,
+        url: URL,
+        request: DownloadRequest,
+        metadata: HTTPMetadata,
+        layout: HTTPTemporaryLayout,
+        progress: SegmentProgress
+    ) async throws {
+        var lastError: Error?
+
+        for attempt in 0...retryLimit {
+            try await ensureActive(request.id)
+
+            do {
+                try await downloadSegment(
+                    segment,
+                    url: url,
+                    request: request,
+                    metadata: metadata,
+                    layout: layout,
+                    progress: progress
+                )
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+                guard await runState.isActive(request.id) else {
+                    throw CancellationError()
+                }
+                guard attempt < retryLimit, Self.isRetryable(error) else {
+                    throw error
+                }
+
+                emitRetry(request, error: error, attempt: attempt + 1)
+                try? await Task.sleep(for: .seconds(min(6, attempt + 1)))
+            }
+        }
+
+        throw lastError ?? HTTPDownloadError.incompleteSegment
     }
 
     private func downloadSegment(
@@ -714,15 +769,16 @@ private struct HTTPDownloadWorker: Sendable {
         }
     }
 
-    private func probe(url: URL) async -> HTTPMetadata {
-        let request = makeRequest(url: url, method: "HEAD", timeoutInterval: 20)
+    private func probe(url: URL, request: DownloadRequest) async -> HTTPMetadata {
+        let headRequest = makeRequest(url: url, method: "HEAD", timeoutInterval: 20)
+        var metadata = HTTPMetadata.unknown
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await URLSession.shared.data(for: headRequest)
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode)
             else {
-                return .unknown
+                return await probeRange(url: url).filled(from: request)
             }
 
             let length = Int64(httpResponse.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
@@ -730,12 +786,63 @@ private struct HTTPDownloadWorker: Sendable {
                 .value(forHTTPHeaderField: "Accept-Ranges")?
                 .localizedCaseInsensitiveContains("bytes") ?? false
 
-            return HTTPMetadata(
+            metadata = HTTPMetadata(
                 contentLength: max(0, length),
                 supportsResume: acceptRanges,
                 eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
                 lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
             )
+        } catch {
+            metadata = .unknown
+        }
+
+        metadata = metadata.filled(from: request)
+        guard !metadata.supportsResume, segmentCount > 1 || request.supportsResume else {
+            return metadata
+        }
+
+        return await probeRange(url: url).merged(over: metadata)
+    }
+
+    private func probeRange(url: URL) async -> HTTPMetadata {
+        var request = makeRequest(url: url, method: "GET", timeoutInterval: 20)
+        request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+
+        do {
+            let (_, response) = try await URLSession.shared.bytes(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .unknown
+            }
+
+            switch httpResponse.statusCode {
+            case 206:
+                guard let rawRange = httpResponse.value(forHTTPHeaderField: "Content-Range"),
+                      let contentRange = HTTPContentRange(rawRange),
+                      contentRange.start == 0,
+                      contentRange.end == 0
+                else {
+                    return .unknown
+                }
+
+                return HTTPMetadata(
+                    contentLength: contentRange.total ?? 0,
+                    supportsResume: true,
+                    eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
+                    lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+                )
+            case 200...299:
+                let responseLength = httpResponse.expectedContentLength > 0
+                    ? httpResponse.expectedContentLength
+                    : 0
+                return HTTPMetadata(
+                    contentLength: responseLength,
+                    supportsResume: false,
+                    eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
+                    lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+                )
+            default:
+                return .unknown
+            }
         } catch {
             return .unknown
         }
@@ -746,6 +853,7 @@ private struct HTTPDownloadWorker: Sendable {
         request.httpMethod = method
         request.timeoutInterval = timeoutInterval
         request.setValue("SwiftGetX", forHTTPHeaderField: "User-Agent")
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if url.host?.localizedCaseInsensitiveCompare("api.github.com") == .orderedSame {
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             request.setValue("2026-03-10", forHTTPHeaderField: "X-GitHub-Api-Version")
@@ -1107,6 +1215,15 @@ struct HTTPMetadata: Sendable {
         )
     }
 
+    func merged(over fallback: HTTPMetadata) -> HTTPMetadata {
+        HTTPMetadata(
+            contentLength: contentLength > 0 ? contentLength : fallback.contentLength,
+            supportsResume: supportsResume || fallback.supportsResume,
+            eTag: eTag ?? fallback.eTag,
+            lastModified: lastModified ?? fallback.lastModified
+        )
+    }
+
     func merging(response: HTTPURLResponse, resumedFrom offset: Int64) -> HTTPMetadata {
         let responseLength = response.expectedContentLength > 0 ? response.expectedContentLength : 0
         let contentRange = response
@@ -1163,7 +1280,17 @@ struct SegmentPlan: Sendable, Equatable {
     let segments: [DownloadSegment]
 
     static func make(totalBytes: Int64, segmentCount: Int) -> SegmentPlan {
-        let segmentCount = max(1, min(segmentCount, Int(totalBytes)))
+        make(totalBytes: totalBytes, segmentCount: segmentCount, minSplitSize: 1)
+    }
+
+    static func make(totalBytes: Int64, segmentCount: Int, minSplitSize: Int64) -> SegmentPlan {
+        guard totalBytes > 0 else {
+            return SegmentPlan(totalBytes: totalBytes, segments: [])
+        }
+
+        let boundedMinSplitSize = max(1, minSplitSize)
+        let maxSegmentsBySize = max(1, Int(totalBytes / boundedMinSplitSize))
+        let segmentCount = max(1, min(segmentCount, Int(totalBytes), maxSegmentsBySize))
         let baseLength = totalBytes / Int64(segmentCount)
         let remainder = totalBytes % Int64(segmentCount)
         var cursor: Int64 = 0

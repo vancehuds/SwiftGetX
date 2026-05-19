@@ -26,6 +26,25 @@ struct SegmentPlanTests {
         ])
     }
 
+    @Test("honors minimum split size")
+    func honorsMinimumSplitSize() {
+        let plan = SegmentPlan.make(totalBytes: 10, segmentCount: 8, minSplitSize: 4)
+
+        #expect(plan.segments == [
+            DownloadSegment(index: 0, start: 0, end: 4),
+            DownloadSegment(index: 1, start: 5, end: 9)
+        ])
+    }
+
+    @Test("keeps small files single segment")
+    func keepsSmallFilesSingleSegment() {
+        let plan = SegmentPlan.make(totalBytes: 1024, segmentCount: 8, minSplitSize: 1024 * 1024)
+
+        #expect(plan.segments == [
+            DownloadSegment(index: 0, start: 0, end: 1023)
+        ])
+    }
+
     @Test("progress sample calculates speed from deltas")
     func progressSampleCalculatesSpeed() async {
         let progress = SegmentProgress(initialBytes: 10)
