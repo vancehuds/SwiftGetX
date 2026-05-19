@@ -1,0 +1,4 @@
+module CSwiftGetXLibtorrent {
+    header "include/CSwiftGetXLibtorrent.h"
+    export *
+}

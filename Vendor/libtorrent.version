@@ -1,0 +1,6 @@
+name: arvidn/libtorrent
+url: https://github.com/arvidn/libtorrent.git
+tag: v2.0.12
+commit: 740a0b9aeabe00e762cc0efe4a0f27593db2550b
+license: BSD-3-Clause
+vendored_at: 2026-05-19
