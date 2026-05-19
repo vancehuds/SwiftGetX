@@ -24,7 +24,9 @@ struct NewTaskSheet: View {
                     .frame(minHeight: 160)
                     .scrollContentBackground(.hidden)
                     .padding(10)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                    .background {
+                        GlassCellBackground(cornerRadius: 14)
+                    }
 
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
@@ -42,7 +44,9 @@ struct NewTaskSheet: View {
                     }
                 }
                 .padding(12)
-                .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
+                .background {
+                    GlassCellBackground(cornerRadius: 14)
+                }
 
                 SourcePreviewView(sourceText: sourceText)
 
@@ -104,6 +108,8 @@ private struct SourcePreviewView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
+        .background {
+            GlassCellBackground(cornerRadius: 14)
+        }
     }
 }

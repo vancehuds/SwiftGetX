@@ -182,7 +182,9 @@ private struct FilesPanel: View {
                                 .foregroundStyle(.secondary)
                         }
                         .padding(8)
-                        .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
+                        .background {
+                            GlassCellBackground(cornerRadius: 10)
+                        }
                     }
                     .buttonStyle(.plain)
                 }
@@ -228,7 +230,9 @@ private struct LogsPanel: View {
                         .font(.caption.monospaced())
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(8)
-                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                        .background {
+                            GlassCellBackground(cornerRadius: 8)
+                        }
                 }
             }
         }
@@ -250,6 +254,8 @@ private struct DetailRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)
-        .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+        .background {
+            GlassCellBackground(cornerRadius: 12)
+        }
     }
 }

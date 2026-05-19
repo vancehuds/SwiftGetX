@@ -108,23 +108,91 @@ private struct LiquidBackground: View {
             Color(nsColor: .windowBackgroundColor)
 
             if !reduceTransparency {
-                LinearGradient(
+                baseGradient
+
+                LiquidFlowBand(
                     colors: colorScheme == .dark
                         ? [
-                            Color(red: 0.05, green: 0.08, blue: 0.11),
-                            Color(red: 0.10, green: 0.12, blue: 0.16),
-                            Color(red: 0.07, green: 0.10, blue: 0.13)
+                            Color(red: 0.10, green: 0.35, blue: 0.34).opacity(0.24),
+                            Color(red: 0.35, green: 0.18, blue: 0.40).opacity(0.18),
+                            Color.clear
                         ]
                         : [
-                            Color(red: 0.88, green: 0.94, blue: 0.98),
-                            Color(red: 0.96, green: 0.98, blue: 0.96),
-                            Color(red: 0.91, green: 0.92, blue: 0.98)
+                            Color(red: 0.55, green: 0.88, blue: 0.86).opacity(0.44),
+                            Color(red: 0.90, green: 0.62, blue: 0.76).opacity(0.28),
+                            Color.clear
                         ],
+                    angle: -15,
+                    verticalScale: 1.45
+                )
+
+                LiquidFlowBand(
+                    colors: colorScheme == .dark
+                        ? [
+                            Color.clear,
+                            Color(red: 0.32, green: 0.30, blue: 0.12).opacity(0.15),
+                            Color(red: 0.12, green: 0.20, blue: 0.38).opacity(0.18)
+                        ]
+                        : [
+                            Color.clear,
+                            Color(red: 0.99, green: 0.83, blue: 0.48).opacity(0.26),
+                            Color(red: 0.56, green: 0.70, blue: 0.96).opacity(0.28)
+                        ],
+                    angle: 19,
+                    verticalScale: 1.30
+                )
+
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(colorScheme == .dark ? 0.08 : 0.34),
+                        Color.clear,
+                        Color.black.opacity(colorScheme == .dark ? 0.26 : 0.06)
+                    ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
             }
         }
         .ignoresSafeArea()
+    }
+
+    private var baseGradient: LinearGradient {
+        LinearGradient(
+            colors: colorScheme == .dark
+                ? [
+                    Color(red: 0.045, green: 0.052, blue: 0.058),
+                    Color(red: 0.075, green: 0.085, blue: 0.090),
+                    Color(red: 0.040, green: 0.052, blue: 0.050)
+                ]
+                : [
+                    Color(red: 0.93, green: 0.97, blue: 0.98),
+                    Color(red: 0.985, green: 0.98, blue: 0.94),
+                    Color(red: 0.94, green: 0.95, blue: 0.99)
+                ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+}
+
+private struct LiquidFlowBand: View {
+    let colors: [Color]
+    let angle: Double
+    let verticalScale: CGFloat
+
+    var body: some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: colors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .scaleEffect(x: 1.30, y: verticalScale)
+            .rotationEffect(.degrees(angle))
+            .blur(radius: 54)
+            .opacity(0.92)
+            .blendMode(.plusLighter)
     }
 }

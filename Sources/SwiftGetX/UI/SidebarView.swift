@@ -75,7 +75,11 @@ private struct SidebarRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .contentShape(Rectangle())
-            .background(isSelected ? Color.accentColor.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+            .background {
+                if isSelected {
+                    GlassCellBackground(isSelected: true, cornerRadius: 12)
+                }
+            }
         }
         .buttonStyle(.plain)
     }

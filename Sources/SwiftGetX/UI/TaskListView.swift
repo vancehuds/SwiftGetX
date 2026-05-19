@@ -140,13 +140,8 @@ private struct TaskRowView: View {
             }
         }
         .padding(12)
-        .background(
-            isSelected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.045),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(isSelected ? Color.accentColor.opacity(0.45) : Color.white.opacity(0.12))
+        .background {
+            GlassCellBackground(isSelected: isSelected, tint: statusColor, cornerRadius: 16)
         }
     }
 
