@@ -6,15 +6,15 @@
 	<dict>
 		<key>Resources/AppIcon.icns</key>
 		<data>
-		deTCdAYY47q9S70NgSKWkc5vNhA=
+		Atxrb4DwpX2Rj/L5CzIubrM+4lo=
 		</data>
 		<key>Resources/SwiftGetX_SwiftGetX.bundle/AppIcon.icns</key>
 		<data>
-		deTCdAYY47q9S70NgSKWkc5vNhA=
+		Atxrb4DwpX2Rj/L5CzIubrM+4lo=
 		</data>
 		<key>Resources/SwiftGetX_SwiftGetX.bundle/AppIcon.png</key>
 		<data>
-		x5yDGymOoit8g9ZoO18Vs/nemy0=
+		fuXpiVk3ySRNNZa9Q3Yd84dzKUY=
 		</data>
 		<key>Resources/SwiftGetX_SwiftGetX.bundle/AppInfo.plist</key>
 		<data>
@@ -47,30 +47,30 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			OeDYv3ojahbwt5xscJ8U5ZdwnEQ=
+			mDfUVzh2YbULLDWHrXIz9GR+iK8=
 			</data>
 			<key>requirement</key>
-			<string>cdhash H"39e0d8bf7a236a16f0b79c6c709f14e597709c44"</string>
+			<string>cdhash H"9837d457387661b50b2c3587ad7233f4647e88af"</string>
 		</dict>
 		<key>Resources/AppIcon.icns</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			awwwwt+IS1VqhZrnwUyOadMeX53avW6LWiJV0dtudP0=
+			2AdkodjhPxIG06HQyerkvPV9zNqGDb+85ty1x6hf790=
 			</data>
 		</dict>
 		<key>Resources/SwiftGetX_SwiftGetX.bundle/AppIcon.icns</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			awwwwt+IS1VqhZrnwUyOadMeX53avW6LWiJV0dtudP0=
+			2AdkodjhPxIG06HQyerkvPV9zNqGDb+85ty1x6hf790=
 			</data>
 		</dict>
 		<key>Resources/SwiftGetX_SwiftGetX.bundle/AppIcon.png</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			X8uPHgJhM7pgfbrRzY/Aww8L5aZCuJY9LVt/na8kruQ=
+			LH3g3NOrTb8aWnqIVXahPCNMAUwD/EfU5HPJk4zln5E=
 			</data>
 		</dict>
 		<key>Resources/SwiftGetX_SwiftGetX.bundle/AppInfo.plist</key>
