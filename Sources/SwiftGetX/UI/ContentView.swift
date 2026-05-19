@@ -180,6 +180,8 @@ private struct LiquidFlowBand: View {
     let angle: Double
     let verticalScale: CGFloat
 
+    @State private var isAnimating = false
+
     var body: some View {
         Rectangle()
             .fill(
@@ -190,9 +192,19 @@ private struct LiquidFlowBand: View {
                 )
             )
             .scaleEffect(x: 1.30, y: verticalScale)
-            .rotationEffect(.degrees(angle))
+            .rotationEffect(.degrees(isAnimating ? angle + 6 : angle - 6))
+            .offset(x: isAnimating ? 40 : -40, y: isAnimating ? 25 : -25)
             .blur(radius: 54)
             .opacity(0.92)
             .blendMode(.plusLighter)
+            .onAppear {
+                withAnimation(
+                    Animation
+                        .easeInOut(duration: 12)
+                        .repeatForever(autoreverses: true)
+                ) {
+                    isAnimating = true
+                }
+            }
     }
 }

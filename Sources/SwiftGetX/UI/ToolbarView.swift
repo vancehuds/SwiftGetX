@@ -3,6 +3,7 @@ import SwiftUI
 struct ToolbarView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var showingNewTask: Bool
 
     var body: some View {
@@ -56,7 +57,18 @@ struct ToolbarView: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 34)
-                .background(Color.primary.opacity(0.07), in: Capsule())
+                .background {
+                    Capsule()
+                        .fill(.thinMaterial)
+                        .overlay {
+                            Capsule()
+                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.05 : 0.035))
+                        }
+                        .overlay {
+                            Capsule()
+                                .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.15 : 0.45), lineWidth: 0.8)
+                        }
+                }
 
                 Spacer()
 
@@ -96,8 +108,11 @@ private struct SpeedLimitMenu: View {
         } label: {
             Label("限速", systemImage: "speedometer")
                 .labelStyle(.iconOnly)
+                .font(.system(size: 14, weight: .semibold))
                 .frame(width: 34, height: 34)
-                .background(Color.primary.opacity(0.08), in: Circle())
+                .background(
+                    GlassIconButtonBackground(isPressed: false)
+                )
         }
         .menuStyle(.button)
         .buttonStyle(.plain)

@@ -18,6 +18,41 @@ struct GlassSurface<Content: View>: View {
         content
             .background(background)
             .clipShape(shape)
+            .overlay(
+                // Bottom-right dark refractive border
+                shape
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.clear,
+                                Color.black.opacity(colorScheme == .dark ? 0.32 : 0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: borderWidth * 1.5
+                    )
+                    .blendMode(.multiply)
+                    .mask(shape)
+            )
+            .overlay(
+                // Specular highlight rim (top-left)
+                shape
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.58 : 0.88),
+                                Color.white.opacity(0.12),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .center
+                        ),
+                        lineWidth: borderWidth * 1.2
+                    )
+                    .blendMode(.screen)
+                    .mask(shape)
+            )
             .overlay(liquidRim)
             .overlay {
                 shape
@@ -206,21 +241,24 @@ struct GlassCellBackground: View {
     var tint: Color = .accentColor
     var cornerRadius: CGFloat = 14
 
+    @State private var isHovered = false
+
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
         ZStack {
             if reduceTransparency {
                 shape
-                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .fill(isSelected ? tint.opacity(0.15) : Color(nsColor: .controlBackgroundColor))
             } else {
                 shape
-                    .fill(.thinMaterial)
+                    .fill(isSelected ? .regularMaterial : (isHovered ? .regularMaterial : .thinMaterial))
+                
                 LinearGradient(
                     colors: [
-                        Color.white.opacity(colorScheme == .dark ? 0.10 : 0.32),
-                        Color.white.opacity(colorScheme == .dark ? 0.035 : 0.14),
-                        Color.black.opacity(colorScheme == .dark ? 0.12 : 0.035)
+                        Color.white.opacity(colorScheme == .dark ? 0.12 : 0.38),
+                        Color.white.opacity(colorScheme == .dark ? 0.04 : 0.18),
+                        Color.black.opacity(colorScheme == .dark ? 0.10 : 0.03)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -228,23 +266,43 @@ struct GlassCellBackground: View {
                 .clipShape(shape)
             }
 
+            // Glow layer
             shape
-                .fill(isSelected ? tint.opacity(colorScheme == .dark ? 0.24 : 0.18) : Color.primary.opacity(colorScheme == .dark ? 0.035 : 0.045))
+                .fill(
+                    isSelected 
+                        ? tint.opacity(colorScheme == .dark ? 0.26 : 0.20) 
+                        : (isHovered ? tint.opacity(colorScheme == .dark ? 0.12 : 0.08) : Color.primary.opacity(colorScheme == .dark ? 0.035 : 0.045))
+                )
         }
         .overlay {
+            // Specular border highlights
             shape
                 .strokeBorder(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(colorScheme == .dark ? 0.22 : 0.64),
-                            isSelected ? tint.opacity(0.48) : Color.white.opacity(colorScheme == .dark ? 0.08 : 0.22),
-                            Color.black.opacity(colorScheme == .dark ? 0.22 : 0.08)
+                            Color.white.opacity(colorScheme == .dark ? (isHovered ? 0.40 : 0.25) : (isHovered ? 0.85 : 0.68)),
+                            isSelected ? tint.opacity(0.60) : (isHovered ? tint.opacity(0.24) : Color.white.opacity(colorScheme == .dark ? 0.08 : 0.22)),
+                            Color.black.opacity(colorScheme == .dark ? 0.25 : 0.08)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: isSelected ? 1.1 : 0.8
+                    lineWidth: isSelected ? 1.25 : (isHovered ? 1.0 : 0.8)
                 )
+        }
+        .scaleEffect(isHovered && !isSelected ? 1.015 : 1.0)
+        .shadow(
+            color: isSelected 
+                ? tint.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                : (isHovered ? Color.black.opacity(colorScheme == .dark ? 0.15 : 0.06) : Color.clear),
+            radius: isSelected ? 8 : (isHovered ? 6 : 0),
+            x: 0,
+            y: isSelected ? 3 : (isHovered ? 2 : 0)
+        )
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isHovered)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: isSelected)
+        .onHover { hovering in
+            isHovered = hovering
         }
     }
 }
@@ -253,6 +311,7 @@ struct LiquidProgressBar: View {
     var progress: Double
     var tint: Color
     @Environment(\.colorScheme) private var colorScheme
+    @State private var shineOffset: CGFloat = -1.0
 
     var body: some View {
         GeometryReader { proxy in
@@ -274,9 +333,9 @@ struct LiquidProgressBar: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                tint.opacity(0.62),
+                                tint.opacity(0.70),
                                 tint,
-                                .white.opacity(colorScheme == .dark ? 0.36 : 0.56)
+                                tint.opacity(0.85)
                             ],
                             startPoint: .leading,
                             endPoint: .trailing
@@ -285,17 +344,36 @@ struct LiquidProgressBar: View {
                     .frame(width: max(width, progress > 0 ? 8 : 0))
                     .overlay(alignment: .top) {
                         Capsule()
-                            .fill(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.34))
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.20 : 0.38))
                             .frame(height: 2)
                             .padding(.horizontal, 3)
                     }
+                    .overlay(
+                        GeometryReader { fillProxy in
+                            let fillWidth = fillProxy.size.width
+                            LinearGradient(
+                                colors: [.clear, .white.opacity(0.48), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: 60)
+                            .offset(x: fillWidth * shineOffset)
+                        }
+                        .mask(Capsule())
+                    )
                     .overlay(alignment: .trailing) {
                         Circle()
-                            .fill(Color.white.opacity(colorScheme == .dark ? 0.48 : 0.68))
+                            .fill(Color.white.opacity(colorScheme == .dark ? 0.60 : 0.85))
                             .frame(width: 8, height: 8)
-                            .blur(radius: 3)
-                            .offset(x: -2)
+                            .blur(radius: 2)
+                            .offset(x: -1)
+                            .shadow(color: tint, radius: 4)
                     }
+            }
+            .onAppear {
+                withAnimation(Animation.linear(duration: 2.2).repeatForever(autoreverses: false)) {
+                    shineOffset = 1.5
+                }
             }
         }
         .frame(height: 8)
@@ -304,33 +382,67 @@ struct LiquidProgressBar: View {
     }
 }
 
+struct GlassIconButtonBackground: View {
+    let isPressed: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var isHovered = false
+
+    var body: some View {
+        Circle()
+            .fill(reduceTransparency ? Color.primary.opacity(0.10) : Color.clear)
+            .background {
+                if !reduceTransparency {
+                    Circle()
+                        .fill(isHovered ? .regularMaterial : .thinMaterial)
+                }
+            }
+            .overlay {
+                Circle()
+                    .fill(isPressed ? Color.primary.opacity(0.22) : (isHovered ? Color.accentColor.opacity(colorScheme == .dark ? 0.15 : 0.10) : Color.primary.opacity(colorScheme == .dark ? 0.07 : 0.045)))
+            }
+            .overlay {
+                if isHovered && !reduceTransparency {
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.65),
+                                    Color.clear
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1.2
+                        )
+                        .blur(radius: 0.2)
+                }
+            }
+            .overlay {
+                Circle()
+                    .strokeBorder(Color.white.opacity(colorScheme == .dark ? (isHovered ? 0.36 : 0.16) : (isHovered ? 0.78 : 0.58)), lineWidth: 0.8)
+            }
+            .scaleEffect(isPressed ? 0.94 : (isHovered ? 1.06 : 1.0))
+            .shadow(color: Color.black.opacity(isHovered ? 0.12 : 0.04), radius: isHovered ? 4 : 1, y: isHovered ? 2 : 0.5)
+            .animation(.spring(response: 0.25, dampingFraction: 0.65), value: isHovered)
+            .animation(.interactiveSpring, value: isPressed)
+            .onHover { hovering in
+                isHovered = hovering
+            }
+    }
+}
+
 struct IconButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var colorScheme
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14, weight: .semibold))
             .frame(width: 34, height: 34)
-            .background {
-                Circle()
-                    .fill(reduceTransparency ? Color.primary.opacity(0.10) : Color.clear)
-                    .background {
-                        if !reduceTransparency {
-                            Circle()
-                                .fill(.thinMaterial)
-                        }
-                    }
-                    .overlay {
-                        Circle()
-                            .fill(configuration.isPressed ? Color.primary.opacity(0.18) : Color.primary.opacity(colorScheme == .dark ? 0.07 : 0.045))
-                    }
-                    .overlay {
-                        Circle()
-                            .strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.16 : 0.58), lineWidth: 0.8)
-                    }
-            }
+            .background(
+                GlassIconButtonBackground(isPressed: configuration.isPressed)
+            )
             .opacity(isEnabled ? 1 : 0.45)
     }
 }
