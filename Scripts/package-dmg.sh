@@ -7,6 +7,7 @@ CREATE_DMG="${3:-}"
 APP_NAME="SwiftGetX"
 APP_BUNDLE="$OUTPUT_DIR/$APP_NAME.app"
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/swiftgetx-package.XXXXXX")"
+DMG_ROOT="$STAGING_DIR/dmg-root"
 STAGED_APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
 INFO_PLIST="Sources/SwiftGetX/Resources/AppInfo.plist"
 ICON_FILE="Sources/SwiftGetX/Resources/Assets/AppIcon.icns"
@@ -71,9 +72,13 @@ mkdir -p "$OUTPUT_DIR"
 ditto --noextattr --noqtn "$STAGED_APP_BUNDLE" "$APP_BUNDLE"
 
 if [[ "$CREATE_DMG" == "--dmg" ]]; then
+    rm -rf "$DMG_ROOT" "$OUTPUT_DIR/$APP_NAME.dmg"
+    mkdir -p "$DMG_ROOT"
+    cp -R "$APP_BUNDLE" "$DMG_ROOT/"
+    ln -s /Applications "$DMG_ROOT/Applications"
     hdiutil create \
         -volname "$APP_NAME" \
-        -srcfolder "$APP_BUNDLE" \
+        -srcfolder "$DMG_ROOT" \
         -ov \
         -format UDZO \
         "$OUTPUT_DIR/$APP_NAME.dmg"
