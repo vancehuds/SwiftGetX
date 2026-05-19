@@ -1,0 +1,68 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build macOS artifacts
+    runs-on: macos-15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Run tests
+        run: swift test
+
+      - name: Build release executables
+        run: swift build -c release --product SwiftGetX --product SwiftGetXNativeHost
+
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+
+          bin_path="$(swift build -c release --show-bin-path)"
+          artifact_root="dist/SwiftGetX"
+          rm -rf "$artifact_root" dist/SwiftGetX-macos.zip
+          mkdir -p "$artifact_root/bin" "$artifact_root/resources"
+
+          cp "$bin_path/SwiftGetX" "$artifact_root/bin/"
+          cp "$bin_path/SwiftGetXNativeHost" "$artifact_root/bin/"
+
+          if [[ -d "$bin_path/SwiftGetX_SwiftGetX.bundle" ]]; then
+            cp -R "$bin_path/SwiftGetX_SwiftGetX.bundle" "$artifact_root/resources/"
+          fi
+
+          cp README.md "$artifact_root/"
+          cp -R Docs "$artifact_root/"
+          cp -R Scripts "$artifact_root/"
+
+          cat > "$artifact_root/INSTALL.txt" <<'EOF'
+SwiftGetX macOS artifact
+
+Contents:
+- bin/SwiftGetX: SwiftGetX executable.
+- bin/SwiftGetXNativeHost: Chrome Native Messaging host executable.
+- resources/SwiftGetX_SwiftGetX.bundle: bundled app resources used by SwiftPM.
+- Docs and Scripts: setup notes and helper scripts.
+
+This artifact is unsigned and not notarized. macOS may require explicit approval
+before running downloaded binaries.
+EOF
+
+          (cd dist && zip -qry SwiftGetX-macos.zip SwiftGetX)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwiftGetX-macos
+          path: dist/SwiftGetX-macos.zip
+          if-no-files-found: error
