@@ -23,7 +23,9 @@ jobs:
         run: swift test
 
       - name: Build release executables
-        run: swift build -c release --product SwiftGetX --product SwiftGetXNativeHost
+        run: |
+          swift build -c release --product SwiftGetX
+          swift build -c release --product SwiftGetXNativeHost
 
       - name: Package artifact
         run: |
