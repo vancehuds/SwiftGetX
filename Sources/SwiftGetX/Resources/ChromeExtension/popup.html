@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwiftGetX</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>SwiftGetX</h1>
+      <p id="active-tab">当前标签页</p>
+    </div>
+    <span id="status" class="status">就绪</span>
+  </header>
+
+  <main>
+    <div class="actions">
+      <button id="send-current" type="button">下载当前页面</button>
+      <button id="send-selection" type="button">下载选中文本</button>
+      <button id="scan-links" type="button">扫描下载链接</button>
+    </div>
+
+    <label class="toggle">
+      <input id="takeover-downloads" type="checkbox">
+      <span>接管 Chrome 下载</span>
+    </label>
+
+    <section id="candidate-panel" class="candidate-panel" hidden>
+      <div class="candidate-header">
+        <strong id="candidate-count">0 个链接</strong>
+        <button id="send-candidates" class="text-button" type="button">全部发送</button>
+      </div>
+      <ul id="candidate-list"></ul>
+    </section>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -12,6 +12,8 @@ SwiftGetX uses explicit browser handoff instead of silently intercepting every d
 
 - Resources live in `Sources/SwiftGetX/Resources/ChromeExtension`.
 - The extension uses `chrome.runtime.sendNativeMessage("com.swiftgetx.native", ...)`.
+- Context menus can send links, the current page, selected text, and media URLs to SwiftGetX.
+- The popup can send the current page, send the current selection, scan a page for likely download links, and optionally hand off Chrome-created downloads.
 - Build the native host with `swift build`.
 - Install the Native Messaging host manifest with:
 
@@ -20,6 +22,13 @@ Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHo
 ```
 
 - The native host opens `swiftgetx://download?url=...`, which the main app handles through `onOpenURL`.
+- Package a local ZIP and CRX with:
+
+```sh
+Scripts/package-chrome-extension.sh
+```
+
+The CRX packager creates a temporary signing key when no key is provided, which changes the Chrome extension ID on each build. For a stable ID, set `SWIFTGETX_CHROME_EXTENSION_KEY_PATH` to a PEM key locally or set the GitHub Actions secret `CHROME_EXTENSION_KEY_BASE64` to a base64-encoded PEM private key. Use the printed CRX ID when installing the Native Messaging host manifest.
 
 ## Native Message Format
 
@@ -30,7 +39,10 @@ Incoming payload:
   "action": "download",
   "url": "https://example.com/file.zip",
   "browser": "Chrome",
-  "suggestedFilename": "file.zip"
+  "suggestedFilename": "file.zip",
+  "sourcePageTitle": "Release notes",
+  "sourcePageUrl": "https://example.com/releases",
+  "source": "popup-scan"
 }
 ```
 

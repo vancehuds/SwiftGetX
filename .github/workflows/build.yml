@@ -25,9 +25,23 @@ jobs:
       - name: Package DMG
         run: Scripts/package-dmg.sh release dist --dmg
 
-      - name: Upload artifact
+      - name: Package Chrome extension
+        env:
+          SWIFTGETX_CHROME_EXTENSION_KEY_BASE64: ${{ secrets.CHROME_EXTENSION_KEY_BASE64 }}
+        run: Scripts/package-chrome-extension.sh Sources/SwiftGetX/Resources/ChromeExtension dist/chrome
+
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v7
         with:
           name: SwiftGetX-dmg
           path: dist/SwiftGetX.dmg
+          if-no-files-found: error
+
+      - name: Upload Chrome extension artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: SwiftGetX-chrome-extension
+          path: |
+            dist/chrome/SwiftGetX-Chrome.crx
+            dist/chrome/SwiftGetX-Chrome.zip
           if-no-files-found: error

@@ -5,13 +5,11 @@ struct InspectorView: View {
     @State private var selectedTab: InspectorTab = .overview
 
     var body: some View {
-        GlassSurface(level: .panel, cornerRadius: 22) {
+        GlassSurface(level: .panel, cornerRadius: 18) {
             VStack(spacing: 0) {
                 if let task = coordinator.selectedTask {
-                    // Header Status Info
                     header(for: task)
                     
-                    // Segmented Tabs picker
                     Picker("详情", selection: $selectedTab) {
                         ForEach(InspectorTab.tabs(for: task.kind)) { tab in
                             Label(tab.title, systemImage: tab.symbolName)
@@ -23,9 +21,8 @@ struct InspectorView: View {
                     .padding(.bottom, 12)
 
                     Divider()
-                        .opacity(0.18)
+                        .opacity(0.35)
 
-                    // Tab View Panels Scroll
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 14) {
                             switch selectedTab {
@@ -43,7 +40,6 @@ struct InspectorView: View {
                     }
                     .transition(.opacity)
                 } else {
-                    // Empty State Selected View
                     VStack(spacing: 16) {
                         ZStack {
                             Circle()
@@ -68,18 +64,18 @@ struct InspectorView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: task.status.symbolName)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(statusColor(for: task.status))
                     .padding(.top, 2)
                 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(task.name)
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 14, weight: .semibold))
                         .lineLimit(2)
                         .foregroundStyle(Color.primary)
                     
                     Text(task.kind.title + " 下载")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -91,7 +87,7 @@ struct InspectorView: View {
             
             HStack {
                 Text(task.progress.formatted(.percent.precision(.fractionLength(1))))
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(statusColor(for: task.status))
                 
                 Spacer()
@@ -110,7 +106,7 @@ struct InspectorView: View {
         case .queued: .secondary
         case .running: .blue
         case .paused: .orange
-        case .verifying: .purple
+        case .verifying: .indigo
         case .completed: .green
         case .failed: .red
         }
@@ -153,7 +149,6 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Premium 2x2 Grid Overview Panel
 private struct OverviewPanel: View {
     let task: DownloadTask
     private let columns = [
@@ -163,9 +158,7 @@ private struct OverviewPanel: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            // MARK: - 2x2 Performance Grid
             LazyVGrid(columns: columns, spacing: 10) {
-                // Status Card
                 MetricCard(
                     title: "任务状态",
                     value: task.status.title,
@@ -173,7 +166,6 @@ private struct OverviewPanel: View {
                     color: statusColor
                 )
 
-                // Speed Card
                 MetricCard(
                     title: "下载速度",
                     value: task.status == .running
@@ -183,7 +175,6 @@ private struct OverviewPanel: View {
                     color: task.status == .running ? .green : .secondary
                 )
 
-                // ETA Card
                 MetricCard(
                     title: "剩余时间",
                     value: task.status == .running
@@ -193,7 +184,6 @@ private struct OverviewPanel: View {
                     color: .secondary
                 )
 
-                // Progress Size Card
                 MetricCard(
                     title: "已下载比例",
                     value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.downloadedBytes),
@@ -202,7 +192,6 @@ private struct OverviewPanel: View {
                 )
             }
 
-            // MARK: - Secondary Parameters
             VStack(spacing: 8) {
                 DetailRow(title: "文件总大小", value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.totalBytes))
                 DetailRow(title: "保存路径", value: task.savePath)
@@ -223,14 +212,13 @@ private struct OverviewPanel: View {
         case .queued: .secondary
         case .running: .blue
         case .paused: .orange
-        case .verifying: .purple
+        case .verifying: .indigo
         case .completed: .green
         case .failed: .red
         }
     }
 }
 
-// MARK: - Metric Card Widget
 private struct MetricCard: View {
     let title: String
     let value: String
@@ -241,27 +229,26 @@ private struct MetricCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(title)
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(color)
             }
 
             Text(value)
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .lineLimit(1)
                 .foregroundStyle(Color.primary)
         }
         .padding(12)
         .background {
-            GlassCellBackground(cornerRadius: 14)
+            GlassCellBackground(cornerRadius: 12)
         }
     }
 }
 
-// MARK: - Files List Panel
 private struct FilesPanel: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     let task: DownloadTask
@@ -323,7 +310,7 @@ private struct FilesPanel: View {
                         }
                         .padding(10)
                         .background {
-                            GlassCellBackground(cornerRadius: 12)
+                            GlassCellBackground(cornerRadius: 10)
                         }
                     }
                     .buttonStyle(.plain)
@@ -343,7 +330,6 @@ private struct FilesPanel: View {
     }
 }
 
-// MARK: - Connections Panel
 private struct ConnectionsPanel: View {
     let task: DownloadTask
 
@@ -358,7 +344,6 @@ private struct ConnectionsPanel: View {
     }
 }
 
-// MARK: - Logs Panel
 private struct LogsPanel: View {
     let task: DownloadTask
 
@@ -374,7 +359,7 @@ private struct LogsPanel: View {
                 ForEach(task.logEntries, id: \.self) { entry in
                     HStack(alignment: .top, spacing: 8) {
                         Text("•")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Color.blue)
                         
                         Text(entry)
@@ -386,7 +371,7 @@ private struct LogsPanel: View {
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background {
-                        GlassCellBackground(cornerRadius: 10)
+                        GlassCellBackground(cornerRadius: 8)
                     }
                 }
             }
@@ -394,7 +379,6 @@ private struct LogsPanel: View {
     }
 }
 
-// MARK: - Key-Value Row Widget
 private struct DetailRow: View {
     let title: String
     let value: String
@@ -403,7 +387,7 @@ private struct DetailRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
             
             Text(value)
@@ -414,7 +398,7 @@ private struct DetailRow: View {
         }
         .padding(12)
         .background {
-            GlassCellBackground(cornerRadius: 14)
+            GlassCellBackground(cornerRadius: 12)
         }
     }
 }

@@ -13,16 +13,16 @@ struct ContentView: View {
         let visibleTasks = filteredTasks()
 
         ZStack {
-            LiquidBackground()
+            AppBackground()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 10) {
                 ClipboardSuggestionBar()
 
                 ToolbarView(
                     showingNewTask: $showingNewTask
                 )
 
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     SidebarView(tasks: allTasks)
                         .frame(width: 196)
 
@@ -34,7 +34,7 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(16)
+            .padding(12)
         }
         .frame(minWidth: 1080, minHeight: 680)
         .sheet(isPresented: $showingNewTask) {
@@ -99,112 +99,11 @@ private struct ClipboardSuggestionBar: View {
     }
 }
 
-private struct LiquidBackground: View {
+private struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor)
-
-            if !reduceTransparency {
-                baseGradient
-
-                LiquidFlowBand(
-                    colors: colorScheme == .dark
-                        ? [
-                            Color(red: 0.10, green: 0.35, blue: 0.34).opacity(0.24),
-                            Color(red: 0.35, green: 0.18, blue: 0.40).opacity(0.18),
-                            Color.clear
-                        ]
-                        : [
-                            Color(red: 0.55, green: 0.88, blue: 0.86).opacity(0.44),
-                            Color(red: 0.90, green: 0.62, blue: 0.76).opacity(0.28),
-                            Color.clear
-                        ],
-                    angle: -15,
-                    verticalScale: 1.45
-                )
-
-                LiquidFlowBand(
-                    colors: colorScheme == .dark
-                        ? [
-                            Color.clear,
-                            Color(red: 0.32, green: 0.30, blue: 0.12).opacity(0.15),
-                            Color(red: 0.12, green: 0.20, blue: 0.38).opacity(0.18)
-                        ]
-                        : [
-                            Color.clear,
-                            Color(red: 0.99, green: 0.83, blue: 0.48).opacity(0.26),
-                            Color(red: 0.56, green: 0.70, blue: 0.96).opacity(0.28)
-                        ],
-                    angle: 19,
-                    verticalScale: 1.30
-                )
-
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(colorScheme == .dark ? 0.08 : 0.34),
-                        Color.clear,
-                        Color.black.opacity(colorScheme == .dark ? 0.26 : 0.06)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        }
+        Color(nsColor: colorScheme == .dark ? .windowBackgroundColor : .underPageBackgroundColor)
         .ignoresSafeArea()
-    }
-
-    private var baseGradient: LinearGradient {
-        LinearGradient(
-            colors: colorScheme == .dark
-                ? [
-                    Color(red: 0.045, green: 0.052, blue: 0.058),
-                    Color(red: 0.075, green: 0.085, blue: 0.090),
-                    Color(red: 0.040, green: 0.052, blue: 0.050)
-                ]
-                : [
-                    Color(red: 0.93, green: 0.97, blue: 0.98),
-                    Color(red: 0.985, green: 0.98, blue: 0.94),
-                    Color(red: 0.94, green: 0.95, blue: 0.99)
-                ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-    }
-}
-
-private struct LiquidFlowBand: View {
-    let colors: [Color]
-    let angle: Double
-    let verticalScale: CGFloat
-
-    @State private var isAnimating = false
-
-    var body: some View {
-        Rectangle()
-            .fill(
-                LinearGradient(
-                    colors: colors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
-            .scaleEffect(x: 1.30, y: verticalScale)
-            .rotationEffect(.degrees(isAnimating ? angle + 6 : angle - 6))
-            .offset(x: isAnimating ? 40 : -40, y: isAnimating ? 25 : -25)
-            .blur(radius: 54)
-            .opacity(0.92)
-            .blendMode(.plusLighter)
-            .onAppear {
-                withAnimation(
-                    Animation
-                        .easeInOut(duration: 12)
-                        .repeatForever(autoreverses: true)
-                ) {
-                    isAnimating = true
-                }
-            }
     }
 }

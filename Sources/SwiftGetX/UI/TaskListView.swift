@@ -9,13 +9,12 @@ struct TaskListView: View {
     var body: some View {
         @Bindable var coordinator = coordinator
 
-        GlassSurface(level: .panel, cornerRadius: 22) {
+        GlassSurface(level: .panel, cornerRadius: 18) {
             VStack(spacing: 0) {
-                // MARK: - Header Area
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(coordinator.activeFilter.title)
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(Color.primary)
                         Text(summary(for: tasks))
                             .font(.system(size: 11.5, weight: .medium))
@@ -28,22 +27,21 @@ struct TaskListView: View {
                 .padding(.vertical, 16)
 
                 Divider()
-                    .opacity(0.18)
+                    .opacity(0.35)
 
-                // MARK: - Task Items Scroll
                 if tasks.isEmpty {
                     EmptyTaskView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 10) {
+                        LazyVStack(spacing: 8) {
                             ForEach(tasks) { task in
                                 TaskRowView(
                                     task: task,
                                     isSelected: coordinator.selectedTaskID == task.id
                                 )
                                 .onTapGesture {
-                                    withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
+                                    withAnimation(.easeOut(duration: 0.12)) {
                                         coordinator.selectedTaskID = task.id
                                     }
                                 }
@@ -127,7 +125,6 @@ extension Notification.Name {
     static let confirmSelectedTaskRemoval = Notification.Name("SwiftGetX.confirmSelectedTaskRemoval")
 }
 
-// MARK: - Premium Task Row View
 private struct TaskRowView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.colorScheme) private var colorScheme
@@ -138,23 +135,13 @@ private struct TaskRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Icon Category Indicator
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(colorScheme == .dark ? 0.16 : 0.10))
-                    .frame(width: 40, height: 40)
-                    .overlay {
-                        Circle()
-                            .strokeBorder(statusColor.opacity(0.24), lineWidth: 0.8)
-                    }
-
-                Image(systemName: task.kind.symbolName)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(statusColor)
-            }
+            Image(systemName: task.kind.symbolName)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(statusColor)
+                .frame(width: 34, height: 34)
+                .background(statusColor.opacity(colorScheme == .dark ? 0.14 : 0.09), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
-                // Title and Status Label
                 HStack(spacing: 8) {
                     Text(task.name)
                         .font(.system(size: 13.5, weight: .semibold))
@@ -162,30 +149,22 @@ private struct TaskRowView: View {
                         .foregroundStyle(Color.primary)
 
                     Label(task.status.title, systemImage: task.status.symbolName)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(statusColor)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(statusColor.opacity(0.08), in: Capsule())
-                        .overlay {
-                            Capsule()
-                                .strokeBorder(statusColor.opacity(0.18), lineWidth: 0.7)
-                        }
+                        .background(statusColor.opacity(colorScheme == .dark ? 0.16 : 0.09), in: Capsule())
 
                     Spacer()
 
-                    // File Total Size
                     Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: task.totalBytes))
-                        .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
 
-                // Progress Bar
                 LiquidProgressBar(progress: task.progress, tint: statusColor)
 
-                // Sub-Metrics
                 HStack(spacing: 14) {
-                    // Task source domain/IP
                     HStack(spacing: 4) {
                         Image(systemName: "globe")
                             .font(.system(size: 10))
@@ -197,7 +176,6 @@ private struct TaskRowView: View {
                     Spacer()
 
                     if task.status == .running {
-                        // Current Speed
                         HStack(spacing: 3) {
                             Image(systemName: "arrow.down")
                                 .font(.system(size: 9, weight: .bold))
@@ -206,7 +184,6 @@ private struct TaskRowView: View {
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.green)
 
-                        // ETA
                         HStack(spacing: 3) {
                             Image(systemName: "clock")
                                 .font(.system(size: 9))
@@ -241,17 +218,13 @@ private struct TaskRowView: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
+        .padding(12)
         .background {
-            GlassCellBackground(isSelected: isSelected, tint: statusColor, cornerRadius: 16)
+            GlassCellBackground(isSelected: isSelected, tint: statusColor, cornerRadius: 12)
         }
-        // Elegant Selected Neon Breathing Glow
-        .breathingGlow(color: statusColor, isAnimating: isSelected, cornerRadius: 16)
-        // Inline Floating Action Overlay on Hover
         .overlay(alignment: .topTrailing) {
             if isHovered {
                 HStack(spacing: 6) {
-                    // Play/Pause Action
                     Button {
                         if task.status == .running {
                             coordinator.pause(task)
@@ -268,7 +241,6 @@ private struct TaskRowView: View {
                     .buttonStyle(.plain)
                     .help(task.status == .running ? "暂停" : "开始")
 
-                    // Open Finder Action
                     Button {
                         let url = URL(fileURLWithPath: task.savePath)
                         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -282,7 +254,6 @@ private struct TaskRowView: View {
                     .buttonStyle(.plain)
                     .help("在访达中显示")
 
-                    // Delete Action
                     Button {
                         coordinator.selectedTaskID = task.id
                         NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
@@ -300,15 +271,14 @@ private struct TaskRowView: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay {
                     Capsule()
-                        .strokeBorder(Color.white.opacity(0.28), lineWidth: 0.8)
+                        .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 1)
                 }
-                .shadow(color: Color.black.opacity(0.18), radius: 6, y: 3)
                 .padding(.top, 10)
                 .padding(.trailing, 10)
-                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                .transition(.opacity)
             }
         }
-        .animation(.spring(response: 0.25, dampingFraction: 0.72), value: isHovered)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
         }
@@ -323,7 +293,7 @@ private struct TaskRowView: View {
         case .paused:
             .orange
         case .verifying:
-            .purple
+            .indigo
         case .completed:
             .green
         case .failed:
@@ -332,69 +302,18 @@ private struct TaskRowView: View {
     }
 }
 
-// MARK: - Premium Empty State View
 private struct EmptyTaskView: View {
-    @State private var animateDrop = false
-
     var body: some View {
-        VStack(spacing: 20) {
-            // Immersive Liquid Glass Drop Art
-            ZStack {
-                // Outer blurring glow
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.cyan.opacity(0.24), Color.blue.opacity(0.16)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 90, height: 90)
-                    .blur(radius: 12)
-                    .scaleEffect(animateDrop ? 1.15 : 0.95)
-
-                // Glass body
-                Circle()
-                    .fill(.thinMaterial)
-                    .frame(width: 80, height: 80)
-                    .overlay {
-                        Circle()
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.68), Color.white.opacity(0.18)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1.2
-                            )
-                    }
-                    .shadow(color: Color.black.opacity(0.08), radius: 8, y: 4)
-
-                // Shimmer core
-                Image(systemName: "arrow.down.doc")
-                    .font(.system(size: 32, weight: .light))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color.cyan, Color.blue, Color.purple],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .offset(y: animateDrop ? 3 : -3)
-            }
-            .onAppear {
-                withAnimation(
-                    Animation
-                        .easeInOut(duration: 2.2)
-                        .repeatForever(autoreverses: true)
-                ) {
-                    animateDrop = true
-                }
-            }
+        VStack(spacing: 16) {
+            Image(systemName: "arrow.down.doc")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(.secondary)
+                .frame(width: 72, height: 72)
+                .background(Color.primary.opacity(0.04), in: Circle())
 
             VStack(spacing: 6) {
                 Text("还没有下载任务")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color.primary)
                 Text("点击左上角加号，粘贴直链、磁力链接或种子文件地址。")
                     .font(.system(size: 12.5))

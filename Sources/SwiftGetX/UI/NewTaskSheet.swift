@@ -7,22 +7,21 @@ struct NewTaskSheet: View {
     @State private var saveDirectory = AppDefaults.downloadDirectory
 
     var body: some View {
-        GlassSurface(level: .floating, cornerRadius: 24) {
-            VStack(alignment: .leading, spacing: 18) {
-                // Header Area
+        GlassSurface(level: .floating, cornerRadius: 18) {
+            VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 12) {
                     ZStack {
-                        Circle()
-                            .fill(Color.blue.opacity(0.12))
-                            .frame(width: 44, height: 44)
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.10))
+                            .frame(width: 42, height: 42)
                         Image(systemName: "doc.badge.plus")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(Color.blue)
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text("新建下载任务")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(Color.primary)
                         Text("支持一次粘贴多个直链、磁力链接或种子文件地址。")
                             .font(.system(size: 11.5))
@@ -31,10 +30,9 @@ struct NewTaskSheet: View {
                     Spacer()
                 }
 
-                // Text Editor with Floating Overlay Placeholder
                 ZStack(alignment: .topLeading) {
                     if sourceText.isEmpty {
-                        Text("在此粘贴一个或多个下载链接（支持多行直链、磁力链接、或种子 URL）...")
+                        Text("在此粘贴一个或多个下载链接（支持多行直链、磁力链接、或种子 URL）")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary.opacity(0.8))
                             .padding(.horizontal, 14)
@@ -49,20 +47,19 @@ struct NewTaskSheet: View {
                         .padding(8)
                 }
                 .background {
-                    GlassCellBackground(cornerRadius: 14)
+                    GlassCellBackground(cornerRadius: 12)
                 }
 
-                // Save Directory Selector
                 HStack(spacing: 12) {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(Color.orange)
                         .padding(8)
-                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+                        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text("保存目录")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.secondary)
                         Text(saveDirectory.path)
                             .font(.system(size: 12, weight: .medium))
@@ -80,13 +77,11 @@ struct NewTaskSheet: View {
                 }
                 .padding(10)
                 .background {
-                    GlassCellBackground(cornerRadius: 14)
+                    GlassCellBackground(cornerRadius: 12)
                 }
 
-                // Identified Source Preview
                 SourcePreviewView(sourceText: sourceText)
 
-                // Dialog Action Buttons
                 HStack {
                     Button("取消") {
                         dismiss()
@@ -101,7 +96,7 @@ struct NewTaskSheet: View {
                         dismiss()
                     } label: {
                         Label("添加任务", systemImage: "plus.circle.fill")
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 12, weight: .semibold))
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -135,11 +130,11 @@ private struct SourcePreviewView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("识别预览")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("已识别 \(sources.count) 个任务")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(sources.isEmpty ? .secondary : Color.green)
             }
 
@@ -166,7 +161,7 @@ private struct SourcePreviewView: View {
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                         }
                         
                         if sources.count > 4 {
@@ -183,14 +178,14 @@ private struct SourcePreviewView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            GlassCellBackground(cornerRadius: 14)
+            GlassCellBackground(cornerRadius: 12)
         }
     }
 
     private func previewColor(for kind: DownloadKind) -> Color {
         switch kind {
         case .http:
-            .purple
+            .indigo
         case .torrentMagnet:
             .teal
         case .torrentFile:
