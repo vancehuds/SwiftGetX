@@ -7,6 +7,7 @@ final class TorrentDownloadEngine: DownloadEngine {
     private let adapter: TorrentEngineAdapter
     private var downloadLimitBytesPerSecond: Int64 = 0
     private var uploadLimitBytesPerSecond: Int64 = 0
+    private var stopSeedingAtRatio: Double = 1.0
 
     init(adapter: TorrentEngineAdapter? = nil) {
         if let adapter {
@@ -23,15 +24,7 @@ final class TorrentDownloadEngine: DownloadEngine {
     func start(_ request: DownloadRequest) async {
         do {
             try await adapter.start(
-                TorrentStartRequest(
-                    id: request.id,
-                    source: request.source,
-                    savePath: request.savePath,
-                    selectedFileIndexes: request.selectedFileIndexes,
-                    downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
-                    uploadLimitBytesPerSecond: uploadLimitBytesPerSecond,
-                    stopSeedingAtRatio: 1.0
-                )
+                torrentRequest(from: request)
             ) { snapshot in
                 Task { @MainActor in
                     self.onSnapshot?(snapshot)
@@ -74,7 +67,31 @@ final class TorrentDownloadEngine: DownloadEngine {
     }
 
     func resume(_ request: DownloadRequest) async {
-        await start(request)
+        do {
+            try await adapter.resume(
+                torrentRequest(from: request),
+                onSnapshot: { snapshot in
+                    Task { @MainActor in
+                        self.onSnapshot?(snapshot)
+                    }
+                }
+            )
+        } catch {
+            onSnapshot?(
+                DownloadSnapshot(
+                    taskID: request.id,
+                    status: .failed,
+                    totalBytes: request.totalBytes,
+                    downloadedBytes: request.downloadedBytes,
+                    speedBytesPerSecond: 0,
+                    etaSeconds: nil,
+                    errorMessage: error.localizedDescription,
+                    supportsResume: true,
+                    eTag: nil,
+                    lastModified: nil
+                )
+            )
+        }
     }
 
     func cancel(_ request: DownloadRequest) async {
@@ -115,10 +132,31 @@ final class TorrentDownloadEngine: DownloadEngine {
             uploadBytesPerSecond: uploadBytesPerSecond
         )
     }
+
+    func configure(stopSeedingAtRatio: Double) {
+        self.stopSeedingAtRatio = stopSeedingAtRatio
+    }
+
+    private func torrentRequest(from request: DownloadRequest) -> TorrentStartRequest {
+        TorrentStartRequest(
+            id: request.id,
+            source: request.source,
+            savePath: request.savePath,
+            selectedFileIndexes: request.selectedFileIndexes,
+            hasExplicitFileSelection: request.hasExplicitFileSelection,
+            downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
+            uploadLimitBytesPerSecond: uploadLimitBytesPerSecond,
+            stopSeedingAtRatio: stopSeedingAtRatio
+        )
+    }
 }
 
 protocol TorrentEngineAdapter: Sendable {
     func start(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async throws
+    func resume(
         _ request: TorrentStartRequest,
         onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
     ) async throws
@@ -135,6 +173,7 @@ struct TorrentStartRequest: Sendable {
     let source: String
     let savePath: String
     let selectedFileIndexes: [Int]
+    let hasExplicitFileSelection: Bool
     let downloadLimitBytesPerSecond: Int64
     let uploadLimitBytesPerSecond: Int64
     let stopSeedingAtRatio: Double
@@ -159,6 +198,13 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
                 lastModified: nil
             )
         )
+    }
+
+    func resume(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async throws {
+        try await start(request, onSnapshot: onSnapshot)
     }
 
     func pause(id: UUID) async {}

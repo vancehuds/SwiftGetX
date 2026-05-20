@@ -1,6 +1,7 @@
 .build/
 .swiftpm/
 DerivedData/
+Vendor/libtorrent/
 *.xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/

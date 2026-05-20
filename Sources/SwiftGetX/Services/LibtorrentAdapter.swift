@@ -7,6 +7,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
     private let sessionBox: LibtorrentSessionBox
     private var handleIDs: [UUID: Int32] = [:]
     private var pollingTasks: [UUID: Task<Void, Never>] = [:]
+    private var selectedFileIndexes: [UUID: [Int]] = [:]
 
     init?() {
         guard let sessionBox = LibtorrentSessionBox() else { return nil }
@@ -23,6 +24,16 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         _ request: TorrentStartRequest,
         onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
     ) async throws {
+        if let handleID = handleIDs[request.id] {
+            rememberFileSelection(for: request)
+            if request.hasExplicitFileSelection {
+                applyFileSelection(handleID: handleID, selectedFileIndexes: request.selectedFileIndexes)
+            }
+            sgx_libtorrent_resume(sessionBox.raw, handleID)
+            startPolling(request: request, handleID: handleID, onSnapshot: onSnapshot)
+            return
+        }
+
         let session = sessionBox.raw
         let selected = request.selectedFileIndexes.map(Int32.init)
         let handleID: Int32
@@ -35,8 +46,8 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                             session,
                             magnet,
                             savePath,
-                            buffer.baseAddress,
-                            Int32(buffer.count)
+                            request.hasExplicitFileSelection ? buffer.baseAddress : nil,
+                            request.hasExplicitFileSelection ? Int32(buffer.count) : -1
                         )
                     }
                 }
@@ -49,8 +60,8 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                             session,
                             torrentPath,
                             savePath,
-                            buffer.baseAddress,
-                            Int32(buffer.count)
+                            request.hasExplicitFileSelection ? buffer.baseAddress : nil,
+                            request.hasExplicitFileSelection ? Int32(buffer.count) : -1
                         )
                     }
                 }
@@ -62,10 +73,15 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         }
 
         handleIDs[request.id] = handleID
-        pollingTasks[request.id]?.cancel()
-        pollingTasks[request.id] = Task { [weak self] in
-            await self?.poll(requestID: request.id, handleID: handleID, onSnapshot: onSnapshot)
-        }
+        rememberFileSelection(for: request)
+        startPolling(request: request, handleID: handleID, onSnapshot: onSnapshot)
+    }
+
+    func resume(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async throws {
+        try await start(request, onSnapshot: onSnapshot)
     }
 
     func pause(id: UUID) async {
@@ -79,6 +95,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         pollingTasks[id]?.cancel()
         pollingTasks[id] = nil
         handleIDs[id] = nil
+        selectedFileIndexes[id] = nil
     }
 
     func remove(id: UUID, deletingFiles: Bool) async {
@@ -87,6 +104,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         pollingTasks[id]?.cancel()
         pollingTasks[id] = nil
         handleIDs[id] = nil
+        selectedFileIndexes[id] = nil
     }
 
     func recheck(id: UUID) async {
@@ -104,6 +122,30 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
 
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {
         guard let handleID = handleIDs[id] else { return }
+        self.selectedFileIndexes[id] = selectedFileIndexes
+        applyFileSelection(handleID: handleID, selectedFileIndexes: selectedFileIndexes)
+    }
+
+    private func startPolling(
+        request: TorrentStartRequest,
+        handleID: Int32,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) {
+        pollingTasks[request.id]?.cancel()
+        pollingTasks[request.id] = Task { [weak self] in
+            await self?.poll(request: request, handleID: handleID, onSnapshot: onSnapshot)
+        }
+    }
+
+    private func rememberFileSelection(for request: TorrentStartRequest) {
+        if request.hasExplicitFileSelection {
+            selectedFileIndexes[request.id] = request.selectedFileIndexes
+        } else {
+            selectedFileIndexes[request.id] = nil
+        }
+    }
+
+    private func applyFileSelection(handleID: Int32, selectedFileIndexes: [Int]) {
         let selected = selectedFileIndexes.map(Int32.init)
         selected.withUnsafeBufferPointer { buffer in
             sgx_libtorrent_set_file_selection(
@@ -116,7 +158,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
     }
 
     private func poll(
-        requestID: UUID,
+        request: TorrentStartRequest,
         handleID: Int32,
         onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
     ) async {
@@ -128,18 +170,69 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             }
 
             let files = copyFiles(session: sessionBox.raw, handleID: handleID)
+            if nativeStatus.has_metadata != 0,
+               let selected = selectedFileIndexes[request.id] {
+                applyFileSelection(handleID: handleID, selectedFileIndexes: selected)
+            }
+
+            if nativeStatus.has_error != 0 {
+                onSnapshot(
+                    DownloadSnapshot(
+                        taskID: request.id,
+                        status: .failed,
+                        totalBytes: max(nativeStatus.total_wanted, 0),
+                        downloadedBytes: max(nativeStatus.total_wanted_done, 0),
+                        speedBytesPerSecond: 0,
+                        etaSeconds: nil,
+                        errorMessage: lastError(),
+                        supportsResume: true,
+                        eTag: nil,
+                        lastModified: nil,
+                        torrentFiles: files,
+                        connectionSummary: connectionSummary(from: nativeStatus)
+                    )
+                )
+                pollingTasks[request.id] = nil
+                handleIDs[request.id] = nil
+                selectedFileIndexes[request.id] = nil
+                return
+            }
+
+            if nativeStatus.is_seeding != 0,
+               request.stopSeedingAtRatio > 0,
+               Double(nativeStatus.share_ratio) >= request.stopSeedingAtRatio {
+                sgx_libtorrent_pause(sessionBox.raw, handleID)
+                onSnapshot(
+                    DownloadSnapshot(
+                        taskID: request.id,
+                        status: .completed,
+                        totalBytes: max(nativeStatus.total_wanted, 0),
+                        downloadedBytes: max(nativeStatus.total_wanted_done, 0),
+                        speedBytesPerSecond: 0,
+                        etaSeconds: nil,
+                        errorMessage: nil,
+                        supportsResume: true,
+                        eTag: nil,
+                        lastModified: nil,
+                        torrentFiles: files,
+                        connectionSummary: connectionSummary(from: nativeStatus)
+                    )
+                )
+                pollingTasks[request.id] = nil
+                return
+            }
+
             let completed = nativeStatus.total_wanted > 0
                 && nativeStatus.total_wanted_done >= nativeStatus.total_wanted
-            let status: DownloadStatus = completed ? .completed : .running
-            let connectionSummary = "\(nativeStatus.num_peers) peers · ratio \(String(format: "%.2f", nativeStatus.share_ratio))"
+            let status = status(from: nativeStatus, completed: completed)
 
             onSnapshot(
                 DownloadSnapshot(
-                    taskID: requestID,
+                    taskID: request.id,
                     status: status,
-                    totalBytes: nativeStatus.total_wanted,
-                    downloadedBytes: nativeStatus.total_wanted_done,
-                    speedBytesPerSecond: nativeStatus.download_rate,
+                    totalBytes: max(nativeStatus.total_wanted, 0),
+                    downloadedBytes: max(nativeStatus.total_wanted_done, 0),
+                    speedBytesPerSecond: status == .running ? nativeStatus.download_rate : 0,
                     etaSeconds: nativeStatus.download_rate > 0
                         ? TimeInterval(max(0, nativeStatus.total_wanted - nativeStatus.total_wanted_done) / nativeStatus.download_rate)
                         : nil,
@@ -148,12 +241,50 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                     eTag: nil,
                     lastModified: nil,
                     torrentFiles: files,
-                    connectionSummary: connectionSummary
+                    connectionSummary: connectionSummary(from: nativeStatus)
                 )
             )
 
+            if status == .completed {
+                pollingTasks[request.id] = nil
+                return
+            }
+
             try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    private func status(from nativeStatus: SGXTorrentStatus, completed: Bool) -> DownloadStatus {
+        if nativeStatus.is_paused != 0 {
+            return .paused
+        }
+        if nativeStatus.state == 1 || nativeStatus.state == 2 {
+            return .verifying
+        }
+        if completed && nativeStatus.is_seeding == 0 {
+            return .completed
+        }
+        return .running
+    }
+
+    private func connectionSummary(from nativeStatus: SGXTorrentStatus) -> String {
+        let downloadSpeed = Self.speedLabel(nativeStatus.download_rate)
+        let uploadSpeed = Self.speedLabel(nativeStatus.upload_rate)
+        return "\(nativeStatus.num_peers) peers · ↓ \(downloadSpeed) · ↑ \(uploadSpeed) · ratio \(String(format: "%.2f", nativeStatus.share_ratio))"
+    }
+
+    private nonisolated static func speedLabel(_ bytesPerSecond: Int64) -> String {
+        let value = Double(max(bytesPerSecond, 0))
+        if value >= 1_000_000_000 {
+            return String(format: "%.1f GB/s", value / 1_000_000_000)
+        }
+        if value >= 1_000_000 {
+            return String(format: "%.1f MB/s", value / 1_000_000)
+        }
+        if value >= 1_000 {
+            return String(format: "%.0f KB/s", value / 1_000)
+        }
+        return "\(Int(value)) B/s"
     }
 
     private func copyFiles(session: OpaquePointer, handleID: Int32) -> [TorrentFile] {

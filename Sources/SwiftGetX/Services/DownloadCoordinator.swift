@@ -41,6 +41,7 @@ final class DownloadCoordinator {
             hidesTemporaryFiles: settings.hideHTTPTemporaryFiles,
             retryLimit: settings.retryLimit
         )
+        torrentEngine.configure(stopSeedingAtRatio: settings.stopSeedingAtRatio)
         setSpeedLimit(
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
@@ -55,6 +56,7 @@ final class DownloadCoordinator {
             hidesTemporaryFiles: settings.hideHTTPTemporaryFiles,
             retryLimit: settings.retryLimit
         )
+        torrentEngine.configure(stopSeedingAtRatio: settings.stopSeedingAtRatio)
         setSpeedLimit(
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes

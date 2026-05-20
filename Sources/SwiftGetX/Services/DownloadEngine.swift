@@ -25,6 +25,7 @@ struct DownloadRequest: Sendable {
     let eTag: String?
     let lastModified: String?
     let selectedFileIndexes: [Int]
+    let hasExplicitFileSelection: Bool
 
     init(
         id: UUID,
@@ -38,7 +39,8 @@ struct DownloadRequest: Sendable {
         supportsResume: Bool,
         eTag: String?,
         lastModified: String?,
-        selectedFileIndexes: [Int]
+        selectedFileIndexes: [Int],
+        hasExplicitFileSelection: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -52,6 +54,7 @@ struct DownloadRequest: Sendable {
         self.eTag = eTag
         self.lastModified = lastModified
         self.selectedFileIndexes = selectedFileIndexes
+        self.hasExplicitFileSelection = hasExplicitFileSelection
     }
 
     init(task: DownloadTask) {
@@ -67,5 +70,8 @@ struct DownloadRequest: Sendable {
         eTag = task.eTag
         lastModified = task.lastModified
         selectedFileIndexes = task.selectedFileIndexes
+        hasExplicitFileSelection = task.kind == .torrentMagnet || task.kind == .torrentFile
+            ? !task.torrentFiles.isEmpty
+            : false
     }
 }

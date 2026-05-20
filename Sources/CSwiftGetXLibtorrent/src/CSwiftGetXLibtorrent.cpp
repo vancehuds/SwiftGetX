@@ -7,6 +7,7 @@
 #include <libtorrent/session_params.hpp>
 #include <libtorrent/settings_pack.hpp>
 #include <libtorrent/torrent_handle.hpp>
+#include <libtorrent/torrent_flags.hpp>
 #include <libtorrent/torrent_info.hpp>
 #include <libtorrent/torrent_status.hpp>
 
@@ -61,7 +62,16 @@ struct SGXLibtorrentSession {
 
 static void apply_file_selection(lt::add_torrent_params &params, const int32_t *selected, int32_t count)
 {
-    if (selected == nullptr || count <= 0) return;
+    if (count < 0) return;
+    if (selected == nullptr) {
+        if (count == 0) params.flags |= lt::torrent_flags::default_dont_download;
+        return;
+    }
+    if (count == 0) {
+        params.flags |= lt::torrent_flags::default_dont_download;
+        return;
+    }
+    params.flags |= lt::torrent_flags::default_dont_download;
     int32_t max_index = 0;
     for (int32_t i = 0; i < count; ++i) max_index = std::max(max_index, selected[i]);
     params.file_priorities.assign(static_cast<std::size_t>(max_index + 1), lt::dont_download);
@@ -167,7 +177,7 @@ void sgx_libtorrent_set_speed_limits(SGXLibtorrentSession *session, int32_t down
 void sgx_libtorrent_set_file_selection(SGXLibtorrentSession *session, int32_t handle_id, const int32_t *selected_file_indexes, int32_t selected_file_count)
 {
     auto *handle = session ? session->find(handle_id) : nullptr;
-    if (handle == nullptr || selected_file_indexes == nullptr) return;
+    if (handle == nullptr) return;
     auto info = handle->torrent_file();
     if (!info) return;
     int file_count = info->num_files();
@@ -185,6 +195,11 @@ int32_t sgx_libtorrent_get_status(SGXLibtorrentSession *session, int32_t handle_
     if (handle == nullptr || status == nullptr) return 0;
     auto native = handle->status();
     status->state = static_cast<int32_t>(native.state);
+    status->is_finished = native.is_finished ? 1 : 0;
+    status->is_seeding = native.is_seeding ? 1 : 0;
+    status->is_paused = (handle->flags() & lt::torrent_flags::paused) ? 1 : 0;
+    status->has_metadata = native.state != lt::torrent_status::downloading_metadata ? 1 : 0;
+    status->has_error = native.errc ? 1 : 0;
     status->total_wanted = native.total_wanted;
     status->total_wanted_done = native.total_wanted_done;
     status->download_rate = native.download_rate;

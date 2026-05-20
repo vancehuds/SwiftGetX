@@ -26,6 +26,10 @@ case "$CONFIGURATION" in
         ;;
 esac
 
+if [[ "${SWIFTGETX_DISABLE_LIBTORRENT:-}" != "1" ]]; then
+    Scripts/build-libtorrent.sh
+fi
+
 if [[ "$CONFIGURATION" == "release" ]]; then
     swift build --configuration release
     BUILD_DIR="$(swift build --configuration release --show-bin-path)"

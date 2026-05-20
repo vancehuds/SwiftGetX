@@ -11,6 +11,11 @@ typedef struct SGXLibtorrentSession SGXLibtorrentSession;
 
 typedef struct SGXTorrentStatus {
     int32_t state;
+    int32_t is_finished;
+    int32_t is_seeding;
+    int32_t is_paused;
+    int32_t has_metadata;
+    int32_t has_error;
     int64_t total_wanted;
     int64_t total_wanted_done;
     int64_t download_rate;

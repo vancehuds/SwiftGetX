@@ -1,27 +1,26 @@
 # Torrent Engine Boundary
 
-`TorrentDownloadEngine` is wired into the same coordinator and UI as HTTP tasks. The libtorrent binding is isolated behind `TorrentEngineAdapter`, with a placeholder fallback for builds that do not enable native dependencies.
+`TorrentDownloadEngine` is wired into the same coordinator and UI as HTTP tasks. The libtorrent binding is isolated behind `TorrentEngineAdapter` and is enabled by default; `SWIFTGETX_DISABLE_LIBTORRENT=1` keeps a lightweight placeholder fallback available for troubleshooting.
 
 ## Native Build
 
-The upstream libtorrent source is vendored from `arvidn/libtorrent` at `Vendor/libtorrent` and pinned in `Vendor/libtorrent.version`.
+The upstream libtorrent source is fetched into `Vendor/libtorrent` from `arvidn/libtorrent` and pinned in `Vendor/libtorrent.version`.
 
 The C wrapper surface lives in `Sources/CSwiftGetXLibtorrent`. Build libtorrent and the wrapper with:
 
 ```sh
 brew install cmake boost openssl
-git -C Vendor/libtorrent submodule update --init deps/try_signal deps/asio-gnutls
 Scripts/build-libtorrent.sh
 ```
 
-Then enable the native Swift adapter:
+Then build the app normally:
 
 ```sh
-SWIFTGETX_ENABLE_LIBTORRENT=1 swift build
-SWIFTGETX_ENABLE_LIBTORRENT=1 swift test
+swift build
+swift test
 ```
 
-When the native flag is set, `Package.swift` compiles `Sources/CSwiftGetXLibtorrent/src/CSwiftGetXLibtorrent.cpp`, links the CMake-built `libtorrent-rasterbar.a`, and makes `canImport(CSwiftGetXLibtorrent)` true for `Sources/SwiftGetX/Services/LibtorrentAdapter.swift`.
+By default, `Package.swift` compiles `Sources/CSwiftGetXLibtorrent/src/CSwiftGetXLibtorrent.cpp`, links the CMake-built `libtorrent-rasterbar.a`, and makes `canImport(CSwiftGetXLibtorrent)` true for `Sources/SwiftGetX/Services/LibtorrentAdapter.swift`.
 
 ## Adapter Contract
 
@@ -50,10 +49,11 @@ The adapter should translate libtorrent state into `DownloadSnapshot` so SwiftUI
 - Selected-file priorities.
 - Recheck and completion verification.
 - Download/upload speed limits.
+- Pause/resume without adding duplicate handles.
+- Stop seeding when the configured ratio is reached.
 
 ## Remaining Torrent Hardening
 
 - Persist libtorrent resume data for faster process-restart recovery.
 - Add real-world magnet and `.torrent` integration tests with controlled fixtures.
-- Stop seeding when the configured ratio is reached.
 - Package OpenSSL/libtorrent artifacts in a signed, deployment-target-aligned app bundle.

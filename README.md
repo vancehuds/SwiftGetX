@@ -1,6 +1,6 @@
 # SwiftGetX
 
-SwiftGetX 是一个面向 macOS 14+ 的原生下载管理器原型，使用 SwiftUI、SwiftData 和 Swift Package Manager 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及可选的 BT/libtorrent 下载能力。
+SwiftGetX 是一个面向 macOS 14+ 的原生下载管理器原型，使用 SwiftUI、SwiftData 和 Swift Package Manager 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及 BT/libtorrent 下载能力。
 
 > 当前仓库更接近可运行的工程原型，而不是已经完成签名、沙盒、Safari 扩展和 notarization 的发布包。生产发布仍需要 Apple Developer ID、Xcode app/extension target，以及部署目标匹配的 OpenSSL/libtorrent 打包方案。
 
@@ -11,7 +11,7 @@ SwiftGetX 是一个面向 macOS 14+ 的原生下载管理器原型，使用 Swif
 - HTTP/HTTPS 下载引擎支持元数据探测、`.part` 临时文件、Range 断点续传、多分段下载、聚合进度、暂停/恢复、重试、限速和重复文件保护。
 - 剪贴板链接检测，并在应用内显示液态玻璃风格的下载建议条。
 - 统一 `DownloadCoordinator` 协调 HTTP 和 BT 下载生命周期。
-- BT 下载通过 `TorrentEngineAdapter` 隔离实现，默认构建使用占位适配器；设置 `SWIFTGETX_ENABLE_LIBTORRENT=1` 后可启用 native libtorrent 适配器。
+- BT 下载通过 `TorrentEngineAdapter` 隔离实现，默认构建链接 native libtorrent 适配器；设置 `SWIFTGETX_DISABLE_LIBTORRENT=1` 可启用轻量 fallback 构建。
 - Chrome Native Messaging 交接：浏览器扩展把下载请求发送给 `SwiftGetXNativeHost`，native host 再打开 `swiftgetx://download?...`。
 - Safari 和 Chrome 扩展资源已放入 app resources，便于后续接入正式扩展 target。
 - 单元和集成测试覆盖链接解析、Native Messaging framing、文件名冲突、分段计划、HTTP Range 下载和 BT 文件列表持久化。
@@ -23,7 +23,7 @@ Sources/
   SwiftGetX/                 主 macOS app：UI、服务、模型、资源
   SwiftGetXCore/             浏览器消息、deep link、Native Messaging 共享类型
   SwiftGetXNativeHost/       Chrome Native Messaging host 可执行文件
-  CSwiftGetXLibtorrent/      可选 libtorrent C/C++ wrapper
+  CSwiftGetXLibtorrent/      libtorrent C/C++ wrapper
 Tests/SwiftGetXTests/        Swift Testing 测试
 Docs/                        浏览器集成、BT 引擎和完成状态说明
 Scripts/                     native host 安装、libtorrent 构建、app/DMG 打包脚本
@@ -37,14 +37,14 @@ Vendor/libtorrent/           vendored arvidn/libtorrent 源码
 - 下载编排和运行时服务在 `Sources/SwiftGetX/Services`。
 - 持久化模型在 `Sources/SwiftGetX/Models`。
 - 浏览器和 native host 共享协议在 `Sources/SwiftGetXCore`。
-- 可选 BT native bridge 在 `Sources/CSwiftGetXLibtorrent` 和 `Native/CSwiftGetXLibtorrent`。
+- BT native bridge 在 `Sources/CSwiftGetXLibtorrent` 和 `Native/CSwiftGetXLibtorrent`。
 
 ## 环境要求
 
 - macOS 14 或更高版本。
 - Swift 6 toolchain。
 - Xcode Command Line Tools。
-- 可选 BT native 构建需要 Homebrew、CMake、Boost 和 OpenSSL。
+- BT native 构建需要 Homebrew、CMake、Boost 和 OpenSSL。
 
 安装基础工具：
 
@@ -52,7 +52,7 @@ Vendor/libtorrent/           vendored arvidn/libtorrent 源码
 xcode-select --install
 ```
 
-安装可选 BT native 依赖：
+安装 BT native 依赖：
 
 ```sh
 brew install cmake boost openssl
@@ -78,31 +78,36 @@ swift run SwiftGetX
 swift test
 ```
 
-默认 SwiftPM 构建不会链接 libtorrent，因此干净机器上也可以直接构建和测试。
+默认 SwiftPM 构建会链接 libtorrent。首次构建前运行 `Scripts/build-libtorrent.sh` 以获取固定版本源码并生成静态库。
 
-## 可选：启用 libtorrent
+## libtorrent 构建
 
-仓库 vendored 了 `arvidn/libtorrent` v2.0.12，并通过 `CSwiftGetXLibtorrent` 提供 Swift 可调用的 native bridge。首次启用前需要初始化 libtorrent 依赖并构建静态库：
+仓库通过 `Vendor/libtorrent.version` 固定 `arvidn/libtorrent` v2.0.12，并通过 `CSwiftGetXLibtorrent` 提供 Swift 可调用的 native bridge。首次构建前运行：
 
 ```sh
-git -C Vendor/libtorrent submodule update --init deps/try_signal deps/asio-gnutls
 Scripts/build-libtorrent.sh
 ```
 
-启用 native adapter 后构建和测试：
+脚本会按固定 tag/commit 拉取或校验 `Vendor/libtorrent`，初始化所需子模块，并构建静态库。然后正常构建和测试：
 
 ```sh
-SWIFTGETX_ENABLE_LIBTORRENT=1 swift build
-SWIFTGETX_ENABLE_LIBTORRENT=1 swift test
+swift build
+swift test
 ```
 
 `Package.swift` 默认使用 `/opt/homebrew` 查找 OpenSSL 和 Boost。如果 Homebrew 安装在其他位置，可以设置：
 
 ```sh
-SWIFTGETX_HOMEBREW_PREFIX=/path/to/homebrew SWIFTGETX_ENABLE_LIBTORRENT=1 swift build
+SWIFTGETX_HOMEBREW_PREFIX=/path/to/homebrew swift build
 ```
 
-当前 native BT 能力包括 magnet 和 `.torrent` 输入、DHT、PEX、tracker 更新、元数据获取、文件列表上报、文件选择优先级、recheck，以及上传/下载限速。仍待增强的生产能力包括 resume data 持久化、受控真实种子测试、做种比例策略和 release 签名打包。
+当前 native BT 能力包括 magnet 和 `.torrent` 输入、DHT、PEX、tracker 更新、元数据获取、文件列表上报、文件选择优先级、暂停/恢复、recheck、上传/下载限速，以及达到设置分享率后停止做种。仍待增强的生产能力包括 resume data 持久化、受控真实种子测试和 release 签名打包。
+
+无原生依赖的排障构建可以显式禁用 libtorrent：
+
+```sh
+SWIFTGETX_DISABLE_LIBTORRENT=1 swift build
+```
 
 ## 浏览器集成
 
@@ -165,17 +170,11 @@ Scripts/package-dmg.sh release dist --dmg
 swift test
 ```
 
-启用 native BT 后的测试：
-
-```sh
-SWIFTGETX_ENABLE_LIBTORRENT=1 swift test
-```
-
 测试使用 Swift Testing 的 `@Suite`、`@Test` 和 `#expect`。添加测试时优先使用临时目录和本地测试服务器，避免依赖外部网络。
 
 ## 常见问题
 
-### `SWIFTGETX_ENABLE_LIBTORRENT=1` 构建失败
+### libtorrent 构建失败
 
 如果提示找不到 `.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a`，先运行：
 
@@ -183,11 +182,7 @@ SWIFTGETX_ENABLE_LIBTORRENT=1 swift test
 Scripts/build-libtorrent.sh
 ```
 
-如果提示 libtorrent submodules 缺失，先运行：
-
-```sh
-git -C Vendor/libtorrent submodule update --init deps/try_signal deps/asio-gnutls
-```
+如果只想排查非 BT 功能，可以临时设置 `SWIFTGETX_DISABLE_LIBTORRENT=1 swift build`。
 
 ### OpenSSL 出现 macOS deployment target linker warning
 
@@ -210,7 +205,7 @@ Homebrew 的 OpenSSL bottle 可能会在 macOS 14 debug 构建时输出 deployme
 - 保持现有边界：UI 放在 `UI`，编排和系统服务放在 `Services`，持久化模型放在 `Models`，共享消息代码放在 `SwiftGetXCore`。
 - 使用 4 空格缩进和惯用 Swift 命名。
 - 涉及 UI、SwiftData 或 observable 状态协调时使用 `@MainActor`。
-- 提交前至少运行 `swift test`；如果改动 BT adapter 或 C wrapper，也运行 `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test`。
+- 提交前至少运行 `swift test`；如果改动 BT adapter 或 C wrapper，也运行 `Scripts/build-libtorrent.sh` 后再测试默认构建。
 - 不要提交 `.build`、`DerivedData`、`dist`、签名身份、notarization profile、浏览器扩展私有 ID 或本地下载路径。
 
 ## 相关文档
