@@ -203,17 +203,36 @@ Next step:
 
 ## Task 6: HTTP Metadata and Content-Disposition
 
-Status: [ ]
+Status: [x]
 
 Parse `Content-Disposition` (`filename*` and `filename`), MIME type, final URL, redirect/source metadata, and server support details. Use this metadata in task creation and tests.
 
 Work performed:
 
+- Added `HTTPResponseMetadata` and `HTTPRedirectMetadata` for persisted HTTP response details including original/final/source-page URLs, MIME type, Content-Disposition, server, resumability, content length, validators, and redirect hops with URL redaction.
+- Added a Content-Disposition parser that prefers RFC-style `filename*` over `filename`, percent-decodes UTF-8/Latin-1 values, handles quoted semicolons/escapes, strips path components, and sanitizes unsafe/control/bidi filename characters.
+- Extended `DownloadTask`, `DownloadRequest`, and `DownloadSnapshot` so HTTP metadata flows from task creation through active engine snapshots into persisted task records.
+- Updated HTTP probing and GET paths to record HEAD/range/GET metadata, final URL, redirects, content type, server, validators, resumability, and Content-Disposition filename.
+- Updated fresh HTTP downloads to rename the task/save path to the server-suggested Content-Disposition filename before writing temp files, while leaving partial/resumed downloads on their existing path.
+- Updated source display fallback to use redacted final URL metadata when browser context is unavailable.
+- Reused `SourceParser.sanitizeFilename` for suggested filenames and extended it to remove control characters.
+- Added local HTTP fixture coverage for Content-Disposition filename precedence, final saved filename, MIME/server/content length/validator metadata, redirect metadata, parser safety, and metadata JSON persistence/redaction.
+
 Verification evidence:
+
+- `swift test --filter HTTPDownloadEngine --filter TorrentFileTests` passed with 27 tests across 2 suites.
+- `swift test` passed with 110 tests across 12 suites.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- The new SwiftData field is an optional JSON field, which should be lightweight for app-side schema evolution, but an installed-user migration was not exercised in this task.
+- Server Content-Disposition filenames are used for fresh downloads and can supersede the initial URL/browser-suggested filename. Partial downloads keep their existing path to avoid orphaning temp data.
+- Redirect capture records the URLSession-observed redirect hops for the current probe/download request; it is not yet exposed in a dedicated inspector UI beyond persisted metadata.
+
 Next step:
+
+- Large Check 2: Browser and HTTP Metadata.
 
 ## Large Check 2: Browser and HTTP Metadata
 

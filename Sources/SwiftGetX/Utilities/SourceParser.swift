@@ -55,6 +55,7 @@ enum SourceParser {
 
     static func sanitizeFilename(_ filename: String) -> String {
         let illegal = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+            .union(.controlCharacters)
         return filename
             .components(separatedBy: illegal)
             .joined(separator: "-")

@@ -33,6 +33,7 @@ final class DownloadTask {
     var torrentFilesJSON: String?
     var connectionSummary: String?
     var browserContextJSON: String?
+    var httpResponseMetadataJSON: String?
     var logEntries: [String]
 
     init(
@@ -65,6 +66,7 @@ final class DownloadTask {
         torrentFilesJSON: String? = nil,
         connectionSummary: String? = nil,
         browserContext: BrowserDownloadContext? = nil,
+        httpResponseMetadata: HTTPResponseMetadata? = nil,
         logEntries: [String] = []
     ) {
         self.id = id
@@ -96,6 +98,7 @@ final class DownloadTask {
         self.torrentFilesJSON = torrentFilesJSON
         self.connectionSummary = connectionSummary
         self.browserContextJSON = Self.encode(browserContext)
+        self.httpResponseMetadataJSON = Self.encode(httpResponseMetadata)
         self.logEntries = logEntries
     }
 
@@ -124,6 +127,7 @@ final class DownloadTask {
 
     var displaySource: String {
         browserContext?.redactedPrimaryURL
+            ?? httpResponseMetadata?.finalURL
             ?? BrowserDownloadContext.redactedURLString(source)
             ?? source
     }
@@ -211,6 +215,11 @@ final class DownloadTask {
     var browserContext: BrowserDownloadContext? {
         get { Self.decode(BrowserDownloadContext.self, from: browserContextJSON) }
         set { browserContextJSON = Self.encode(newValue) }
+    }
+
+    var httpResponseMetadata: HTTPResponseMetadata? {
+        get { Self.decode(HTTPResponseMetadata.self, from: httpResponseMetadataJSON) }
+        set { httpResponseMetadataJSON = Self.encode(newValue) }
     }
 
     private static func decode<Value: Decodable>(_ type: Value.Type, from json: String?) -> Value? {
@@ -315,6 +324,7 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
 struct DownloadSnapshot: Sendable {
     let taskID: UUID
     let status: DownloadStatus
+    let name: String?
     let savePath: String?
     let resolvedTorrentFilePath: String?
     let torrentMetadataStatus: TorrentMetadataStatus?
@@ -334,11 +344,13 @@ struct DownloadSnapshot: Sendable {
     let torrentRuntimeOptions: TorrentRuntimeOptions?
     let torrentHealth: TorrentHealthInfo?
     let connectionSummary: String?
+    let httpResponseMetadata: HTTPResponseMetadata?
     let retryCount: Int?
 
     init(
         taskID: UUID,
         status: DownloadStatus,
+        name: String? = nil,
         savePath: String? = nil,
         totalBytes: Int64,
         downloadedBytes: Int64,
@@ -350,6 +362,7 @@ struct DownloadSnapshot: Sendable {
         lastModified: String?,
         torrentFiles: [TorrentFile] = [],
         connectionSummary: String? = nil,
+        httpResponseMetadata: HTTPResponseMetadata? = nil,
         retryCount: Int? = nil,
         resolvedTorrentFilePath: String? = nil,
         torrentMetadataStatus: TorrentMetadataStatus? = nil,
@@ -362,6 +375,7 @@ struct DownloadSnapshot: Sendable {
     ) {
         self.taskID = taskID
         self.status = status
+        self.name = name
         self.savePath = savePath
         self.resolvedTorrentFilePath = resolvedTorrentFilePath
         self.torrentMetadataStatus = torrentMetadataStatus
@@ -381,6 +395,7 @@ struct DownloadSnapshot: Sendable {
         self.torrentRuntimeOptions = torrentRuntimeOptions
         self.torrentHealth = torrentHealth
         self.connectionSummary = connectionSummary
+        self.httpResponseMetadata = httpResponseMetadata
         self.retryCount = retryCount
     }
 }

@@ -88,7 +88,8 @@ final class HTTPDownloadEngine: DownloadEngine {
                 lastModified: request.lastModified,
                 connectionSummary: request.supportsResume
                     ? L10n.string("http_connection_resume_only")
-                    : L10n.string("http_connection_no_resume_only")
+                    : L10n.string("http_connection_no_resume_only"),
+                httpResponseMetadata: request.httpResponseMetadata
             )
         )
     }
@@ -154,15 +155,40 @@ private actor HTTPDownloadRunState {
     }
 }
 
+private final class HTTPRedirectRecorder: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values = [HTTPRedirectMetadata]()
+
+    var redirects: [HTTPRedirectMetadata] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        let redirect = HTTPRedirectMetadata(
+            statusCode: response.statusCode,
+            fromURL: response.url?.absoluteString,
+            toURL: request.url?.absoluteString
+        )
+        lock.lock()
+        values.append(redirect)
+        lock.unlock()
+        completionHandler(request)
+    }
+}
+
 private struct HTTPDownloadWorker: Sendable {
     private static let bufferSize = 64 * 1024
     private static let minimumSplitSize: Int64 = 1024 * 1024
     private static let session: URLSession = {
-        let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
-        return URLSession(configuration: configuration)
+        URLSession(configuration: sessionConfiguration())
     }()
 
     let segmentCount: Int
@@ -170,6 +196,18 @@ private struct HTTPDownloadWorker: Sendable {
     let retryLimit: Int
     let runState: HTTPDownloadRunState
     let onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
+
+    private static func sessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
+        return configuration
+    }
+
+    private static func redirectRecordingSession(_ recorder: HTTPRedirectRecorder) -> URLSession {
+        URLSession(configuration: sessionConfiguration(), delegate: recorder, delegateQueue: nil)
+    }
 
     func start(_ request: DownloadRequest, url: URL) async {
         var lastError: Error?
@@ -214,14 +252,22 @@ private struct HTTPDownloadWorker: Sendable {
     }
 
     private func download(url: URL, request: DownloadRequest) async throws {
-        let destination = URL(fileURLWithPath: request.savePath)
-        let layout = HTTPTemporaryLayout(savePath: request.savePath)
+        var destination = URL(fileURLWithPath: request.savePath)
+        var layout = HTTPTemporaryLayout(savePath: request.savePath)
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
 
         var metadata = await probe(url: url, request: request)
+        let prepared = prepareInitialDestination(
+            request: request,
+            metadata: metadata,
+            destination: destination,
+            layout: layout
+        )
+        destination = prepared.destination
+        layout = prepared.layout
 
         let singlePartBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
         let segmentedBytes = layout.segmentProgress(maxSegments: segmentScanLimit)
@@ -301,6 +347,45 @@ private struct HTTPDownloadWorker: Sendable {
             layout: layout,
             destination: destination
         )
+    }
+
+    private func prepareInitialDestination(
+        request: DownloadRequest,
+        metadata: HTTPMetadata,
+        destination: URL,
+        layout: HTTPTemporaryLayout
+    ) -> (destination: URL, layout: HTTPTemporaryLayout) {
+        guard request.downloadedBytes == 0,
+              layout.temporaryProgress(maxSegments: segmentScanLimit) == 0,
+              let filename = metadata.responseMetadata?.suggestedFilename,
+              !filename.isEmpty,
+              filename != destination.lastPathComponent
+        else {
+            return (destination, layout)
+        }
+
+        let updatedDestination = destination
+            .deletingLastPathComponent()
+            .appendingPathComponent(filename)
+        emit(
+            DownloadSnapshot(
+                taskID: request.id,
+                status: .running,
+                name: filename,
+                savePath: updatedDestination.path,
+                totalBytes: metadata.contentLength,
+                downloadedBytes: 0,
+                speedBytesPerSecond: 0,
+                etaSeconds: nil,
+                errorMessage: nil,
+                supportsResume: metadata.supportsResume,
+                eTag: metadata.eTag,
+                lastModified: metadata.lastModified,
+                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
+                httpResponseMetadata: metadata.responseMetadata
+            )
+        )
+        return (updatedDestination, HTTPTemporaryLayout(savePath: updatedDestination.path))
     }
 
     private func downloadSegmentedWithSingleStreamFallback(
@@ -395,7 +480,8 @@ private struct HTTPDownloadWorker: Sendable {
                 supportsResume: metadata.supportsResume,
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
-                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume)
+                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
+                httpResponseMetadata: metadata.responseMetadata
             )
         )
 
@@ -410,7 +496,10 @@ private struct HTTPDownloadWorker: Sendable {
             applyIfRange(to: &urlRequest, metadata: metadata, request: request)
         }
 
-        let (stream, response) = try await Self.session.bytes(for: urlRequest)
+        let redirectRecorder = HTTPRedirectRecorder()
+        let session = Self.redirectRecordingSession(redirectRecorder)
+        defer { session.finishTasksAndInvalidate() }
+        let (stream, response) = try await session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw HTTPDownloadError.invalidResponse(L10n.string("error_invalid_server_response"))
         }
@@ -426,14 +515,22 @@ private struct HTTPDownloadWorker: Sendable {
                 expectedETag: request.eTag ?? metadata.eTag,
                 expectedLastModified: request.lastModified ?? metadata.lastModified
             )
-            metadata = metadata.merging(response: httpResponse, resumedFrom: existingBytes)
+            metadata = metadata.merging(
+                response: httpResponse,
+                resumedFrom: existingBytes,
+                redirects: redirectRecorder.redirects
+            )
         case 200...299:
             if shouldResume {
                 try Data().write(to: layout.singlePartURL)
                 appendExistingBytes = false
                 existingBytes = 0
             }
-            metadata = metadata.merging(response: httpResponse, resumedFrom: 0)
+            metadata = metadata.merging(
+                response: httpResponse,
+                resumedFrom: 0,
+                redirects: redirectRecorder.redirects
+            )
         case 416 where shouldResume:
             if let totalBytes = Self.unsatisfiedRangeTotal(from: httpResponse),
                totalBytes > 0,
@@ -451,7 +548,11 @@ private struct HTTPDownloadWorker: Sendable {
             }
 
             try Data().write(to: layout.singlePartURL)
-            var restartMetadata = metadata.merging(response: httpResponse, resumedFrom: 0)
+            var restartMetadata = metadata.merging(
+                response: httpResponse,
+                resumedFrom: 0,
+                redirects: redirectRecorder.redirects
+            )
             restartMetadata.supportsResume = false
             try await downloadSingle(
                 url: url,
@@ -516,7 +617,8 @@ private struct HTTPDownloadWorker: Sendable {
                     supportsResume: metadata.supportsResume,
                     eTag: metadata.eTag,
                     lastModified: metadata.lastModified,
-                    connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume)
+                    connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
+                    httpResponseMetadata: metadata.responseMetadata
                 )
             )
 
@@ -570,7 +672,8 @@ private struct HTTPDownloadWorker: Sendable {
                 supportsResume: metadata.supportsResume,
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
-                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume)
+                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
+                httpResponseMetadata: metadata.responseMetadata
             )
         )
     }
@@ -603,7 +706,8 @@ private struct HTTPDownloadWorker: Sendable {
                 supportsResume: true,
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
-                connectionSummary: summary
+                connectionSummary: summary,
+                httpResponseMetadata: metadata.responseMetadata
             )
         )
 
@@ -657,7 +761,8 @@ private struct HTTPDownloadWorker: Sendable {
                 supportsResume: true,
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
-                connectionSummary: summary
+                connectionSummary: summary,
+                httpResponseMetadata: metadata.responseMetadata
             )
         )
 
@@ -697,7 +802,8 @@ private struct HTTPDownloadWorker: Sendable {
                 supportsResume: true,
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
-                connectionSummary: summary
+                connectionSummary: summary,
+                httpResponseMetadata: metadata.responseMetadata
             )
         )
     }
@@ -731,7 +837,8 @@ private struct HTTPDownloadWorker: Sendable {
                     supportsResume: true,
                     eTag: metadata.eTag,
                     lastModified: metadata.lastModified,
-                    connectionSummary: summary
+                    connectionSummary: summary,
+                    httpResponseMetadata: metadata.responseMetadata
                 )
             )
         }
@@ -916,7 +1023,10 @@ private struct HTTPDownloadWorker: Sendable {
         var metadata = HTTPMetadata.unknown
 
         do {
-            let (_, response) = try await Self.session.data(for: headRequest)
+            let redirectRecorder = HTTPRedirectRecorder()
+            let session = Self.redirectRecordingSession(redirectRecorder)
+            defer { session.finishTasksAndInvalidate() }
+            let (_, response) = try await session.data(for: headRequest)
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode)
             else {
@@ -933,6 +1043,10 @@ private struct HTTPDownloadWorker: Sendable {
                 supportsResume: acceptRanges,
                 eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
                 lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+            ).merging(
+                response: httpResponse,
+                resumedFrom: 0,
+                redirects: redirectRecorder.redirects
             )
         } catch {
             metadata = .unknown
@@ -958,7 +1072,10 @@ private struct HTTPDownloadWorker: Sendable {
         urlRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 
         do {
-            let (_, response) = try await Self.session.bytes(for: urlRequest)
+            let redirectRecorder = HTTPRedirectRecorder()
+            let session = Self.redirectRecordingSession(redirectRecorder)
+            defer { session.finishTasksAndInvalidate() }
+            let (_, response) = try await session.bytes(for: urlRequest)
             guard let httpResponse = response as? HTTPURLResponse else {
                 return .unknown
             }
@@ -978,6 +1095,10 @@ private struct HTTPDownloadWorker: Sendable {
                     supportsResume: true,
                     eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
                     lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+                ).merging(
+                    response: httpResponse,
+                    resumedFrom: 0,
+                    redirects: redirectRecorder.redirects
                 )
             case 200...299:
                 let responseLength = httpResponse.expectedContentLength > 0
@@ -988,6 +1109,10 @@ private struct HTTPDownloadWorker: Sendable {
                     supportsResume: false,
                     eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
                     lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+                ).merging(
+                    response: httpResponse,
+                    resumedFrom: 0,
+                    redirects: redirectRecorder.redirects
                 )
             default:
                 return .unknown
@@ -1140,6 +1265,7 @@ private struct HTTPDownloadWorker: Sendable {
                 supportsResume: request.supportsResume,
                 eTag: request.eTag,
                 lastModified: request.lastModified,
+                httpResponseMetadata: request.httpResponseMetadata,
                 retryCount: attempt
             )
         )
@@ -1220,7 +1346,8 @@ private struct HTTPDownloadWorker: Sendable {
             errorMessage: nil,
             supportsResume: request.supportsResume,
             eTag: request.eTag,
-            lastModified: request.lastModified
+            lastModified: request.lastModified,
+            httpResponseMetadata: request.httpResponseMetadata
         )
     }
 
@@ -1238,7 +1365,8 @@ private struct HTTPDownloadWorker: Sendable {
             errorMessage: message,
             supportsResume: request.supportsResume,
             eTag: request.eTag,
-            lastModified: request.lastModified
+            lastModified: request.lastModified,
+            httpResponseMetadata: request.httpResponseMetadata
         )
     }
 }
@@ -1398,29 +1526,47 @@ struct HTTPMetadata: Sendable {
     var supportsResume: Bool
     var eTag: String?
     var lastModified: String?
+    var responseMetadata: HTTPResponseMetadata? = nil
 
     static let unknown = HTTPMetadata(
         contentLength: 0,
         supportsResume: false,
         eTag: nil,
-        lastModified: nil
+        lastModified: nil,
+        responseMetadata: nil
     )
 
     func filled(from request: DownloadRequest) -> HTTPMetadata {
-        HTTPMetadata(
+        let requestMetadata = request.httpResponseMetadata
+            ?? HTTPResponseMetadata.fromCreationContext(
+                source: request.source,
+                browserContext: request.browserContext,
+                totalBytes: request.totalBytes,
+                supportsResume: request.supportsResume,
+                eTag: request.eTag,
+                lastModified: request.lastModified
+            )
+        return HTTPMetadata(
             contentLength: contentLength > 0 ? contentLength : request.totalBytes,
             supportsResume: supportsResume || request.supportsResume,
             eTag: eTag ?? request.eTag,
-            lastModified: lastModified ?? request.lastModified
+            lastModified: lastModified ?? request.lastModified,
+            responseMetadata: responseMetadata?.merged(over: requestMetadata) ?? requestMetadata
         )
     }
 
     fileprivate func filled(from manifest: HTTPDownloadManifest) -> HTTPMetadata {
-        HTTPMetadata(
+        let manifestMetadata = HTTPResponseMetadata(
+            contentLength: manifest.totalBytes,
+            eTag: manifest.eTag,
+            lastModified: manifest.lastModified
+        )
+        return HTTPMetadata(
             contentLength: contentLength > 0 ? contentLength : manifest.totalBytes,
             supportsResume: true,
             eTag: eTag ?? manifest.eTag,
-            lastModified: lastModified ?? manifest.lastModified
+            lastModified: lastModified ?? manifest.lastModified,
+            responseMetadata: responseMetadata?.merged(over: manifestMetadata) ?? manifestMetadata
         )
     }
 
@@ -1429,24 +1575,56 @@ struct HTTPMetadata: Sendable {
             contentLength: contentLength > 0 ? contentLength : fallback.contentLength,
             supportsResume: supportsResume || fallback.supportsResume,
             eTag: eTag ?? fallback.eTag,
-            lastModified: lastModified ?? fallback.lastModified
+            lastModified: lastModified ?? fallback.lastModified,
+            responseMetadata: responseMetadata?.merged(over: fallback.responseMetadata) ?? fallback.responseMetadata
         )
     }
 
-    func merging(response: HTTPURLResponse, resumedFrom offset: Int64) -> HTTPMetadata {
+    func merging(
+        response: HTTPURLResponse,
+        resumedFrom offset: Int64,
+        redirects: [HTTPRedirectMetadata] = []
+    ) -> HTTPMetadata {
         let responseLength = response.expectedContentLength > 0 ? response.expectedContentLength : 0
         let contentRange = response
             .value(forHTTPHeaderField: "Content-Range")
             .flatMap(HTTPContentRange.init)
         let totalLength = contentRange?.total
             ?? (response.statusCode == 206 ? offset + responseLength : max(contentLength, responseLength))
+        let responseETag = response.value(forHTTPHeaderField: "ETag") ?? eTag
+        let responseLastModified = response.value(forHTTPHeaderField: "Last-Modified") ?? lastModified
+        let canResume = supportsResume || response.statusCode == 206
+        let serverMetadata = HTTPResponseMetadata(
+            originalURL: responseMetadata?.originalURL,
+            finalURL: response.url?.absoluteString ?? responseMetadata?.finalURL,
+            sourcePageURL: responseMetadata?.sourcePageURL,
+            mimeType: response.mimeType ?? contentType(from: response),
+            contentDisposition: response.value(forHTTPHeaderField: "Content-Disposition"),
+            suggestedFilename: HTTPContentDisposition.suggestedFilename(
+                from: response.value(forHTTPHeaderField: "Content-Disposition")
+            ) ?? responseMetadata?.suggestedFilename,
+            server: response.value(forHTTPHeaderField: "Server"),
+            supportsResume: canResume,
+            contentLength: totalLength > 0 ? totalLength : nil,
+            eTag: responseETag,
+            lastModified: responseLastModified,
+            redirects: redirects
+        )
 
         return HTTPMetadata(
             contentLength: totalLength,
-            supportsResume: supportsResume || response.statusCode == 206,
-            eTag: response.value(forHTTPHeaderField: "ETag") ?? eTag,
-            lastModified: response.value(forHTTPHeaderField: "Last-Modified") ?? lastModified
+            supportsResume: canResume,
+            eTag: responseETag,
+            lastModified: responseLastModified,
+            responseMetadata: serverMetadata.merged(over: responseMetadata)
         )
+    }
+
+    private func contentType(from response: HTTPURLResponse) -> String? {
+        response.value(forHTTPHeaderField: "Content-Type")?
+            .split(separator: ";", maxSplits: 1)
+            .first
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 }
 

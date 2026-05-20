@@ -616,6 +616,91 @@ struct HTTPDownloadEngineTests {
         })
     }
 
+    @Test("uses Content-Disposition filename and records HTTP metadata")
+    func usesContentDispositionFilenameAndRecordsHTTPMetadata() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .contentDispositionMetadata)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("download")
+        let finalDestination = directory.appendingPathComponent("report final.zip")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(source: server.url, destination: destination))
+
+        let downloaded = try Data(contentsOf: finalDestination)
+        let completed = try #require(recorder.snapshots.last(where: { $0.status == .completed }))
+        let metadata = try #require(completed.httpResponseMetadata)
+
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+        #expect(completed.savePath == finalDestination.path)
+        #expect(recorder.snapshots.contains { $0.name == "report final.zip" })
+        #expect(metadata.suggestedFilename == "report final.zip")
+        #expect(metadata.mimeType == "application/zip")
+        #expect(metadata.contentDisposition == RangeTestServer.contentDisposition)
+        #expect(metadata.server == "SwiftGetXTest")
+        #expect(metadata.finalURL == server.url.absoluteString)
+        #expect(metadata.contentLength == Int64(payload.count))
+        #expect(metadata.supportsResume == true)
+        #expect(metadata.eTag == "\"test\"")
+        #expect(metadata.lastModified == RangeTestServer.lastModified)
+    }
+
+    @Test("records final URL and redirect metadata")
+    func recordsFinalURLAndRedirectMetadata() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .redirectToMetadata)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("download.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(source: server.redirectURL, destination: destination))
+
+        let completed = try #require(recorder.snapshots.last(where: { $0.status == .completed }))
+        let metadata = try #require(completed.httpResponseMetadata)
+
+        #expect(try Data(contentsOf: directory.appendingPathComponent("report final.zip")) == payload)
+        #expect(metadata.originalURL == server.redirectURL.absoluteString)
+        #expect(metadata.finalURL == server.url.absoluteString)
+        #expect(metadata.wasRedirected)
+        #expect(metadata.redirects.contains {
+            $0.statusCode == 302
+                && $0.fromURL == server.redirectURL.absoluteString
+                && $0.toURL == server.url.absoluteString
+        })
+    }
+
+    @Test("parses Content-Disposition filenames safely")
+    func parsesContentDispositionFilenamesSafely() {
+        #expect(HTTPContentDisposition.suggestedFilename(
+            from: #"attachment; filename="fallback.zip"; filename*=UTF-8''server%20name.zip"#
+        ) == "server name.zip")
+        #expect(HTTPContentDisposition.suggestedFilename(
+            from: #"attachment; filename="../unsafe/name.zip""#
+        ) == "name.zip")
+
+        let controlFilename = "attachment; filename=\"bad\(String(UnicodeScalar(1)))name.zip\""
+        #expect(HTTPContentDisposition.suggestedFilename(from: controlFilename) == "bad-name.zip")
+    }
+
     private static func payload() -> Data {
         Data((0..<32_768).map { UInt8($0 % 251) })
     }
@@ -680,6 +765,8 @@ private final class SnapshotRecorder: @unchecked Sendable {
 private final class RangeTestServer: @unchecked Sendable {
     enum Behavior: Equatable, Sendable {
         case normal
+        case contentDispositionMetadata
+        case redirectToMetadata
         case failFirstGET(status: Int)
         case failFirstRangedGET(status: Int)
         case ignoreRange
@@ -699,8 +786,15 @@ private final class RangeTestServer: @unchecked Sendable {
     private var rangedGETCount = 0
     private var capturedRequests = [String]()
 
+    static let contentDisposition = #"attachment; filename="fallback.zip"; filename*=UTF-8''report%20final.zip"#
+    static let lastModified = "Wed, 21 Oct 2015 07:28:00 GMT"
+
     var url: URL {
         URL(string: "http://127.0.0.1:\(listener.port!.rawValue)/payload.bin")!
+    }
+
+    var redirectURL: URL {
+        URL(string: "http://127.0.0.1:\(listener.port!.rawValue)/redirect.bin")!
     }
 
     var requests: [String] {
@@ -754,6 +848,18 @@ private final class RangeTestServer: @unchecked Sendable {
         lock.lock()
         capturedRequests.append(request)
         lock.unlock()
+
+        let path = Self.requestPath(from: request)
+        if behavior == .redirectToMetadata, path == "/redirect.bin" {
+            return Self.httpResponse(
+                status: "302 Found",
+                headers: [
+                    "Location": url.absoluteString,
+                    "Content-Length": "0"
+                ],
+                body: Data()
+            )
+        }
 
         if request.hasPrefix("HEAD") {
             if behavior == .headWithoutRangeMetadata {
@@ -855,11 +961,24 @@ private final class RangeTestServer: @unchecked Sendable {
     }
 
     private func baseHeaders(contentLength: Int, eTag: String) -> [String: String] {
-        [
+        var headers = [
             "Content-Length": "\(contentLength)",
             "Accept-Ranges": "bytes",
-            "ETag": eTag
+            "ETag": eTag,
+            "Last-Modified": Self.lastModified
         ]
+        if behavior == .contentDispositionMetadata || behavior == .redirectToMetadata {
+            headers["Content-Disposition"] = Self.contentDisposition
+            headers["Content-Type"] = "application/zip"
+            headers["Server"] = "SwiftGetXTest"
+        }
+        return headers
+    }
+
+    private static func requestPath(from request: String) -> String {
+        let line = request.components(separatedBy: "\r\n").first ?? ""
+        let parts = line.split(separator: " ", maxSplits: 2).map(String.init)
+        return parts.count > 1 ? parts[1] : "/"
     }
 
     private static func parseRange(from request: String, payloadCount: Int) -> Range<Int>? {

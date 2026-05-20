@@ -122,4 +122,42 @@ struct TorrentFileTests {
         #expect(task.browserContextJSON?.contains("session=secret") == false)
         #expect(task.browserContextJSON?.contains("other.zip") == false)
     }
+
+    @Test("task persists HTTP response metadata as json")
+    func persistsHTTPResponseMetadata() {
+        let metadata = HTTPResponseMetadata(
+            originalURL: "https://example.com/download?token=secret",
+            finalURL: "https://cdn.example.com/file.zip?signature=secret&file=1",
+            sourcePageURL: "https://example.com/releases?auth=secret",
+            mimeType: "application/zip",
+            contentDisposition: "attachment; filename=file.zip",
+            suggestedFilename: "file.zip",
+            server: "SwiftGetXTest",
+            supportsResume: true,
+            contentLength: 42,
+            eTag: "\"test\"",
+            lastModified: "Wed, 21 Oct 2015 07:28:00 GMT",
+            redirects: [
+                HTTPRedirectMetadata(
+                    statusCode: 302,
+                    fromURL: "https://example.com/download?token=secret",
+                    toURL: "https://cdn.example.com/file.zip?signature=secret&file=1"
+                )
+            ]
+        )
+        let task = DownloadTask(
+            name: "file.zip",
+            source: "https://example.com/download?token=secret",
+            kind: .http,
+            savePath: "/tmp/file.zip",
+            httpResponseMetadata: metadata
+        )
+
+        #expect(task.httpResponseMetadata?.finalURL == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
+        #expect(task.httpResponseMetadata?.sourcePageURL == "https://example.com/releases?auth=%3Credacted%3E")
+        #expect(task.httpResponseMetadata?.suggestedFilename == "file.zip")
+        #expect(task.httpResponseMetadata?.redirects.first?.fromURL == "https://example.com/download?token=%3Credacted%3E")
+        #expect(task.displaySource == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
+        #expect(task.httpResponseMetadataJSON?.contains("secret") == false)
+    }
 }

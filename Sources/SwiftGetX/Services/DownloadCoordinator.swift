@@ -113,13 +113,26 @@ final class DownloadCoordinator {
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
         let tasks = sources.map { source in
             let kind = SourceParser.kind(for: source)
-            let displayName = displayName(for: source, kind: kind, suggestedFilename: suggestedFilename, sourceCount: sources.count)
+            let creationSuggestedFilename = sources.count == 1 ? suggestedFilename : nil
+            let displayName = displayName(
+                for: source,
+                kind: kind,
+                suggestedFilename: creationSuggestedFilename,
+                sourceCount: sources.count
+            )
             let task = DownloadTask(
                 name: displayName,
                 source: source,
                 kind: kind,
                 savePath: saveDirectory.appendingPathComponent(displayName).path,
-                browserContext: browserContext?.persistable
+                browserContext: browserContext?.persistable,
+                httpResponseMetadata: kind == .http
+                    ? HTTPResponseMetadata.fromCreationContext(
+                        source: source,
+                        browserContext: browserContext,
+                        suggestedFilename: creationSuggestedFilename
+                    )
+                    : nil
             )
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
@@ -199,11 +212,7 @@ final class DownloadCoordinator {
             return SourceParser.displayName(for: source, kind: kind)
         }
 
-        let illegal = CharacterSet(charactersIn: "/\\?%*|\"<>:")
-        let sanitizedFilename = suggestedFilename
-            .components(separatedBy: illegal)
-            .joined(separator: "-")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let sanitizedFilename = SourceParser.sanitizeFilename(suggestedFilename)
         return sanitizedFilename.isEmpty ? SourceParser.displayName(for: source, kind: kind) : sanitizedFilename
     }
 
@@ -436,6 +445,9 @@ final class DownloadCoordinator {
         guard let task = try? modelContext.fetch(descriptor).first else { return }
 
         task.status = snapshot.status
+        if let name = snapshot.name {
+            task.name = name
+        }
         if let savePath = snapshot.savePath {
             task.savePath = savePath
         }
@@ -464,6 +476,9 @@ final class DownloadCoordinator {
         }
         if let connectionSummary = snapshot.connectionSummary {
             task.connectionSummary = connectionSummary
+        }
+        if let httpResponseMetadata = snapshot.httpResponseMetadata {
+            task.httpResponseMetadata = httpResponseMetadata.merged(over: task.httpResponseMetadata)
         }
         if let torrentConnection = snapshot.torrentConnection {
             task.torrentConnection = torrentConnection
