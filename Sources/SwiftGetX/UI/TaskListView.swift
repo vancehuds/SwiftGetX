@@ -47,7 +47,7 @@ struct TaskListView: View {
                                     }
                                 }
                                 .contextMenu {
-                                    let isPausable = task.status == .running || task.status == .seeding
+                                    let isPausable = task.status == .running || task.status == .seeding || task.status == .verifying
                                     Button(isPausable ? L10n.string("action_pause") : L10n.string("action_start")) {
                                         if isPausable {
                                             coordinator.pause(task)
@@ -258,7 +258,7 @@ private struct TaskRowView: View {
         .overlay(alignment: .topTrailing) {
             if isHovered {
                 HStack(spacing: layout.value(6)) {
-                    let isPausable = task.status == .running || task.status == .seeding
+                    let isPausable = task.status == .running || task.status == .seeding || task.status == .verifying
                     Button {
                         if isPausable {
                             coordinator.pause(task)

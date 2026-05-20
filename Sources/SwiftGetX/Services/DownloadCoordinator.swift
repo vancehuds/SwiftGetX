@@ -14,6 +14,7 @@ final class DownloadCoordinator {
     private var runtimeHTTPOptions: [UUID: HTTPDownloadOptions] = [:]
     private var queueWakeTask: Task<Void, Never>?
     private var queueWakeDate: Date?
+    private let runsEngines: Bool
 
     var selectedTaskID: UUID?
     var activeFilter: DownloadFilter = .all
@@ -22,6 +23,10 @@ final class DownloadCoordinator {
     var uploadLimitBytes: Int64 = 0
 
     private(set) var statusMessage = L10n.string("status_ready")
+
+    init(runsEngines: Bool = true) {
+        self.runsEngines = runsEngines
+    }
 
     var selectedTask: DownloadTask? {
         guard let selectedTaskID, let modelContext else { return nil }
@@ -307,6 +312,7 @@ final class DownloadCoordinator {
         )
         save()
 
+        guard runsEngines else { return }
         Task {
             await engine(for: request.kind).start(request)
         }
@@ -325,6 +331,11 @@ final class DownloadCoordinator {
     }
 
     func pause(_ task: DownloadTask) {
+        pause(task, schedulesQueueAfterFreeingSlot: true)
+    }
+
+    private func pause(_ task: DownloadTask, schedulesQueueAfterFreeingSlot: Bool) {
+        let shouldScheduleQueue = schedulesQueueAfterFreeingSlot && task.usesActiveDownloadSlot
         task.status = .paused
         task.speedBytesPerSecond = 0
         task.nextQueueRetryAt = nil
@@ -332,8 +343,31 @@ final class DownloadCoordinator {
         let request = DownloadRequest(task: task)
         save()
 
-        Task {
-            await engine(for: request.kind).pause(request)
+        if runsEngines {
+            Task {
+                await engine(for: request.kind).pause(request)
+                if shouldScheduleQueue {
+                    scheduleQueue()
+                }
+            }
+        } else if shouldScheduleQueue {
+            scheduleQueue()
+        }
+    }
+
+    private func runEngineOperation(
+        schedulesQueueAfterFreeingSlot shouldScheduleQueue: Bool,
+        operation: @escaping @MainActor () async -> Void
+    ) {
+        if runsEngines {
+            Task {
+                await operation()
+                if shouldScheduleQueue {
+                    scheduleQueue()
+                }
+            }
+        } else if shouldScheduleQueue {
+            scheduleQueue()
         }
     }
 
@@ -351,6 +385,7 @@ final class DownloadCoordinator {
     }
 
     func cancel(_ task: DownloadTask) {
+        let shouldScheduleQueue = task.usesActiveDownloadSlot
         task.status = .failed
         task.speedBytesPerSecond = 0
         task.errorMessage = L10n.string("error_task_cancelled")
@@ -359,18 +394,16 @@ final class DownloadCoordinator {
         let request = DownloadRequest(task: task)
         save()
 
-        Task {
-            await engine(for: request.kind).cancel(request)
+        runEngineOperation(schedulesQueueAfterFreeingSlot: shouldScheduleQueue) {
+            await self.engine(for: request.kind).cancel(request)
         }
     }
 
     func remove(_ task: DownloadTask, deletingFiles: Bool) {
         guard let modelContext else { return }
+        let shouldScheduleQueue = task.usesActiveDownloadSlot
         let shouldDeleteLocalData = deletingFiles || !task.hasFinishedDownloading
         let request = DownloadRequest(task: task)
-        Task {
-            await engine(for: request.kind).remove(request, deletingFiles: shouldDeleteLocalData)
-        }
 
         if shouldDeleteLocalData {
             try? FileManager.default.removeItem(atPath: task.savePath)
@@ -385,6 +418,10 @@ final class DownloadCoordinator {
             selectedTaskID = tasks().first?.id
         }
         save()
+
+        runEngineOperation(schedulesQueueAfterFreeingSlot: shouldScheduleQueue) {
+            await self.engine(for: request.kind).remove(request, deletingFiles: shouldDeleteLocalData)
+        }
     }
 
     func recheck(_ task: DownloadTask) {
@@ -493,13 +530,13 @@ final class DownloadCoordinator {
     }
 
     func pauseAll() {
-        for task in tasks() where task.status == .running || task.status == .seeding || task.status == .queued || task.status == .verifying {
-            pause(task)
+        for task in allTasks() where task.status == .running || task.status == .seeding || task.status == .queued || task.status == .verifying {
+            pause(task, schedulesQueueAfterFreeingSlot: false)
         }
     }
 
     func resumeAll() {
-        for task in tasks() where task.status == .paused || task.status == .failed || task.status == .queued {
+        for task in allTasks() where task.status == .paused || task.status == .failed || task.status == .queued {
             resume(task)
         }
     }
@@ -516,15 +553,17 @@ final class DownloadCoordinator {
             settings.globalUploadLimitBytes = uploadBytesPerSecond
             persistSettings(settings)
         }
-        Task {
-            await httpEngine.setSpeedLimit(
-                downloadBytesPerSecond: downloadBytesPerSecond,
-                uploadBytesPerSecond: uploadBytesPerSecond
-            )
-            await torrentEngine.setSpeedLimit(
-                downloadBytesPerSecond: downloadBytesPerSecond,
-                uploadBytesPerSecond: uploadBytesPerSecond
-            )
+        if runsEngines {
+            Task {
+                await httpEngine.setSpeedLimit(
+                    downloadBytesPerSecond: downloadBytesPerSecond,
+                    uploadBytesPerSecond: uploadBytesPerSecond
+                )
+                await torrentEngine.setSpeedLimit(
+                    downloadBytesPerSecond: downloadBytesPerSecond,
+                    uploadBytesPerSecond: uploadBytesPerSecond
+                )
+            }
         }
     }
 

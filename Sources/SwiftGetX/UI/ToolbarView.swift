@@ -17,7 +17,7 @@ struct ToolbarView: View {
 
     private var selectedTaskIsPausable: Bool {
         guard let status = coordinator.selectedTask?.status else { return false }
-        return status == .running || status == .seeding
+        return status == .running || status == .seeding || status == .verifying
     }
 
     var body: some View {
@@ -52,7 +52,7 @@ struct ToolbarView: View {
                     Button {
                         guard let task = coordinator.selectedTask else { return }
                         switch task.status {
-                        case .running, .seeding, .queued, .verifying:
+                        case .running, .seeding, .verifying:
                             coordinator.pause(task)
                         default:
                             coordinator.resume(task)

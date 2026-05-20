@@ -377,17 +377,36 @@ Next step:
 
 ## Large Check 3: HTTP Task Control
 
-Status: [ ]
+Status: [x]
 
 Review Tasks 7-9 for data migration, settings consistency, user-facing behavior, scheduler edge cases, and tests. Run `swift test` if Swift code changed.
 
 Work performed:
 
+- Audited Tasks 7-9 against the HTTP/task-control portions of `Docs/FunctionalImprovementOpportunities.md`, covering HTTP preview metadata, per-task HTTP options, AppSettings persistence, queue ordering, restart/requeue policy, large-list behavior, task-list controls, toolbar behavior, and menu/command paths.
+- Found that global Pause All / Resume All still respected the current sidebar filter and search text. Updated them to operate on `allTasks()` so menu and command actions affect the full queue as labeled.
+- Found that pausing/cancelling/removing an active task did not deterministically refill the next queued slot until later engine snapshots. Added slot-fill scheduling after active pause/cancel/remove engine control paths.
+- Found that the toolbar and task-row controls treated queued/verifying inconsistently. Updated controls so verifying tasks show/use pause, while queued tasks show/use resume/start queue semantics.
+- Added a narrow `DownloadCoordinator(runsEngines:)` test seam so coordinator queue tests can verify scheduling state without spawning real HTTP engine work.
+- Added regression tests for queue-policy settings persistence, active pause/cancel/remove slot refill, and global pause/resume ignoring current filter/search.
+
 Verification evidence:
+
+- `swift test --filter DownloadCoordinator` passed with 12 tests in the `DownloadCoordinator` suite.
+- `swift build` passed.
+- `swift test` passed with 138 tests across 13 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Drag-and-drop queue reordering, planned task windows, and network/power-aware scheduling remain deferred beyond Tasks 7-9 and are not implemented in this check.
+- Failure-recovery UX items such as a distinct cancelled state, copy-error/reprobe actions, disk/permission preflight, and partial-file operations are intentionally Task 10 scope.
+- SwiftUI control behavior was compile/test verified and statically inspected, not screenshot-tested.
+
 Next step:
+
+- Task 10: Failure Recovery, Cancellation, and File Preflight.
 
 ## Task 10: Failure Recovery, Cancellation, and File Preflight
 

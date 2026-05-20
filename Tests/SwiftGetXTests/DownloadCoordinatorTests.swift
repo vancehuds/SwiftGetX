@@ -37,6 +37,34 @@ struct DownloadCoordinatorTests {
         #expect(coordinator.uploadLimitBytes == 512_000)
     }
 
+    @Test("queue policy settings persist through AppSettings records")
+    func queuePolicySettingsPersistThroughAppSettingsRecords() {
+        let settings = AppSettings()
+        settings.downloadRestartPolicy = .autoResume
+        settings.automaticallyRequeuesFailedTasks = true
+        settings.queueFailureRetryLimit = 7
+
+        let record = settings.makeRecord()
+        #expect(record.downloadRestartPolicyRawValue == DownloadRestartPolicy.autoResume.rawValue)
+        #expect(record.automaticallyRequeuesFailedTasks)
+        #expect(record.queueFailureRetryLimit == 7)
+
+        let restored = AppSettings()
+        restored.apply(record)
+        #expect(restored.downloadRestartPolicy == .autoResume)
+        #expect(restored.automaticallyRequeuesFailedTasks)
+        #expect(restored.queueFailureRetryLimit == 7)
+
+        restored.downloadRestartPolicy = .restorePaused
+        restored.automaticallyRequeuesFailedTasks = false
+        restored.queueFailureRetryLimit = 1
+        restored.update(record)
+
+        #expect(record.downloadRestartPolicyRawValue == DownloadRestartPolicy.restorePaused.rawValue)
+        #expect(!record.automaticallyRequeuesFailedTasks)
+        #expect(record.queueFailureRetryLimit == 1)
+    }
+
     @Test("allTasks returns more than the old 500 task cap")
     func allTasksReturnsMoreThanOldFetchLimit() throws {
         let fixture = try makeFixture()
@@ -67,6 +95,8 @@ struct DownloadCoordinatorTests {
         #expect(high.status == .running)
         #expect(normal.status == .queued)
         #expect(low.status == .queued)
+        fixture.settings.concurrentTaskLimit = 0
+        fixture.coordinator.cancel(high)
     }
 
     @Test("reloadSettings fills newly available queue slots")
@@ -88,6 +118,71 @@ struct DownloadCoordinatorTests {
         #expect(active.status == .running)
         #expect(first.status == .running)
         #expect(second.status == .running)
+        fixture.settings.concurrentTaskLimit = 0
+        fixture.coordinator.cancel(active)
+        fixture.coordinator.cancel(first)
+        fixture.coordinator.cancel(second)
+    }
+
+    @Test("pausing active task fills the next queue slot")
+    func pausingActiveTaskFillsNextQueueSlot() async throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 1
+        let active = makeTask(name: "Active", status: .running, queuePosition: 1)
+        let next = makeTask(name: "Next", queuePosition: 2)
+        fixture.context.insert(active)
+        fixture.context.insert(next)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.pause(active)
+        await waitForStatus(next, .running)
+
+        #expect(active.status == .paused)
+        #expect(next.status == .running)
+        fixture.settings.concurrentTaskLimit = 0
+        fixture.coordinator.cancel(next)
+    }
+
+    @Test("cancelling active task fills the next queue slot")
+    func cancellingActiveTaskFillsNextQueueSlot() async throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 1
+        let active = makeTask(name: "Active", status: .running, queuePosition: 1)
+        let next = makeTask(name: "Next", queuePosition: 2)
+        fixture.context.insert(active)
+        fixture.context.insert(next)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.cancel(active)
+        await waitForStatus(next, .running)
+
+        #expect(active.status == .failed)
+        #expect(active.errorMessage == L10n.string("error_task_cancelled"))
+        #expect(next.status == .running)
+        fixture.settings.concurrentTaskLimit = 0
+        fixture.coordinator.cancel(next)
+    }
+
+    @Test("removing active task fills the next queue slot")
+    func removingActiveTaskFillsNextQueueSlot() async throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 1
+        let active = makeTask(name: "Active", status: .running, queuePosition: 1)
+        let next = makeTask(name: "Next", queuePosition: 2)
+        fixture.context.insert(active)
+        fixture.context.insert(next)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.remove(active, deletingFiles: false)
+        await waitForStatus(next, .running)
+
+        #expect(fixture.coordinator.allTasks().map(\.id).contains(active.id) == false)
+        #expect(next.status == .running)
+        fixture.settings.concurrentTaskLimit = 0
+        fixture.coordinator.cancel(next)
     }
 
     @Test("failed tasks can be requeued with backoff up to the retry limit")
@@ -174,6 +269,40 @@ struct DownloadCoordinatorTests {
         #expect(third.queuePriority == .high)
     }
 
+    @Test("pauseAll and resumeAll ignore current filter and search")
+    func pauseAllAndResumeAllIgnoreCurrentFilterAndSearch() throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 0
+        let running = makeTask(name: "Running", status: .running, queuePosition: 1)
+        let queued = makeTask(name: "Queued", status: .queued, queuePosition: 2)
+        let verifying = makeTask(name: "Verifying", status: .verifying, queuePosition: 3)
+        let failed = makeTask(name: "Failed", status: .failed, queuePosition: 4)
+        let completed = makeTask(name: "Completed", status: .completed, queuePosition: 5)
+        for task in [running, queued, verifying, failed, completed] {
+            fixture.context.insert(task)
+        }
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+        fixture.coordinator.activeFilter = .completed
+        fixture.coordinator.searchText = "does-not-match-any-task"
+
+        fixture.coordinator.pauseAll()
+
+        #expect(running.status == .paused)
+        #expect(queued.status == .paused)
+        #expect(verifying.status == .paused)
+        #expect(failed.status == .failed)
+        #expect(completed.status == .completed)
+
+        fixture.coordinator.resumeAll()
+
+        #expect(running.status == .queued)
+        #expect(queued.status == .queued)
+        #expect(verifying.status == .queued)
+        #expect(failed.status == .queued)
+        #expect(completed.status == .completed)
+    }
+
     private func makeFixture() throws -> CoordinatorFixture {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
@@ -185,7 +314,7 @@ struct DownloadCoordinatorTests {
             container: container,
             context: container.mainContext,
             settings: AppSettings(),
-            coordinator: DownloadCoordinator()
+            coordinator: DownloadCoordinator(runsEngines: false)
         )
     }
 
@@ -197,7 +326,7 @@ struct DownloadCoordinatorTests {
     ) -> DownloadTask {
         DownloadTask(
             name: name,
-            source: "http://127.0.0.1/\(name)",
+            source: "http://127.0.0.1:1/\(name)",
             kind: .http,
             status: status,
             savePath: "/tmp/\(name)",
@@ -225,6 +354,15 @@ struct DownloadCoordinatorTests {
         coordinator.allTasks()
             .filter(\.isQueueManageable)
             .map(\.name)
+    }
+
+    private func waitForStatus(_ task: DownloadTask, _ status: DownloadStatus) async {
+        for _ in 0..<20 {
+            if task.status == status {
+                return
+            }
+            await Task.yield()
+        }
     }
 }
 
