@@ -5,7 +5,7 @@ import Foundation
 @Observable
 final class NativeHostDiagnostics {
     private(set) var status: DiagnosticStatus = .unchecked
-    private(set) var statusMessage: String = "未检查"
+    private(set) var statusMessage: String = L10n.string("diagnostics_unchecked")
     private(set) var detailMessage: String = ""
     private(set) var isRepairable: Bool = false
     private(set) var isChecking: Bool = false
@@ -29,7 +29,7 @@ final class NativeHostDiagnostics {
     func check() {
         isChecking = true
         status = .checking
-        statusMessage = "检查中…"
+        statusMessage = L10n.string("diagnostics_checking")
         detailMessage = ""
         isRepairable = false
 
@@ -84,7 +84,7 @@ final class NativeHostDiagnostics {
     func repair() {
         isChecking = true
         status = .checking
-        statusMessage = "修复中…"
+        statusMessage = L10n.string("diagnostics_repairing")
         detailMessage = ""
         isRepairable = false
 

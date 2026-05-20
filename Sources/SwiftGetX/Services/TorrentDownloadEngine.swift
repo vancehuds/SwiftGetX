@@ -192,7 +192,7 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
                 downloadedBytes: 0,
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
-                errorMessage: "BT 引擎桥接已预留，需接入 libtorrent 后启用真实磁力/种子下载",
+                errorMessage: L10n.string("error_libtorrent_unavailable"),
                 supportsResume: true,
                 eTag: nil,
                 lastModified: nil

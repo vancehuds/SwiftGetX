@@ -65,6 +65,7 @@ if enableNativeLibtorrent {
 
 let package = Package(
     name: "SwiftGetX",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
@@ -85,7 +86,9 @@ let package = Package(
                 .copy("Resources/NativeMessaging"),
                 .copy("Resources/AppInfo.plist"),
                 .copy("Resources/Assets/AppIcon.icns"),
-                .copy("Resources/Assets/AppIcon.png")
+                .copy("Resources/Assets/AppIcon.png"),
+                .process("Resources/en.lproj"),
+                .process("Resources/zh-Hans.lproj")
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")

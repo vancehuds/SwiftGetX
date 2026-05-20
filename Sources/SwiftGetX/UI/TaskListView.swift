@@ -47,23 +47,23 @@ struct TaskListView: View {
                                     }
                                 }
                                 .contextMenu {
-                                    Button(task.status == .running ? "暂停" : "开始") {
+                                    Button(task.status == .running ? L10n.string("action_pause") : L10n.string("action_start")) {
                                         if task.status == .running {
                                             coordinator.pause(task)
                                         } else {
                                             coordinator.resume(task)
                                         }
                                     }
-                                    Button("校验") {
+                                    Button(L10n.string("action_recheck")) {
                                         coordinator.recheck(task)
                                     }
                                     Divider()
-                                    Button("在访达中显示") {
+                                    Button(L10n.string("action_reveal_in_finder")) {
                                         let url = URL(fileURLWithPath: task.savePath)
                                         NSWorkspace.shared.activateFileViewerSelecting([url])
                                     }
                                     Divider()
-                                    Button("删除任务", role: .destructive) {
+                                    Button(L10n.string("action_delete_task"), role: .destructive) {
                                         taskToDelete = task
                                     }
                                 }
@@ -75,7 +75,7 @@ struct TaskListView: View {
             }
         }
         .confirmationDialog(
-            "删除下载任务？",
+            L10n.string("delete_task_dialog_title"),
             isPresented: Binding(
                 get: { taskToDelete != nil },
                 set: { if !$0 { taskToDelete = nil } }
@@ -83,30 +83,30 @@ struct TaskListView: View {
         ) {
             if let taskToDelete {
                 if taskToDelete.status == .completed {
-                    Button("仅删除任务", role: .destructive) {
+                    Button(L10n.string("delete_task_only"), role: .destructive) {
                         coordinator.remove(taskToDelete, deletingFiles: false)
                         self.taskToDelete = nil
                     }
-                    Button("删除任务和本地文件", role: .destructive) {
+                    Button(L10n.string("delete_task_and_local_file"), role: .destructive) {
                         coordinator.remove(taskToDelete, deletingFiles: true)
                         self.taskToDelete = nil
                     }
                 } else {
-                    Button("删除任务和已下载部分", role: .destructive) {
+                    Button(L10n.string("delete_task_and_partial_file"), role: .destructive) {
                         coordinator.remove(taskToDelete, deletingFiles: true)
                         self.taskToDelete = nil
                     }
                 }
             }
-            Button("取消", role: .cancel) {
+            Button(L10n.string("action_cancel"), role: .cancel) {
                 taskToDelete = nil
             }
         } message: {
             if let taskToDelete {
                 if taskToDelete.status == .completed {
-                    Text("可以只删除任务记录，也可以同时删除本地文件。")
+                    Text(L10n.string("delete_task_completed_message"))
                 } else {
-                    Text("未完成的下载会自动删除已下载部分和临时分块，避免残留。")
+                    Text(L10n.string("delete_task_unfinished_message"))
                 }
             }
         }
@@ -118,7 +118,7 @@ struct TaskListView: View {
     private func summary(for tasks: [DownloadTask]) -> String {
         let running = tasks.filter { $0.status == .running }.count
         let completed = tasks.filter { $0.status == .completed }.count
-        return "\(tasks.count) 个任务 · \(running) 下载中 · \(completed) 已完成"
+        return L10n.string("task_list_summary", tasks.count, running, completed)
     }
 }
 
@@ -197,16 +197,16 @@ private struct TaskRowView: View {
                         HStack(spacing: layout.value(3)) {
                             Image(systemName: "checkmark.shield")
                                 .font(layout.font(9))
-                            Text("已安全就绪")
+                            Text(L10n.string("task_ready"))
                         }
                         .font(layout.font(11, weight: .semibold))
                         .foregroundStyle(Color.green)
                     } else if task.status == .paused {
-                        Text("已暂停")
+                        Text(L10n.string("download_status_paused"))
                             .font(layout.font(11, weight: .medium))
                             .foregroundStyle(.orange)
                     } else if task.status == .failed {
-                        Text("失败：\(task.errorMessage ?? "未知错误")")
+                        Text(L10n.string("task_failed_message", task.errorMessage ?? L10n.string("error_unknown")))
                             .font(layout.font(11, weight: .medium))
                             .lineLimit(1)
                             .foregroundStyle(.red)
@@ -241,7 +241,7 @@ private struct TaskRowView: View {
                             .background(Color.primary.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .help(task.status == .running ? "暂停" : "开始")
+                    .help(task.status == .running ? L10n.string("action_pause") : L10n.string("action_start"))
 
                     Button {
                         let url = URL(fileURLWithPath: task.savePath)
@@ -254,7 +254,7 @@ private struct TaskRowView: View {
                             .background(Color.primary.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .help("在访达中显示")
+                    .help(L10n.string("action_reveal_in_finder"))
 
                     Button {
                         coordinator.selectedTaskID = task.id
@@ -267,7 +267,7 @@ private struct TaskRowView: View {
                             .background(Color.red.opacity(colorScheme == .dark ? 0.20 : 0.10), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .help("删除任务")
+                    .help(L10n.string("action_delete_task"))
                 }
                 .padding(layout.value(4))
                 .background(.regularMaterial, in: Capsule())
@@ -316,10 +316,10 @@ private struct EmptyTaskView: View {
                 .background(ContentSurfaceBackground(cornerRadius: 36))
 
             VStack(spacing: layout.value(6)) {
-                Text("还没有下载任务")
+                Text(L10n.string("empty_tasks_title"))
                     .font(layout.font(16, weight: .semibold))
                     .foregroundStyle(Color.primary)
-                Text("点击左上角加号，粘贴直链、磁力链接或种子文件地址。")
+                Text(L10n.string("empty_tasks_message"))
                     .font(layout.font(12.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

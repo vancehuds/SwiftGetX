@@ -56,7 +56,11 @@ struct HTTPDownloadEngineTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
         #expect(recorder.snapshots.contains {
-            $0.connectionSummary == "HTTP · 单流 · 可续传"
+            $0.connectionSummary == L10n.string(
+                "http_connection_summary",
+                L10n.string("http_connection_single_stream"),
+                L10n.string("http_connection_resumable")
+            )
         })
     }
 
@@ -82,7 +86,11 @@ struct HTTPDownloadEngineTests {
         let downloaded = try Data(contentsOf: destination)
         #expect(downloaded == payload)
         #expect(recorder.snapshots.contains {
-            $0.connectionSummary == "HTTP · 单流 · 可续传"
+            $0.connectionSummary == L10n.string(
+                "http_connection_summary",
+                L10n.string("http_connection_single_stream"),
+                L10n.string("http_connection_resumable")
+            )
         })
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
@@ -228,7 +236,11 @@ struct HTTPDownloadEngineTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
         #expect(recorder.snapshots.contains {
-            $0.connectionSummary == "HTTP · 单流 · 不支持续传"
+            $0.connectionSummary == L10n.string(
+                "http_connection_summary",
+                L10n.string("http_connection_single_stream"),
+                L10n.string("http_connection_not_resumable")
+            )
         })
     }
 
@@ -302,7 +314,11 @@ struct HTTPDownloadEngineTests {
         let downloaded = try Data(contentsOf: destination)
         #expect(downloaded == payload)
         #expect(recorder.snapshots.contains {
-            $0.connectionSummary == "HTTP · 4 分片 · 可续传"
+            $0.connectionSummary == L10n.string(
+                "http_connection_summary",
+                L10n.string("http_connection_segments", 4),
+                L10n.string("http_connection_resumable")
+            )
         })
     }
 

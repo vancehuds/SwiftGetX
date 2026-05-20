@@ -1,0 +1,11 @@
+{
+  "appName": {
+    "message": "SwiftGetX"
+  },
+  "contextSendLink": {
+    "message": "使用 SwiftGetX 下载链接"
+  },
+  "safariDescription": {
+    "message": "将选中的下载发送到 SwiftGetX。"
+  }
+}

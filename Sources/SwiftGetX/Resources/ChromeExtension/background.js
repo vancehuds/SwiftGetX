@@ -14,31 +14,32 @@ const DEFAULT_OPTIONS = {
 const DOWNLOAD_SOURCE_PATTERN = /(magnet:\?|https?:\/\/|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)/i;
 let currentOptions = { ...DEFAULT_OPTIONS };
 let activeNativeRepair;
+const i18n = (key, substitutions) => chrome.i18n.getMessage(key, substitutions) || key;
 
 const MENU_ITEMS = [
   {
     id: "send-link",
-    title: "使用 SwiftGetX 下载链接",
+    titleKey: "contextSendLink",
     contexts: ["link"]
   },
   {
     id: "send-page",
-    title: "使用 SwiftGetX 下载当前页面",
+    titleKey: "contextSendPage",
     contexts: ["page"]
   },
   {
     id: "send-selection",
-    title: "使用 SwiftGetX 下载选中文本",
+    titleKey: "contextSendSelection",
     contexts: ["selection"]
   },
   {
     id: "send-media",
-    title: "使用 SwiftGetX 下载媒体",
+    titleKey: "contextSendMedia",
     contexts: ["image", "video", "audio"]
   },
   {
     id: "scan-page",
-    title: "扫描页面下载链接到 SwiftGetX",
+    titleKey: "contextScanPage",
     contexts: ["page"]
   }
 ];
@@ -46,7 +47,11 @@ const MENU_ITEMS = [
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     for (const item of MENU_ITEMS) {
-      chrome.contextMenus.create(item);
+      chrome.contextMenus.create({
+        id: item.id,
+        title: i18n(item.titleKey),
+        contexts: item.contexts
+      });
     }
   });
 
@@ -239,7 +244,7 @@ async function handleContextMenuClick(info, tab) {
 
 async function scanTabAndSend(tab) {
   if (!tab?.id) {
-    markFailure("没有可扫描的标签页");
+    markFailure(i18n("errorNoScannableTab"));
     return;
   }
 
@@ -252,7 +257,7 @@ async function scanTabAndSend(tab) {
     const sourceText = candidates.map((candidate) => candidate.url).join("\n");
 
     if (!sourceText) {
-      markFailure("当前页面没有发现下载链接");
+      markFailure(i18n("errorNoDownloadLinksOnPage"));
       return;
     }
 
@@ -272,10 +277,10 @@ async function sendToSwiftGetX(payload, options = {}) {
   const allowSetup = options.allowSetup !== false;
   const url = (payload?.url || "").trim();
   if (!isSupportedSource(url)) {
-    markFailure("没有可发送的下载地址");
+    markFailure(i18n("errorNoDownloadAddress"));
     return {
       ok: false,
-      message: "没有可发送的下载地址"
+      message: i18n("errorNoDownloadAddress")
     };
   }
 
@@ -316,7 +321,7 @@ async function sendToSwiftGetX(payload, options = {}) {
   if (result.ok) {
     markSuccess();
   } else {
-    markFailure(result.message || "SwiftGetX 未接受该任务");
+    markFailure(result.message || i18n("errorTaskRejected"));
     if (allowSetup) {
       repairNativeHost(payload.source || "download-rejected");
     }
@@ -324,7 +329,7 @@ async function sendToSwiftGetX(payload, options = {}) {
 
   return {
     ok: result.ok,
-    message: result.message || (result.ok ? "已发送到 SwiftGetX" : "发送失败")
+    message: result.message || (result.ok ? i18n("sentToSwiftGetX") : i18n("sendFailed"))
   };
 }
 
@@ -384,8 +389,8 @@ async function repairNativeHost(reason, options = {}) {
         setupOpened: Boolean(setupResult.opened),
         setupThrottled: Boolean(setupResult.throttled),
         message: setupResult.throttled
-          ? "已请求 SwiftGetX 配对，请在软件中允许配对后重新检查。"
-          : "已打开 SwiftGetX 配对请求，请在软件中点击“允许配对”后重新检查。",
+          ? i18n("setupPairingRequested")
+          : i18n("setupPairingOpened"),
         detailMessage: result.message
       };
     })().finally(() => {
@@ -456,7 +461,7 @@ function sendNativeMessage(message) {
       resolve({
         ok,
         runtimeError: false,
-        message: response?.message || (ok ? "connected" : "Native Host returned an error"),
+        message: response?.message || (ok ? i18n("connected") : i18n("nativeHostReturnedError")),
         version: response?.version,
         response
       });
@@ -468,7 +473,7 @@ async function waitForNativeHost(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let lastResult = {
     ok: false,
-    message: "Native Host 未响应"
+    message: i18n("nativeHostNoResponse")
   };
 
   while (Date.now() <= deadline) {

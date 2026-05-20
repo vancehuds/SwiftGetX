@@ -11,7 +11,7 @@ struct InspectorView: View {
                 if let task = coordinator.selectedTask {
                     header(for: task)
                     
-                    Picker("详情", selection: $selectedTab) {
+                    Picker(L10n.string("inspector_details_picker"), selection: $selectedTab) {
                         ForEach(InspectorTab.tabs(for: task.kind)) { tab in
                             Label(tab.title, systemImage: tab.symbolName)
                                 .tag(tab)
@@ -48,7 +48,7 @@ struct InspectorView: View {
                             .frame(width: layout.value(64), height: layout.value(64))
                             .background(ContentSurfaceBackground(cornerRadius: 32))
 
-                        Text("选择任务查看详情")
+                        Text(L10n.string("inspector_select_task"))
                             .font(layout.font(14, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
@@ -72,7 +72,7 @@ struct InspectorView: View {
                         .lineLimit(2)
                         .foregroundStyle(Color.primary)
                     
-                    Text(task.kind.title + " 下载")
+                    Text(L10n.string("download_kind_badge", task.kind.title))
                         .font(layout.font(10, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, layout.value(6))
@@ -125,10 +125,10 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .overview: "概览"
-        case .files: "文件"
-        case .connections: "连接"
-        case .logs: "日志"
+        case .overview: L10n.string("inspector_tab_overview")
+        case .files: L10n.string("inspector_tab_files")
+        case .connections: L10n.string("inspector_tab_connections")
+        case .logs: L10n.string("inspector_tab_logs")
         }
     }
 
@@ -164,14 +164,14 @@ private struct OverviewPanel: View {
         VStack(spacing: layout.value(12)) {
             LazyVGrid(columns: columns, spacing: layout.value(10)) {
                 MetricCard(
-                    title: "任务状态",
+                    title: L10n.string("metric_task_status"),
                     value: task.status.title,
                     symbol: task.status.symbolName,
                     color: statusColor
                 )
 
                 MetricCard(
-                    title: "下载速度",
+                    title: L10n.string("metric_download_speed"),
                     value: task.status == .running
                         ? ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond) + "/s"
                         : "--",
@@ -180,16 +180,16 @@ private struct OverviewPanel: View {
                 )
 
                 MetricCard(
-                    title: "剩余时间",
+                    title: L10n.string("metric_eta"),
                     value: task.status == .running
-                        ? (task.etaSeconds.map(TimeFormatter.eta) ?? "未知")
+                        ? (task.etaSeconds.map(TimeFormatter.eta) ?? L10n.string("unknown"))
                         : "--",
                     symbol: "clock",
                     color: .secondary
                 )
 
                 MetricCard(
-                    title: "已下载比例",
+                    title: L10n.string("metric_downloaded"),
                     value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.downloadedBytes),
                     symbol: "chart.bar.fill",
                     color: .blue
@@ -197,15 +197,15 @@ private struct OverviewPanel: View {
             }
 
             VStack(spacing: layout.value(8)) {
-                DetailRow(title: "文件总大小", value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.totalBytes))
-                DetailRow(title: "保存路径", value: task.savePath)
-                DetailRow(title: "下载链接/种子源", value: task.source)
-                DetailRow(title: "断点续传", value: task.supportsResume ? "支持" : "不支持/未知")
+                DetailRow(title: L10n.string("detail_total_size"), value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.totalBytes))
+                DetailRow(title: L10n.string("detail_save_path"), value: task.savePath)
+                DetailRow(title: L10n.string("detail_source"), value: task.source)
+                DetailRow(title: L10n.string("detail_resume"), value: task.supportsResume ? L10n.string("supported") : L10n.string("not_supported_or_unknown"))
                 if let connectionSummary = task.connectionSummary {
-                    DetailRow(title: "连接详情", value: connectionSummary)
+                    DetailRow(title: L10n.string("detail_connection"), value: connectionSummary)
                 }
                 if let errorMessage = task.errorMessage {
-                    DetailRow(title: "错误消息", value: errorMessage, color: .red)
+                    DetailRow(title: L10n.string("detail_error"), value: errorMessage, color: .red)
                 }
             }
         }
@@ -262,13 +262,13 @@ private struct FilesPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: layout.value(12)) {
             if task.torrentFiles.isEmpty {
-                Text("BT 文件列表会在 metadata 获取后展示。")
+                Text(L10n.string("files_empty_metadata"))
                     .font(layout.font(12))
                     .foregroundStyle(.secondary)
                     .padding(layout.value(12))
             } else {
                 HStack {
-                    Button("全选") {
+                    Button(L10n.string("action_select_all")) {
                         coordinator.setTorrentFileSelection(
                             task,
                             selectedFileIndexes: task.torrentFiles.map(\.index)
@@ -277,7 +277,7 @@ private struct FilesPanel: View {
                     .font(layout.font(11, weight: .semibold))
                     .buttonStyle(.bordered)
                     
-                    Button("清空") {
+                    Button(L10n.string("action_clear")) {
                         coordinator.setTorrentFileSelection(task, selectedFileIndexes: [])
                     }
                     .font(layout.font(11, weight: .semibold))
@@ -285,7 +285,7 @@ private struct FilesPanel: View {
                     
                     Spacer()
                     
-                    Text("\(task.selectedFileIndexes.count) / \(task.torrentFiles.count) 个文件")
+                    Text(L10n.string("files_selected_count", task.selectedFileIndexes.count, task.torrentFiles.count))
                         .font(layout.font(11, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -342,11 +342,11 @@ private struct ConnectionsPanel: View {
 
     var body: some View {
         VStack(spacing: layout.value(8)) {
-            DetailRow(title: "DHT 状态", value: "已启动 (接收正常)")
-            DetailRow(title: "PEX 交换", value: "已启用")
-            DetailRow(title: "本地监听端口", value: "端口分配就绪")
-            DetailRow(title: "连接详情", value: task.connectionSummary ?? "等待 BT 引擎上报连接 Peer 节点数")
-            DetailRow(title: "做种分享限制", value: "达到 1.0 倍率后自动停止")
+            DetailRow(title: L10n.string("connection_dht_status"), value: L10n.string("connection_dht_ready"))
+            DetailRow(title: L10n.string("connection_pex"), value: L10n.string("connection_pex_enabled"))
+            DetailRow(title: L10n.string("connection_local_port"), value: L10n.string("connection_port_ready"))
+            DetailRow(title: L10n.string("detail_connection"), value: task.connectionSummary ?? L10n.string("connection_waiting_peers"))
+            DetailRow(title: L10n.string("connection_seed_limit"), value: L10n.string("connection_seed_limit_value"))
         }
     }
 }
@@ -358,7 +358,7 @@ private struct LogsPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: layout.value(6)) {
             if task.logEntries.isEmpty {
-                Text("暂无日志记录")
+                Text(L10n.string("logs_empty"))
                     .font(layout.font(12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)

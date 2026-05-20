@@ -217,16 +217,28 @@ private struct DownloadSettingsSection: View {
     let chooseDirectory: () -> Void
 
     var body: some View {
-        Section("下载") {
+        Section(L10n.string("settings_download_section")) {
             downloadDirectoryRow
-            Stepper("同时下载任务：\(settings.concurrentTaskLimit)", value: $settings.concurrentTaskLimit, in: 1...12)
-            Toggle("启用 HTTP 多线程下载", isOn: $settings.httpMultithreadingEnabled)
-            Stepper("HTTP 线程数：\(settings.httpSegmentCount)", value: $settings.httpSegmentCount, in: 1...32)
+            Stepper(
+                L10n.string("settings_concurrent_tasks", settings.concurrentTaskLimit),
+                value: $settings.concurrentTaskLimit,
+                in: 1...12
+            )
+            Toggle(L10n.string("settings_enable_http_multithreading"), isOn: $settings.httpMultithreadingEnabled)
+            Stepper(
+                L10n.string("settings_http_thread_count", settings.httpSegmentCount),
+                value: $settings.httpSegmentCount,
+                in: 1...32
+            )
                 .disabled(!settings.httpMultithreadingEnabled)
-            Toggle("隐藏 HTTP 分块临时文件", isOn: $settings.hideHTTPTemporaryFiles)
-            Stepper("失败重试次数：\(settings.retryLimit)", value: $settings.retryLimit, in: 0...10)
+            Toggle(L10n.string("settings_hide_http_temp_files"), isOn: $settings.hideHTTPTemporaryFiles)
+            Stepper(
+                L10n.string("settings_retry_count", settings.retryLimit),
+                value: $settings.retryLimit,
+                in: 0...10
+            )
             SpeedLimitSettingsRow(
-                title: "下载限速",
+                title: L10n.string("download_speed_limit"),
                 value: $settings.globalDownloadLimitBytes,
                 values: [0, 1_000_000, 5_000_000, 10_000_000, 20_000_000]
             )
@@ -236,14 +248,14 @@ private struct DownloadSettingsSection: View {
     private var downloadDirectoryRow: some View {
         HStack {
             VStack(alignment: .leading, spacing: layout.value(4)) {
-                Text("默认下载目录")
+                Text(L10n.string("default_download_directory"))
                 Text(settings.defaultDownloadDirectory.path)
                     .font(layout.font(12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             Spacer()
-            Button("选择") {
+            Button(L10n.string("action_choose")) {
                 chooseDirectory()
             }
         }
@@ -256,14 +268,14 @@ private struct TorrentSettingsSection: View {
     var body: some View {
         Section("BT") {
             SpeedLimitSettingsRow(
-                title: "上传限速",
+                title: L10n.string("upload_speed_limit"),
                 value: $settings.globalUploadLimitBytes,
                 values: [0, 256_000, 512_000, 1_000_000, 5_000_000]
             )
             Slider(value: $settings.stopSeedingAtRatio, in: 0...5, step: 0.1) {
-                Text("分享率限制")
+                Text(L10n.string("share_ratio_limit"))
             }
-            Text("分享率达到 \(settings.stopSeedingAtRatio, specifier: "%.1f") 后停止做种")
+            Text(L10n.string("stop_seeding_ratio_message", settings.stopSeedingAtRatio))
                 .foregroundStyle(.secondary)
         }
     }
@@ -273,9 +285,9 @@ private struct SystemSettingsSection: View {
     @Bindable var settings: AppSettings
 
     var body: some View {
-        Section("系统") {
-            Toggle("完成后通知", isOn: $settings.completionNotificationsEnabled)
-            Toggle("剪贴板链接检测", isOn: $settings.clipboardDetectionEnabled)
+        Section(L10n.string("settings_system_section")) {
+            Toggle(L10n.string("completion_notifications"), isOn: $settings.completionNotificationsEnabled)
+            Toggle(L10n.string("clipboard_link_detection"), isOn: $settings.clipboardDetectionEnabled)
         }
     }
 }
@@ -286,8 +298,8 @@ private struct BrowserIntegrationSection: View {
     let layout: ResponsiveLayout
 
     var body: some View {
-        Section("浏览器集成") {
-            Toggle("接管下载后显示确认界面", isOn: $settings.confirmBrowserTakeoverDownloads)
+        Section(L10n.string("browser_integration_section")) {
+            Toggle(L10n.string("confirm_browser_takeover_downloads"), isOn: $settings.confirmBrowserTakeoverDownloads)
             BrowserIntegrationRow(diagnostics: diagnostics, layout: layout)
         }
     }
@@ -307,7 +319,7 @@ private struct SpeedLimitSettingsRow: View {
     }
 
     private func label(for value: Int64) -> String {
-        guard value > 0 else { return "不限速" }
+        guard value > 0 else { return L10n.string("speed_unlimited") }
         return ByteCountFormatter.downloadFormatter.string(fromByteCount: value) + "/s"
     }
 }
@@ -353,13 +365,13 @@ private struct BrowserIntegrationRow: View {
     private var actionButtons: some View {
         HStack(spacing: layout.value(6)) {
             if diagnostics.isRepairable {
-                Button("尝试修复") {
+                Button(L10n.string("action_try_repair")) {
                     diagnostics.repair()
                 }
                 .disabled(diagnostics.isChecking)
             }
 
-            Button("检查") {
+            Button(L10n.string("action_check")) {
                 diagnostics.check()
             }
             .disabled(diagnostics.isChecking)
@@ -370,7 +382,7 @@ private struct BrowserIntegrationRow: View {
                 Image(systemName: "folder")
             }
             .buttonStyle(.borderless)
-            .help("在 Finder 中显示配置文件")
+            .help(L10n.string("help_reveal_manifest"))
         }
     }
 

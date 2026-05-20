@@ -1,0 +1,156 @@
+{
+  "appName": {
+    "message": "SwiftGetX"
+  },
+  "appDescription": {
+    "message": "Send links, pages, media, and detected downloads to SwiftGetX."
+  },
+  "safariDescription": {
+    "message": "Send selected downloads to SwiftGetX."
+  },
+  "checkPair": {
+    "message": "Check / Pair"
+  },
+  "connected": {
+    "message": "connected"
+  },
+  "connectionChecking": {
+    "message": "Checking..."
+  },
+  "connectionConnected": {
+    "message": "Connected"
+  },
+  "connectionFailed": {
+    "message": "Connection failed"
+  },
+  "connectionUnchecked": {
+    "message": "Not checked"
+  },
+  "connectionWaitingPairing": {
+    "message": "Waiting for pairing"
+  },
+  "contextScanPage": {
+    "message": "Scan page download links to SwiftGetX"
+  },
+  "contextSendLink": {
+    "message": "Download link with SwiftGetX"
+  },
+  "contextSendMedia": {
+    "message": "Download media with SwiftGetX"
+  },
+  "contextSendPage": {
+    "message": "Download current page with SwiftGetX"
+  },
+  "contextSendSelection": {
+    "message": "Download selected text with SwiftGetX"
+  },
+  "currentTab": {
+    "message": "Current tab"
+  },
+  "downloadCurrentPage": {
+    "message": "Download current page"
+  },
+  "downloadLink": {
+    "message": "Download link"
+  },
+  "downloadSelection": {
+    "message": "Download selection"
+  },
+  "errorNoDownloadAddress": {
+    "message": "No download address to send"
+  },
+  "errorNoDownloadLinksOnPage": {
+    "message": "No download links found on the current page"
+  },
+  "errorNoScannableTab": {
+    "message": "No tab available to scan"
+  },
+  "errorTaskRejected": {
+    "message": "SwiftGetX did not accept the task"
+  },
+  "linkCount": {
+    "message": "$COUNT$ links",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "nativeHostCannotCommunicate": {
+    "message": "Unable to communicate with Native Host"
+  },
+  "nativeHostHealthy": {
+    "message": "Native Host is running normally"
+  },
+  "nativeHostNoResponse": {
+    "message": "Native Host did not respond"
+  },
+  "nativeHostReturnedError": {
+    "message": "Native Host returned an error"
+  },
+  "pairingOpenedDetail": {
+    "message": "SwiftGetX has been opened. Allow extension pairing in the app, then check again."
+  },
+  "scanDownloadLinks": {
+    "message": "Scan download links"
+  },
+  "sendAll": {
+    "message": "Send all"
+  },
+  "sendFailed": {
+    "message": "Send failed"
+  },
+  "sentToSwiftGetX": {
+    "message": "Sent to SwiftGetX"
+  },
+  "setupPairingOpened": {
+    "message": "SwiftGetX pairing request was opened. Click \"Allow Pairing\" in the app, then check again."
+  },
+  "setupPairingRequested": {
+    "message": "SwiftGetX pairing was requested. Allow pairing in the app, then check again."
+  },
+  "statusCannotScan": {
+    "message": "Cannot scan"
+  },
+  "statusCount": {
+    "message": "$COUNT$ found",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusFailed": {
+    "message": "Failed"
+  },
+  "statusNoLinks": {
+    "message": "No links"
+  },
+  "statusNoPage": {
+    "message": "No page"
+  },
+  "statusNoPermission": {
+    "message": "No permission"
+  },
+  "statusNoSelection": {
+    "message": "No selection"
+  },
+  "statusNotFound": {
+    "message": "Not found"
+  },
+  "statusReady": {
+    "message": "Ready"
+  },
+  "statusScanning": {
+    "message": "Scanning"
+  },
+  "statusSending": {
+    "message": "Sending"
+  },
+  "statusSent": {
+    "message": "Sent"
+  },
+  "takeoverChromeDownloads": {
+    "message": "Take over Chrome downloads"
+  }
+}

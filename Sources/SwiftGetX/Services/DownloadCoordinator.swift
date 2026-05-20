@@ -16,7 +16,7 @@ final class DownloadCoordinator {
     var downloadLimitBytes: Int64 = 0
     var uploadLimitBytes: Int64 = 0
 
-    private(set) var statusMessage = "就绪"
+    private(set) var statusMessage = L10n.string("status_ready")
 
     var selectedTask: DownloadTask? {
         guard let selectedTaskID, let modelContext else { return nil }
@@ -75,7 +75,7 @@ final class DownloadCoordinator {
         guard let tasks = try? modelContext.fetch(descriptor) else { return }
         for task in tasks where task.status == .running || task.status == .verifying {
             task.status = .paused
-            task.appendLog("应用重启后任务已恢复为暂停状态")
+            task.appendLog(L10n.string("log_restored_paused_after_restart"))
         }
         save()
     }
@@ -113,7 +113,7 @@ final class DownloadCoordinator {
                 kind: kind,
                 savePath: saveDirectory.appendingPathComponent(displayName).path
             )
-            task.appendLog("任务已创建")
+            task.appendLog(L10n.string("log_task_created"))
             return task
         }
 
@@ -123,7 +123,7 @@ final class DownloadCoordinator {
         }
         selectedTaskID = tasks.first?.id ?? selectedTaskID
         save()
-        statusMessage = "已添加 \(tasks.count) 个任务"
+        statusMessage = L10n.string("status_added_tasks", tasks.count)
         scheduleQueue()
         return tasks
     }
@@ -153,7 +153,7 @@ final class DownloadCoordinator {
         task.status = .running
         task.errorMessage = nil
         task.retryCount = 0
-        task.appendLog("开始下载")
+        task.appendLog(L10n.string("log_start_download"))
         let request = DownloadRequest(task: task)
         save()
 
@@ -165,7 +165,7 @@ final class DownloadCoordinator {
     func pause(_ task: DownloadTask) {
         task.status = .paused
         task.speedBytesPerSecond = 0
-        task.appendLog("已暂停")
+        task.appendLog(L10n.string("log_paused"))
         let request = DownloadRequest(task: task)
         save()
 
@@ -181,8 +181,8 @@ final class DownloadCoordinator {
     func cancel(_ task: DownloadTask) {
         task.status = .failed
         task.speedBytesPerSecond = 0
-        task.errorMessage = "任务已取消"
-        task.appendLog("任务已取消")
+        task.errorMessage = L10n.string("error_task_cancelled")
+        task.appendLog(L10n.string("log_task_cancelled"))
         let request = DownloadRequest(task: task)
         save()
 
@@ -211,7 +211,7 @@ final class DownloadCoordinator {
 
     func recheck(_ task: DownloadTask) {
         task.status = .verifying
-        task.appendLog("开始校验")
+        task.appendLog(L10n.string("log_start_recheck"))
         let request = DownloadRequest(task: task)
         save()
 
@@ -223,7 +223,7 @@ final class DownloadCoordinator {
     func setTorrentFileSelection(_ task: DownloadTask, selectedFileIndexes: [Int]) {
         guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
         task.selectedFileIndexes = selectedFileIndexes.sorted()
-        task.appendLog("已更新 BT 文件选择：\(selectedFileIndexes.count) 个文件")
+        task.appendLog(L10n.string("log_updated_bt_file_selection", selectedFileIndexes.count))
         let request = DownloadRequest(task: task)
         save()
 
@@ -306,14 +306,14 @@ final class DownloadCoordinator {
         case .completed:
             task.completedAt = .now
             task.speedBytesPerSecond = 0
-            task.appendLog("下载完成")
+            task.appendLog(L10n.string("log_download_completed"))
             if settings?.completionNotificationsEnabled ?? true {
                 NotificationManager.notifyCompletion(for: task)
             }
             scheduleQueue()
         case .failed:
             task.speedBytesPerSecond = 0
-            task.appendLog(snapshot.errorMessage ?? "下载失败")
+            task.appendLog(snapshot.errorMessage ?? L10n.string("error_download_failed"))
             scheduleQueue()
         default:
             break
@@ -335,7 +335,7 @@ final class DownloadCoordinator {
         do {
             try modelContext?.save()
         } catch {
-            statusMessage = "保存失败：\(error.localizedDescription)"
+            statusMessage = L10n.string("status_save_failed", error.localizedDescription)
         }
     }
 }
@@ -354,12 +354,12 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .all: "全部"
-        case .running: "下载中"
-        case .queued: "等待中"
-        case .paused: "已暂停"
-        case .completed: "已完成"
-        case .failed: "失败"
+        case .all: L10n.string("filter_all")
+        case .running: L10n.string("download_status_running")
+        case .queued: L10n.string("download_status_queued")
+        case .paused: L10n.string("download_status_paused")
+        case .completed: L10n.string("download_status_completed")
+        case .failed: L10n.string("download_status_failed")
         case .http: "HTTP"
         case .torrent: "BT"
         }

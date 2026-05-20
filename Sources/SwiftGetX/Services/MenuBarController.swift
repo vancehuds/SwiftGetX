@@ -43,14 +43,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         menu.addItem(
-            withTitle: "新建下载任务",
+            withTitle: L10n.string("command_new_download"),
             action: #selector(showNewTask),
             keyEquivalent: "n"
         ).target = self
 
         if !snapshot.recentTasks.isEmpty {
             menu.addItem(NSMenuItem.separator())
-            let title = disabledItem("最近任务")
+            let title = disabledItem(L10n.string("menu_recent_tasks"))
             menu.addItem(title)
 
             for taskSnapshot in snapshot.recentTasks {
@@ -63,7 +63,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         let pauseItem = menu.addItem(
-            withTitle: "暂停全部",
+            withTitle: L10n.string("command_pause_all"),
             action: #selector(pauseAll),
             keyEquivalent: ""
         )
@@ -71,7 +71,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         pauseItem.isEnabled = snapshot.runningCount > 0 || snapshot.queuedCount > 0 || snapshot.verifyingCount > 0
 
         let resumeItem = menu.addItem(
-            withTitle: "恢复全部",
+            withTitle: L10n.string("command_resume_all"),
             action: #selector(resumeAll),
             keyEquivalent: ""
         )
@@ -79,7 +79,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         resumeItem.isEnabled = snapshot.pausedCount > 0 || snapshot.failedCount > 0 || snapshot.queuedCount > 0
 
         menu.addItem(
-            withTitle: "打开下载目录",
+            withTitle: L10n.string("menu_open_download_directory"),
             action: #selector(openDownloadDirectory),
             keyEquivalent: ""
         ).target = self
@@ -87,13 +87,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         menu.addItem(
-            withTitle: "打开 SwiftGetX",
+            withTitle: L10n.string("menu_open_app"),
             action: #selector(openApp),
             keyEquivalent: ""
         ).target = self
 
         menu.addItem(
-            withTitle: "设置…",
+            withTitle: L10n.string("menu_settings"),
             action: #selector(openSettings),
             keyEquivalent: ","
         ).target = self
@@ -101,7 +101,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         menu.addItem(
-            withTitle: "退出 SwiftGetX",
+            withTitle: L10n.string("menu_quit_app"),
             action: #selector(quitApp),
             keyEquivalent: "q"
         ).target = self
@@ -109,13 +109,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func addSummaryItems(_ snapshot: MenuBarSnapshot) {
         let summary = disabledItem(
-            "全部 \(snapshot.totalCount) · 下载中 \(snapshot.runningCount) · 等待 \(snapshot.queuedCount)"
+            L10n.string(
+                "menu_summary",
+                snapshot.totalCount,
+                snapshot.runningCount,
+                snapshot.queuedCount
+            )
         )
         summary.image = NSImage(systemSymbolName: snapshot.statusSymbolName, accessibilityDescription: nil)
         menu.addItem(summary)
 
         let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: snapshot.totalDownloadSpeed)
-        menu.addItem(disabledItem("速度 \(speed)/s · 已完成 \(snapshot.completedCount) · 失败 \(snapshot.failedCount)"))
+        menu.addItem(disabledItem(
+            L10n.string("menu_speed_summary", speed, snapshot.completedCount, snapshot.failedCount)
+        ))
     }
 
     private func menuItem(for task: MenuBarTaskSnapshot) -> NSMenuItem {
@@ -132,7 +139,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         submenu.addItem(NSMenuItem.separator())
 
         let toggleItem = submenu.addItem(
-            withTitle: task.status == .running ? "暂停" : "开始",
+            withTitle: task.status == .running ? L10n.string("action_pause") : L10n.string("action_start"),
             action: #selector(toggleTask(_:)),
             keyEquivalent: ""
         )
@@ -141,7 +148,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         toggleItem.isEnabled = task.status != .completed && task.status != .verifying
 
         let revealItem = submenu.addItem(
-            withTitle: "在访达中显示",
+            withTitle: L10n.string("action_reveal_in_finder"),
             action: #selector(revealTask(_:)),
             keyEquivalent: ""
         )
@@ -151,7 +158,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         submenu.addItem(NSMenuItem.separator())
 
         let deleteItem = submenu.addItem(
-            withTitle: "删除任务",
+            withTitle: L10n.string("action_delete_task"),
             action: #selector(deleteTask(_:)),
             keyEquivalent: ""
         )
@@ -194,9 +201,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond)
             return "\(task.name) · \(percent)% · \(speed)/s"
         case .completed:
-            return "\(task.name) · 已完成"
+            return "\(task.name) · \(L10n.string("download_status_completed"))"
         case .failed:
-            return "\(task.name) · 失败"
+            return "\(task.name) · \(L10n.string("download_status_failed"))"
         default:
             return "\(task.name) · \(task.status.title) · \(percent)%"
         }
@@ -213,7 +220,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func toolTip(for snapshot: MenuBarSnapshot) -> String {
         let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: snapshot.totalDownloadSpeed)
-        return "SwiftGetX · \(snapshot.runningCount) 下载中 · \(speed)/s"
+        return L10n.string("menu_tooltip", snapshot.runningCount, speed)
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {

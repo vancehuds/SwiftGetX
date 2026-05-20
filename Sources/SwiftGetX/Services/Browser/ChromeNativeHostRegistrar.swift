@@ -63,8 +63,8 @@ struct ChromeNativeHostRegistrar {
         guard !pairedExtensionIDs.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "Chrome 插件未配对",
-                detailMessage: "请从 SwiftGetX Chrome 插件发起连接检查，并在 SwiftGetX 中手动允许配对。",
+                statusMessage: L10n.string("native_host_chrome_extension_unpaired"),
+                detailMessage: L10n.string("native_host_pair_from_extension_detail"),
                 isRepairable: false
             )
         }
@@ -73,8 +73,8 @@ struct ChromeNativeHostRegistrar {
         guard !manifestTargets.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "需要重新配对",
-                detailMessage: "没有在已支持的 Chromium 浏览器配置中找到已配对的 SwiftGetX 插件。",
+                statusMessage: L10n.string("native_host_repairing_required"),
+                detailMessage: L10n.string("native_host_no_supported_profile_detail"),
                 isRepairable: false
             )
         }
@@ -87,8 +87,8 @@ struct ChromeNativeHostRegistrar {
         let okCount = diagnoses.count
         return ChromeNativeHostRegistrationResult(
             status: .ok,
-            statusMessage: "一切正常",
-            detailMessage: "Native Host 已安装，已配置 \(okCount) 个浏览器配置",
+            statusMessage: L10n.string("native_host_all_good"),
+            detailMessage: L10n.string("native_host_installed_profile_count", okCount),
             isRepairable: false
         )
     }
@@ -97,8 +97,11 @@ struct ChromeNativeHostRegistrar {
         guard fileManager.fileExists(atPath: target.manifestDirectory.path) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "Native Host 未安装",
-                detailMessage: "缺少 \(target.browserConfiguration.name) Native Messaging 配置目录",
+                statusMessage: L10n.string("native_host_not_installed"),
+                detailMessage: L10n.string(
+                    "native_host_missing_config_directory",
+                    target.browserConfiguration.name
+                ),
                 isRepairable: true
             )
         }
@@ -108,8 +111,8 @@ struct ChromeNativeHostRegistrar {
         guard fileManager.fileExists(atPath: manifestURL.path) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "Native Host 未安装",
-                detailMessage: "缺少 \(hostName).json 配置文件",
+                statusMessage: L10n.string("native_host_not_installed"),
+                detailMessage: L10n.string("native_host_missing_manifest", hostName),
                 isRepairable: true
             )
         }
@@ -117,8 +120,8 @@ struct ChromeNativeHostRegistrar {
         guard let manifest = readManifest(at: manifestURL) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "配置文件损坏",
-                detailMessage: "无法解析 \(hostName).json",
+                statusMessage: L10n.string("native_host_manifest_corrupt"),
+                detailMessage: L10n.string("native_host_manifest_unreadable", hostName),
                 isRepairable: true
             )
         }
@@ -126,8 +129,8 @@ struct ChromeNativeHostRegistrar {
         guard manifest.name == hostName else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "Host 名称错误",
-                detailMessage: "配置文件 name 应为 \(hostName)，当前为 \(manifest.name)。",
+                statusMessage: L10n.string("native_host_name_wrong"),
+                detailMessage: L10n.string("native_host_name_wrong_detail", hostName, manifest.name),
                 isRepairable: true
             )
         }
@@ -135,8 +138,8 @@ struct ChromeNativeHostRegistrar {
         guard manifest.type == "stdio" else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "Host 类型错误",
-                detailMessage: "配置文件 type 应为 stdio，当前为 \(manifest.type)。",
+                statusMessage: L10n.string("native_host_type_wrong"),
+                detailMessage: L10n.string("native_host_type_wrong_detail", manifest.type),
                 isRepairable: true
             )
         }
@@ -144,8 +147,8 @@ struct ChromeNativeHostRegistrar {
         guard fileManager.fileExists(atPath: manifest.path) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "可执行文件缺失",
-                detailMessage: "路径不存在：\(manifest.path)",
+                statusMessage: L10n.string("native_host_executable_missing"),
+                detailMessage: L10n.string("native_host_path_missing", manifest.path),
                 isRepairable: true
             )
         }
@@ -153,8 +156,8 @@ struct ChromeNativeHostRegistrar {
         guard fileManager.isExecutableFile(atPath: manifest.path) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "可执行文件权限错误",
-                detailMessage: "文件不可执行：\(manifest.path)",
+                statusMessage: L10n.string("native_host_executable_permission_wrong"),
+                detailMessage: L10n.string("native_host_file_not_executable", manifest.path),
                 isRepairable: true
             )
         }
@@ -170,8 +173,8 @@ struct ChromeNativeHostRegistrar {
         if hasPlaceholder {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "扩展来源待清理",
-                detailMessage: "allowed_origins 中包含占位符，可自动改写为已配对的 Chrome 插件 ID。",
+                statusMessage: L10n.string("native_host_origins_need_cleanup"),
+                detailMessage: L10n.string("native_host_origins_placeholder_detail"),
                 isRepairable: true
             )
         }
@@ -179,8 +182,8 @@ struct ChromeNativeHostRegistrar {
         if hasInvalidOrigins {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "扩展来源待清理",
-                detailMessage: "allowed_origins 中包含无效来源，可自动改写为已配对的 Chrome 插件 ID。",
+                statusMessage: L10n.string("native_host_origins_need_cleanup"),
+                detailMessage: L10n.string("native_host_origins_invalid_detail"),
                 isRepairable: true
             )
         }
@@ -188,8 +191,8 @@ struct ChromeNativeHostRegistrar {
         if validOrigins.isEmpty {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "扩展来源缺失",
-                detailMessage: "未写入已配对的 Chrome 插件来源，可自动补写 allowed_origins。",
+                statusMessage: L10n.string("native_host_origins_missing"),
+                detailMessage: L10n.string("native_host_origins_empty_detail"),
                 isRepairable: true
             )
         }
@@ -198,8 +201,8 @@ struct ChromeNativeHostRegistrar {
         if !missingOrigins.isEmpty {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "扩展来源缺失",
-                detailMessage: "配置文件未允许已配对的 SwiftGetX Chrome 插件，可自动补写 allowed_origins。",
+                statusMessage: L10n.string("native_host_origins_missing"),
+                detailMessage: L10n.string("native_host_origins_missing_detail"),
                 isRepairable: true
             )
         }
@@ -208,16 +211,20 @@ struct ChromeNativeHostRegistrar {
         if !unpairedOrigins.isEmpty {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "发现未配对来源",
-                detailMessage: "配置文件允许了未手动配对的 Chrome 插件来源，可自动移除。",
+                statusMessage: L10n.string("native_host_unpaired_origins_found"),
+                detailMessage: L10n.string("native_host_unpaired_origins_detail"),
                 isRepairable: true
             )
         }
 
         return ChromeNativeHostRegistrationResult(
             status: .ok,
-            statusMessage: "一切正常",
-            detailMessage: "\(target.browserConfiguration.name) Native Host 已安装，已允许 \(validOrigins.count) 个插件来源",
+            statusMessage: L10n.string("native_host_all_good"),
+            detailMessage: L10n.string(
+                "native_host_browser_installed_origin_count",
+                target.browserConfiguration.name,
+                validOrigins.count
+            ),
             isRepairable: false
         )
     }
@@ -227,8 +234,8 @@ struct ChromeNativeHostRegistrar {
         guard !pairedExtensionIDs.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "需要手动配对",
-                detailMessage: "请先从 SwiftGetX Chrome 插件发起连接检查，并在 SwiftGetX 中允许该插件配对。",
+                statusMessage: L10n.string("native_host_manual_pairing_required"),
+                detailMessage: L10n.string("native_host_pair_from_extension_detail"),
                 isRepairable: false
             )
         }
@@ -237,8 +244,8 @@ struct ChromeNativeHostRegistrar {
         guard !manifestTargets.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "需要重新配对",
-                detailMessage: "没有在已支持的 Chromium 浏览器配置中找到已配对的 SwiftGetX 插件。",
+                statusMessage: L10n.string("native_host_repairing_required"),
+                detailMessage: L10n.string("native_host_no_supported_profile_detail"),
                 isRepairable: false
             )
         }
@@ -246,8 +253,8 @@ struct ChromeNativeHostRegistrar {
         guard let binaryPath = locateNativeHostBinary() else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "修复失败",
-                detailMessage: "找不到 SwiftGetXNativeHost 可执行文件。请确认 App 完整安装。",
+                statusMessage: L10n.string("native_host_repair_failed"),
+                detailMessage: L10n.string("native_host_binary_missing_detail"),
                 isRepairable: false
             )
         }
@@ -264,8 +271,12 @@ struct ChromeNativeHostRegistrar {
         }
         return ChromeNativeHostRegistrationResult(
             status: .ok,
-            statusMessage: "配置完成",
-            detailMessage: "Native Host 已自动配置 \(manifestTargets.count) 个浏览器配置，并写入 \(allowedOriginCount) 个插件来源",
+            statusMessage: L10n.string("native_host_configured"),
+            detailMessage: L10n.string(
+                "native_host_configured_profile_origin_count",
+                manifestTargets.count,
+                allowedOriginCount
+            ),
             isRepairable: false
         )
     }
@@ -274,8 +285,8 @@ struct ChromeNativeHostRegistrar {
         guard ChromeNativeMessagingOrigin.isValidExtensionID(extensionID) else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "插件 ID 无效",
-                detailMessage: "浏览器传入的 Chrome 插件 ID 不合法，已忽略本次配对请求。",
+                statusMessage: L10n.string("native_host_extension_id_invalid"),
+                detailMessage: L10n.string("native_host_extension_id_invalid_detail"),
                 isRepairable: false
             )
         }
@@ -285,8 +296,8 @@ struct ChromeNativeHostRegistrar {
             guard discoveredIDs.contains(extensionID) else {
                 return ChromeNativeHostRegistrationResult(
                     status: .warning,
-                    statusMessage: "未验证插件 ID",
-                    detailMessage: "Chrome profile 中未找到匹配的 SwiftGetX 插件，已忽略本次配对请求。",
+                    statusMessage: L10n.string("native_host_extension_id_unverified"),
+                    detailMessage: L10n.string("native_host_extension_id_unverified_detail"),
                     isRepairable: false
                 )
             }
@@ -326,8 +337,8 @@ struct ChromeNativeHostRegistrar {
         guard !allowedOrigins.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "需要手动配对",
-                detailMessage: "没有可写入的已配对 Chrome 插件 ID。",
+                statusMessage: L10n.string("native_host_manual_pairing_required"),
+                detailMessage: L10n.string("native_host_no_paired_ids_detail"),
                 isRepairable: false
             )
         }
@@ -347,8 +358,8 @@ struct ChromeNativeHostRegistrar {
         } catch {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
-                statusMessage: "修复失败",
-                detailMessage: "无法写入配置文件：\(error.localizedDescription)",
+                statusMessage: L10n.string("native_host_repair_failed"),
+                detailMessage: L10n.string("native_host_write_failed", error.localizedDescription),
                 isRepairable: false
             )
         }
@@ -360,8 +371,12 @@ struct ChromeNativeHostRegistrar {
 
         return ChromeNativeHostRegistrationResult(
             status: .ok,
-            statusMessage: "配置完成",
-            detailMessage: "\(target.browserConfiguration.name) Native Host 已自动配置，并写入 \(allowedOrigins.count) 个插件来源",
+            statusMessage: L10n.string("native_host_configured"),
+            detailMessage: L10n.string(
+                "native_host_browser_configured_origin_count",
+                target.browserConfiguration.name,
+                allowedOrigins.count
+            ),
             isRepairable: false
         )
     }

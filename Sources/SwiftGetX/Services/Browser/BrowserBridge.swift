@@ -6,7 +6,7 @@ import SwiftGetXCore
 @Observable
 final class BrowserBridge {
     private weak var coordinator: DownloadCoordinator?
-    private(set) var lastMessage: String = "浏览器接管待连接"
+    private(set) var lastMessage: String = L10n.string("browser_bridge_waiting")
 
     func attach(coordinator: DownloadCoordinator) {
         self.coordinator = coordinator
@@ -14,16 +14,19 @@ final class BrowserBridge {
 
     func handleNativeMessage(_ message: BrowserDownloadMessage) {
         guard message.action == "download" else {
-            lastMessage = "忽略未知浏览器消息：\(message.action)"
+            lastMessage = L10n.string("browser_bridge_unknown_message", message.action)
             return
         }
 
         guard let url = message.url, !url.isEmpty else {
-            lastMessage = "浏览器消息缺少下载地址"
+            lastMessage = L10n.string("browser_bridge_missing_url")
             return
         }
 
         coordinator?.add(source: url, suggestedFilename: message.suggestedFilename)
-        lastMessage = "已从 \(message.browser ?? "浏览器") 接收下载任务"
+        lastMessage = L10n.string(
+            "browser_bridge_received_task",
+            message.browser ?? L10n.string("browser_generic")
+        )
     }
 }

@@ -1,15 +1,36 @@
-# 🚀 SwiftGetX
+<p align="center">
+  <a href="https://github.com/vancehudson/SwiftGetX">
+    <img src="Sources/SwiftGetX/Resources/Assets/AppIcon.png" alt="SwiftGetX Logo" width="128" height="128">
+  </a>
+</p>
 
-English | [简体中文](README.md)
+<h1 align="center">SwiftGetX</h1>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: macOS 14+](https://img.shields.io/badge/Platform-macOS%2014%2B-flat.svg)]()
-[![Swift: 6.0](https://img.shields.io/badge/Swift-6.0-orange.svg)]()
+<p align="center">
+  <strong>Lightweight, Premium Native macOS Multi-threaded & BitTorrent Download Manager</strong>
+</p>
+
+<p align="center">
+  <strong>English</strong> | <a href="README.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-0066b2.svg?style=flat&logo=github" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Platform-macOS%2014%2B-4ebd31.svg?style=flat&logo=apple" alt="Platform: macOS 14+">
+  <img src="https://img.shields.io/badge/Swift-6.0-f05138.svg?style=flat&logo=swift" alt="Swift: 6.0">
+  <img src="https://img.shields.io/badge/Xcode-15.0%2B-1572B6.svg?style=flat&logo=xcode" alt="Xcode: 15.0+">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/UI-SwiftUI-FF5A09.svg?style=flat&logo=swift" alt="UI: SwiftUI">
+  <img src="https://img.shields.io/badge/Database-SwiftData-E34F26.svg?style=flat" alt="Database: SwiftData">
+  <img src="https://img.shields.io/badge/Engine-HTTP%20%2F%20libtorrent-darkviolet.svg?style=flat" alt="Engine: HTTP / libtorrent">
+  <img src="https://img.shields.io/badge/Extensions-Chrome%20%2F%20Safari-8A2BE2.svg?style=flat&logo=googlechrome" alt="Extensions: Chrome / Safari">
+</p>
+
+
 
 **SwiftGetX** is a lightweight, high-performance native download manager prototype designed for macOS 14+, built entirely using **SwiftUI**, **SwiftData**, and **Swift Package Manager**. It delivers a premium native macOS feel, frictionless browser takeover integration, and a highly pluggable BitTorrent engine abstraction.
-
-> [!IMPORTANT]
-> **Open-Source Project Status**: This repository is designed as a **high-fidelity engineering prototype** for developers, power users, and geeks. It is not an end-user commercial product pre-configured with App Store sandboxing, notarized build codes, or commercial certificates. Unlocking full workflows (e.g. Safari Web Extensions, active Native Messaging registration, and C++ torrent modules) requires local compilation, a valid Apple Developer Account, or local Ad-hoc codesigning exceptions.
 
 ---
 
@@ -45,24 +66,33 @@ English | [简体中文](README.md)
 
 SwiftGetX is engineered with explicit unidirectional dependencies and clear module boundaries:
 
-```text
-  [ Chrome/Atlas Extension ] <----(Native Messaging)----> [ SwiftGetXNativeHost ]
-                                                                 |
-                                                               (Deep Link)
-                                                                 v
-[ SwiftUI UI / Views ] ----> [ Services / Coordinator ] ----> [ SwiftGetX (Main App) ]
-                                      |                              |
-                                      v                              v
-                          [ DownloadEngineAdapter ]            [ SwiftData Models ]
-                            /                   \
-                           v                     v
-              [ HTTPDownloadEngine ]     [ TorrentEngineAdapter ]
-                                                    |
-                                      (SWIFTGETX_ENABLE_LIBTORRENT=1)
-                                                    v
-                                         [ CSwiftGetXLibtorrent ] (C++ Wrapper)
-                                                    |
-                                         [ Vendor/libtorrent ] (arvidn)
+```mermaid
+graph TD
+    classDef main fill:#E3F2FD,stroke:#1565C0,stroke-width:2px;
+    classDef browser fill:#F1F8E9,stroke:#558B2F,stroke-width:2px;
+    classDef core fill:#EDE7F6,stroke:#651FFF,stroke-width:2px;
+    classDef engine fill:#FFF3E0,stroke:#FF8F00,stroke-width:2px;
+    
+    Chrome["Chrome/Atlas Extension (Manifest V3)"]:::browser
+    NativeHost["SwiftGetXNativeHost (Lightweight C Bridge)"]:::browser
+    MainApp["SwiftGetX Main App (SwiftUI View)"]:::main
+    Models["SwiftData Persistent Models"]:::main
+    Coordinator["Services & Coordinator Layer"]:::main
+    Adapter["DownloadEngineAdapter Interface"]:::core
+    HTTPEngine["HTTPDownloadEngine (Multi-segmented)"]:::engine
+    TorrentAdapter["TorrentEngineAdapter BT Interface"]:::core
+    LibtorrentWrapper["CSwiftGetXLibtorrent (C++ Wrapper)"]:::engine
+    Libtorrent["arvidn/libtorrent Pinned Core"]:::engine
+
+    Chrome <-->|"Native Messaging"| NativeHost
+    NativeHost -->|"Deep Link Scheme Dispatch"| MainApp
+    MainApp --> Models
+    MainApp --> Coordinator
+    Coordinator --> Adapter
+    Adapter --> HTTPEngine
+    Adapter --> TorrentAdapter
+    TorrentAdapter -->|"SWIFTGETX_ENABLE_LIBTORRENT=1"| LibtorrentWrapper
+    LibtorrentWrapper --> Libtorrent
 ```
 
 ### 📂 Directory Structure

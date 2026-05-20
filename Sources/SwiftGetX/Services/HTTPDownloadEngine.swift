@@ -33,7 +33,7 @@ final class HTTPDownloadEngine: DownloadEngine {
 
     func start(_ request: DownloadRequest) async {
         guard let url = URL(string: request.source) else {
-            emitFailure(request, message: "链接格式无效")
+            emitFailure(request, message: L10n.string("error_invalid_url"))
             return
         }
 
@@ -81,11 +81,13 @@ final class HTTPDownloadEngine: DownloadEngine {
                 downloadedBytes: size,
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
-                errorMessage: status == .failed ? "文件大小与任务记录不一致" : nil,
+                errorMessage: status == .failed ? L10n.string("error_file_size_mismatch") : nil,
                 supportsResume: request.supportsResume,
                 eTag: request.eTag,
                 lastModified: request.lastModified,
-                connectionSummary: request.supportsResume ? "HTTP · 可续传" : "HTTP · 不支持续传"
+                connectionSummary: request.supportsResume
+                    ? L10n.string("http_connection_resume_only")
+                    : L10n.string("http_connection_no_resume_only")
             )
         )
     }
@@ -199,7 +201,7 @@ private struct HTTPDownloadWorker: Sendable {
         await runState.deactivate(request.id)
         emit(Self.failureSnapshot(
             for: request,
-            message: lastError?.localizedDescription ?? "下载失败"
+            message: lastError?.localizedDescription ?? L10n.string("error_download_failed")
         ))
     }
 
@@ -382,7 +384,7 @@ private struct HTTPDownloadWorker: Sendable {
 
         let (stream, response) = try await URLSession.shared.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw HTTPDownloadError.invalidResponse("服务器响应无效")
+            throw HTTPDownloadError.invalidResponse(L10n.string("error_invalid_server_response"))
         }
 
         var appendExistingBytes = shouldResume
@@ -739,7 +741,7 @@ private struct HTTPDownloadWorker: Sendable {
 
         let localBytes = HTTPTemporaryLayout.localSize(at: segmentURL)
         guard localBytes <= segment.length else {
-            throw HTTPDownloadError.invalidLocalData("分片 \(segment.index) 大小超过预期")
+            throw HTTPDownloadError.invalidLocalData(L10n.string("error_segment_too_large", segment.index))
         }
         guard localBytes < segment.length else { return }
 
@@ -750,7 +752,7 @@ private struct HTTPDownloadWorker: Sendable {
 
         let (stream, response) = try await URLSession.shared.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw HTTPDownloadError.invalidResponse("服务器响应无效")
+            throw HTTPDownloadError.invalidResponse(L10n.string("error_invalid_server_response"))
         }
         guard httpResponse.statusCode == 206 else {
             if (200...299).contains(httpResponse.statusCode) {
@@ -759,7 +761,7 @@ private struct HTTPDownloadWorker: Sendable {
             if (400...599).contains(httpResponse.statusCode) {
                 throw HTTPDownloadError.serverStatus(httpResponse.statusCode)
             }
-            throw HTTPDownloadError.invalidResponse("服务器未按 Range 返回分片")
+            throw HTTPDownloadError.invalidResponse(L10n.string("error_server_did_not_return_range"))
         }
 
         try validateRangeResponse(
@@ -947,7 +949,7 @@ private struct HTTPDownloadWorker: Sendable {
     ) throws -> HTTPDownloadManifest {
         let totalBytes = metadata.contentLength > 0 ? metadata.contentLength : request.totalBytes
         guard totalBytes > 0 else {
-            throw HTTPDownloadError.invalidLocalData("缺少分片任务的总大小，无法安全恢复")
+            throw HTTPDownloadError.invalidLocalData(L10n.string("error_missing_segment_total_size"))
         }
 
         let indexes = layout.existingSegmentIndexes(maxSegments: segmentScanLimit)
@@ -997,14 +999,14 @@ private struct HTTPDownloadWorker: Sendable {
         guard let rawRange = response.value(forHTTPHeaderField: "Content-Range"),
               let contentRange = HTTPContentRange(rawRange)
         else {
-            throw HTTPDownloadError.invalidResponse("缺少 Content-Range")
+            throw HTTPDownloadError.invalidResponse(L10n.string("error_missing_content_range"))
         }
 
         guard contentRange.start == expectedStart else {
-            throw HTTPDownloadError.invalidResponse("Content-Range 起点不匹配")
+            throw HTTPDownloadError.invalidResponse(L10n.string("error_content_range_start_mismatch"))
         }
         if let expectedEnd, contentRange.end != expectedEnd {
-            throw HTTPDownloadError.invalidResponse("Content-Range 终点不匹配")
+            throw HTTPDownloadError.invalidResponse(L10n.string("error_content_range_end_mismatch"))
         }
         if expectedTotal > 0, let total = contentRange.total, total != expectedTotal {
             throw HTTPDownloadError.validatorChanged
@@ -1039,7 +1041,7 @@ private struct HTTPDownloadWorker: Sendable {
                     .temporaryProgress(maxSegments: segmentScanLimit),
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
-                errorMessage: "第 \(attempt) 次重试：\(error.localizedDescription)",
+                errorMessage: L10n.string("error_retry_attempt", attempt, error.localizedDescription),
                 supportsResume: request.supportsResume,
                 eTag: request.eTag,
                 lastModified: request.lastModified,
@@ -1053,9 +1055,13 @@ private struct HTTPDownloadWorker: Sendable {
     }
 
     private func connectionSummary(segmentCount: Int, supportsResume: Bool) -> String {
-        let streamDescription = segmentCount > 1 ? "\(segmentCount) 分片" : "单流"
-        let resumeDescription = supportsResume ? "可续传" : "不支持续传"
-        return "HTTP · \(streamDescription) · \(resumeDescription)"
+        let streamDescription = segmentCount > 1
+            ? L10n.string("http_connection_segments", segmentCount)
+            : L10n.string("http_connection_single_stream")
+        let resumeDescription = supportsResume
+            ? L10n.string("http_connection_resumable")
+            : L10n.string("http_connection_not_resumable")
+        return L10n.string("http_connection_summary", streamDescription, resumeDescription)
     }
 
     private static func isRetryable(_ error: Error) -> Bool {
@@ -1151,7 +1157,7 @@ private struct HTTPTemporaryLayout: Sendable {
         try plan.segments.reduce(Int64(0)) { partialResult, segment in
             let size = Self.localSize(at: segmentURL(index: segment.index))
             guard size <= segment.length else {
-                throw HTTPDownloadError.invalidLocalData("分片 \(segment.index) 大小超过预期")
+                throw HTTPDownloadError.invalidLocalData(L10n.string("error_segment_too_large", segment.index))
             }
             return partialResult + size
         }
@@ -1341,15 +1347,15 @@ enum HTTPDownloadError: LocalizedError, Equatable {
         case .invalidResponse(let message):
             message
         case .serverStatus(let status):
-            "服务器返回 HTTP \(status)"
+            L10n.string("error_server_status", status)
         case .incompleteSegment:
-            "下载分片不完整"
+            L10n.string("error_incomplete_segment")
         case .invalidLocalData(let message):
             message
         case .rangeNotSupported:
-            "服务器不支持断点续传"
+            L10n.string("error_range_not_supported")
         case .validatorChanged:
-            "服务器文件已变化，已保留临时文件以避免合并错误数据"
+            L10n.string("error_validator_changed")
         }
     }
 }

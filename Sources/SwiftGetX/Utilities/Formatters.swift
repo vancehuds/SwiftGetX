@@ -19,12 +19,12 @@ enum TimeFormatter {
         let seconds = total % 60
 
         if hours > 0 {
-            return "\(hours)时 \(minutes)分"
+            return L10n.string("eta_hours_minutes", hours, minutes)
         }
         if minutes > 0 {
-            return "\(minutes)分 \(seconds)秒"
+            return L10n.string("eta_minutes_seconds", minutes, seconds)
         }
-        return "\(seconds)秒"
+        return L10n.string("eta_seconds", seconds)
     }
 }
 

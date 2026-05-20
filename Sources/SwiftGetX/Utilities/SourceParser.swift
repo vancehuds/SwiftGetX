@@ -25,11 +25,11 @@ enum SourceParser {
             if let dn = magnetDisplayName(from: source) {
                 return sanitizeFilename(dn)
             }
-            return "磁力任务-\(shortHash(source)).torrent"
+            return L10n.string("default_magnet_task_filename", String(shortHash(source))) + ".torrent"
         case .torrentFile:
-            return urlFilename(source) ?? "种子任务.torrent"
+            return urlFilename(source) ?? L10n.string("default_torrent_task_filename")
         case .http:
-            return urlFilename(source) ?? "未命名下载"
+            return urlFilename(source) ?? L10n.string("default_unnamed_download_filename")
         }
     }
 

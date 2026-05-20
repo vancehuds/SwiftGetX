@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,36 +10,36 @@
   <header class="topbar">
     <div>
       <h1>SwiftGetX</h1>
-      <p id="active-tab">当前标签页</p>
+      <p id="active-tab" data-i18n="currentTab">Current tab</p>
     </div>
-    <span id="status" class="status">就绪</span>
+    <span id="status" class="status" data-i18n="statusReady">Ready</span>
   </header>
 
   <main>
     <div class="actions">
-      <button id="send-current" type="button">下载当前页面</button>
-      <button id="send-selection" type="button">下载选中文本</button>
-      <button id="scan-links" type="button">扫描下载链接</button>
+      <button id="send-current" type="button" data-i18n="downloadCurrentPage">Download current page</button>
+      <button id="send-selection" type="button" data-i18n="downloadSelection">Download selection</button>
+      <button id="scan-links" type="button" data-i18n="scanDownloadLinks">Scan download links</button>
     </div>
 
     <label class="toggle">
       <input id="takeover-downloads" type="checkbox">
-      <span>接管 Chrome 下载</span>
+      <span data-i18n="takeoverChromeDownloads">Take over Chrome downloads</span>
     </label>
 
     <section id="connection-section" class="connection-section">
       <div class="connection-header">
         <span id="connection-indicator" class="connection-indicator"></span>
-        <span id="connection-label">未检查</span>
-        <button id="check-connection" class="text-button" type="button">检查/配对</button>
+        <span id="connection-label" data-i18n="connectionUnchecked">Not checked</span>
+        <button id="check-connection" class="text-button" type="button" data-i18n="checkPair">Check / Pair</button>
       </div>
       <p id="connection-detail" class="connection-detail"></p>
     </section>
 
     <section id="candidate-panel" class="candidate-panel" hidden>
       <div class="candidate-header">
-        <strong id="candidate-count">0 个链接</strong>
-        <button id="send-candidates" class="text-button" type="button">全部发送</button>
+        <strong id="candidate-count">0 links</strong>
+        <button id="send-candidates" class="text-button" type="button" data-i18n="sendAll">Send all</button>
       </div>
       <ul id="candidate-list"></ul>
     </section>

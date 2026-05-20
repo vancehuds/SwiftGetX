@@ -1,7 +1,7 @@
 browser.runtime.onInstalled.addListener(() => {
   browser.contextMenus.create({
     id: "send-to-swiftgetx",
-    title: "使用 SwiftGetX 下载",
+    title: browser.i18n.getMessage("contextSendLink") || "Download link with SwiftGetX",
     contexts: ["link"]
   });
 });

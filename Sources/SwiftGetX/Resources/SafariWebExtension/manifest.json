@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "SwiftGetX",
-  "description": "Send selected downloads to SwiftGetX.",
+  "name": "__MSG_appName__",
+  "description": "__MSG_safariDescription__",
+  "default_locale": "en",
   "version": "0.1.0",
   "permissions": ["contextMenus", "nativeMessaging"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "SwiftGetX"
+    "default_title": "__MSG_appName__"
   }
 }

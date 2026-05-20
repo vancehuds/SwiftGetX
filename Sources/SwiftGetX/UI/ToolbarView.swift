@@ -42,7 +42,7 @@ struct ToolbarView: View {
                         Image(systemName: "plus")
                     }
                     .buttonStyle(IconButtonStyle())
-                    .help("新建下载任务")
+                    .help(L10n.string("command_new_download"))
 
                     Button {
                         guard let task = coordinator.selectedTask else { return }
@@ -57,7 +57,7 @@ struct ToolbarView: View {
                     }
                     .buttonStyle(IconButtonStyle())
                     .disabled(coordinator.selectedTask == nil)
-                    .help("开始或暂停选中任务")
+                    .help(L10n.string("help_toggle_selected_task"))
 
                     Button {
                         NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
@@ -66,7 +66,7 @@ struct ToolbarView: View {
                     }
                     .buttonStyle(IconButtonStyle())
                     .disabled(coordinator.selectedTask == nil)
-                    .help("删除任务")
+                    .help(L10n.string("action_delete_task"))
                 }
 
                 Divider()
@@ -78,7 +78,7 @@ struct ToolbarView: View {
                         .font(layout.font(13, weight: .medium))
                         .foregroundStyle(.secondary)
 
-                    TextField("搜索任务、链接或文件名...", text: $coordinator.searchText)
+                    TextField(L10n.string("search_placeholder"), text: $coordinator.searchText)
                         .textFieldStyle(.plain)
                         .focused($isSearchFocused)
                         .font(layout.font(13))
@@ -144,7 +144,7 @@ struct ToolbarView: View {
                         Image(systemName: "gearshape")
                     }
                     .buttonStyle(IconButtonStyle())
-                    .help("设置")
+                    .help(L10n.string("menu_settings_plain"))
                 }
             }
             .padding(.horizontal, layout.value(12))
@@ -159,7 +159,7 @@ private struct SpeedLimitMenu: View {
 
     var body: some View {
         Menu {
-            Button("不限速") {
+            Button(L10n.string("speed_unlimited")) {
                 coordinator.setSpeedLimit(downloadBytesPerSecond: 0, uploadBytesPerSecond: 0)
             }
             Button("1 MB/s") {
@@ -172,7 +172,7 @@ private struct SpeedLimitMenu: View {
                 coordinator.setSpeedLimit(downloadBytesPerSecond: 10_000_000, uploadBytesPerSecond: 1_000_000)
             }
         } label: {
-            Label("限速", systemImage: "speedometer")
+            Label(L10n.string("speed_limit"), systemImage: "speedometer")
                 .labelStyle(.iconOnly)
                 .font(layout.font(14, weight: .semibold))
                 .frame(width: layout.value(34), height: layout.value(34))
@@ -182,6 +182,6 @@ private struct SpeedLimitMenu: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .help("全局限速")
+        .help(L10n.string("global_speed_limit"))
     }
 }

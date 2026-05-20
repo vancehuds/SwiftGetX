@@ -6,6 +6,7 @@ const DEFAULT_OPTIONS = {
 let activeTab;
 let candidates = [];
 
+const i18n = (key, substitutions) => chrome.i18n.getMessage(key, substitutions) || key;
 const activeTabLabel = document.getElementById("active-tab");
 const statusLabel = document.getElementById("status");
 const takeoverDownloads = document.getElementById("takeover-downloads");
@@ -34,9 +35,10 @@ takeoverDownloads.addEventListener("change", () => {
 init();
 
 async function init() {
+  localizeStaticText();
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   activeTab = tabs[0];
-  activeTabLabel.textContent = activeTab?.title || "当前标签页";
+  activeTabLabel.textContent = activeTab?.title || i18n("currentTab");
 
   chrome.storage.local.get(DEFAULT_OPTIONS, (options) => {
     takeoverDownloads.checked = Boolean(options.takeoverDownloads);
@@ -47,7 +49,7 @@ async function init() {
 
 async function sendCurrentPage() {
   if (!activeTab?.url) {
-    setStatus("无页面", "error");
+    setStatus(i18n("statusNoPage"), "error");
     return;
   }
 
@@ -62,7 +64,7 @@ async function sendCurrentPage() {
 
 async function sendSelection() {
   if (!activeTab?.id) {
-    setStatus("无选区", "error");
+    setStatus(i18n("statusNoSelection"), "error");
     return;
   }
 
@@ -74,12 +76,12 @@ async function sendSelection() {
     });
     selection = injection?.[0]?.result || "";
   } catch {
-    setStatus("无权限", "error");
+    setStatus(i18n("statusNoPermission"), "error");
     return;
   }
 
   if (!selection) {
-    setStatus("无选区", "error");
+    setStatus(i18n("statusNoSelection"), "error");
     return;
   }
 
@@ -94,11 +96,11 @@ async function sendSelection() {
 
 async function scanLinks() {
   if (!activeTab?.id) {
-    setStatus("无法扫描", "error");
+    setStatus(i18n("statusCannotScan"), "error");
     return;
   }
 
-  setStatus("扫描中", "");
+  setStatus(i18n("statusScanning"), "");
   try {
     const injection = await chrome.scripting.executeScript({
       target: { tabId: activeTab.id },
@@ -108,21 +110,21 @@ async function scanLinks() {
   } catch {
     candidates = [];
     candidatePanel.hidden = true;
-    setStatus("无权限", "error");
+    setStatus(i18n("statusNoPermission"), "error");
     return;
   }
   renderCandidates();
 
   if (candidates.length === 0) {
-    setStatus("未发现", "error");
+    setStatus(i18n("statusNotFound"), "error");
   } else {
-    setStatus(`${candidates.length} 个`, "ok");
+    setStatus(i18n("statusCount", String(candidates.length)), "ok");
   }
 }
 
 async function sendAllCandidates() {
   if (candidates.length === 0) {
-    setStatus("无链接", "error");
+    setStatus(i18n("statusNoLinks"), "error");
     return;
   }
 
@@ -136,7 +138,7 @@ async function sendAllCandidates() {
 }
 
 async function sendDownload(payload) {
-  setStatus("发送中", "");
+  setStatus(i18n("statusSending"), "");
   const response = await chrome.runtime.sendMessage({
     type: "swiftgetx-download",
     payload,
@@ -144,15 +146,15 @@ async function sendDownload(payload) {
   });
 
   if (response?.ok) {
-    setStatus("已发送", "ok");
+    setStatus(i18n("statusSent"), "ok");
   } else {
-    setStatus("失败", "error");
+    setStatus(i18n("statusFailed"), "error");
   }
 }
 
 function renderCandidates() {
   candidatePanel.hidden = candidates.length === 0;
-  candidateCount.textContent = `${candidates.length} 个链接`;
+  candidateCount.textContent = i18n("linkCount", String(candidates.length));
   candidateList.replaceChildren();
 
   for (const candidate of candidates.slice(0, 12)) {
@@ -161,7 +163,7 @@ function renderCandidates() {
     const url = document.createElement("div");
 
     title.className = "candidate-title";
-    title.textContent = candidate.title || filenameFromURL(candidate.url) || "下载链接";
+    title.textContent = candidate.title || filenameFromURL(candidate.url) || i18n("downloadLink");
     url.className = "candidate-url";
     url.textContent = candidate.url;
 
@@ -176,7 +178,7 @@ function setStatus(text, state) {
 }
 
 async function checkConnection(options = {}) {
-  setConnectionState("checking", "检查中…", "");
+  setConnectionState("checking", i18n("connectionChecking"), "");
 
   try {
     const response = await chrome.runtime.sendMessage({
@@ -188,19 +190,28 @@ async function checkConnection(options = {}) {
 
     if (response?.ok) {
       const version = response.version ? `v${response.version}` : "";
-      setConnectionState("ok", "已连接", version ? `Native Host ${version}` : "Native Host 运行正常");
+      setConnectionState("ok", i18n("connectionConnected"), version ? `Native Host ${version}` : i18n("nativeHostHealthy"));
     } else if (response?.setupOpened || response?.setupThrottled) {
       setConnectionState(
         "checking",
-        "等待配对",
-        response.message || "已打开 SwiftGetX，请在软件中允许插件配对后再次检查。"
+        i18n("connectionWaitingPairing"),
+        response.message || i18n("pairingOpenedDetail")
       );
     } else {
-      setConnectionState("error", "连接失败", response?.message || "Native Host 未响应");
+      setConnectionState("error", i18n("connectionFailed"), response?.message || i18n("nativeHostNoResponse"));
     }
   } catch (error) {
-    setConnectionState("error", "连接失败", error.message || "无法与 Native Host 通信");
+    setConnectionState("error", i18n("connectionFailed"), error.message || i18n("nativeHostCannotCommunicate"));
   }
+}
+
+function localizeStaticText() {
+  document.documentElement.lang = chrome.i18n.getUILanguage().replace("_", "-");
+  for (const element of document.querySelectorAll("[data-i18n]")) {
+    element.textContent = i18n(element.dataset.i18n);
+  }
+  document.title = i18n("appName");
+  candidateCount.textContent = i18n("linkCount", "0");
 }
 
 function setConnectionState(state, label, detail) {

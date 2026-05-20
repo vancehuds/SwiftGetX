@@ -260,7 +260,7 @@ struct LiquidProgressBar: View {
             }
         }
         .frame(height: layout.value(6))
-        .accessibilityLabel("下载进度")
+        .accessibilityLabel(L10n.string("accessibility_download_progress"))
         .accessibilityValue(progress.formatted(.percent.precision(.fractionLength(0))))
     }
 }

@@ -24,7 +24,7 @@ enum NotificationManager {
         guard canUseUserNotifications else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "下载完成"
+        content.title = L10n.string("notification_download_complete")
         content.body = task.name
         content.sound = .default
 

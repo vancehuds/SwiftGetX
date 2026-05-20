@@ -63,7 +63,7 @@ struct NewTaskSheet: View {
                 }
 
                 VStack(alignment: .leading, spacing: layout.value(3)) {
-                    Text("新建下载任务")
+                    Text(L10n.string("new_task_title"))
                         .font(layout.font(16, weight: .semibold))
                         .foregroundStyle(Color.primary)
                     Text(subtitle)
@@ -79,7 +79,7 @@ struct NewTaskSheet: View {
 
             ZStack(alignment: .topLeading) {
                 if sourceText.isEmpty {
-                    Text("在此粘贴一个或多个下载链接（支持多行直链、磁力链接、或种子 URL）")
+                    Text(L10n.string("new_task_source_placeholder"))
                         .font(layout.font(12))
                         .foregroundStyle(.secondary.opacity(0.8))
                         .padding(.horizontal, layout.value(14))
@@ -105,7 +105,7 @@ struct NewTaskSheet: View {
                     .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: layout.value(8), style: .continuous))
 
                 VStack(alignment: .leading, spacing: layout.value(3)) {
-                    Text("保存目录")
+                    Text(L10n.string("save_directory"))
                         .font(layout.font(10, weight: .semibold))
                         .foregroundStyle(.secondary)
                     Text(saveDirectory.path)
@@ -116,7 +116,7 @@ struct NewTaskSheet: View {
 
                 Spacer()
 
-                Button("选择目录") {
+                Button(L10n.string("choose_directory")) {
                     chooseDirectory()
                 }
                 .font(layout.font(11.5, weight: .semibold))
@@ -130,7 +130,7 @@ struct NewTaskSheet: View {
             SourcePreviewView(sourceText: sourceText)
 
             HStack {
-                Button("取消") {
+                Button(L10n.string("action_cancel")) {
                     dismiss()
                 }
                 .buttonStyle(.bordered)
@@ -142,7 +142,7 @@ struct NewTaskSheet: View {
                     coordinator.add(source: sourceText, saveDirectory: saveDirectory, suggestedFilename: suggestedFilename)
                     dismiss()
                 } label: {
-                    Label("添加任务", systemImage: "plus.circle.fill")
+                    Label(L10n.string("add_task"), systemImage: "plus.circle.fill")
                         .font(layout.font(12, weight: .semibold))
                 }
                 .buttonStyle(.borderedProminent)
@@ -154,9 +154,9 @@ struct NewTaskSheet: View {
 
     private var subtitle: String {
         if let draft, draft.isBrowserTakeover {
-            return "浏览器下载已被接管，确认保存目录后即可添加任务。"
+            return L10n.string("new_task_browser_takeover_subtitle")
         }
-        return "支持一次粘贴多个直链、磁力链接或种子文件地址。"
+        return L10n.string("new_task_subtitle")
     }
 
     private func apply(_ draft: DownloadDraft?) {
@@ -188,7 +188,7 @@ private struct BrowserTakeoverBanner: View {
                 .frame(width: layout.value(24), height: layout.value(24))
 
             VStack(alignment: .leading, spacing: layout.value(3)) {
-                Text("\(draft.browser ?? "浏览器") 接管下载")
+                Text(L10n.string("browser_takeover_download_title", draft.browser ?? L10n.string("browser_generic")))
                     .font(layout.font(12, weight: .semibold))
                 Text(detailText)
                     .font(layout.font(11))
@@ -206,9 +206,9 @@ private struct BrowserTakeoverBanner: View {
 
     private var detailText: String {
         if let suggestedFilename = draft.suggestedFilename, !suggestedFilename.isEmpty {
-            return "已预填 \(suggestedFilename)，可在添加前调整链接或保存目录。"
+            return L10n.string("browser_takeover_prefilled_filename", suggestedFilename)
         }
-        return "已预填下载链接，可在添加前调整链接或保存目录。"
+        return L10n.string("browser_takeover_prefilled_link")
     }
 }
 
@@ -222,17 +222,17 @@ private struct SourcePreviewView: View {
 
         VStack(alignment: .leading, spacing: layout.value(10)) {
             HStack {
-                Text("识别预览")
+                Text(L10n.string("source_preview_title"))
                     .font(layout.font(10, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("已识别 \(sources.count) 个任务")
+                Text(L10n.string("source_preview_count", sources.count))
                     .font(layout.font(10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(sources.isEmpty ? .secondary : Color.primary)
             }
 
             if sources.isEmpty {
-                Text("粘贴合法链接后会在此处实时显示识别到的类型与资源名预览。")
+                Text(L10n.string("source_preview_empty"))
                     .font(layout.font(11))
                     .foregroundStyle(.secondary.opacity(0.8))
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -258,7 +258,7 @@ private struct SourcePreviewView: View {
                         }
                         
                         if sources.count > 4 {
-                            Text("... 以及其它 \(sources.count - 4) 个任务")
+                            Text(L10n.string("source_preview_more_tasks", sources.count - 4))
                                 .font(layout.font(10, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, layout.value(8))

@@ -12,7 +12,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: layout.value(10)) {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: layout.value(5)) {
-                        Text("任务")
+                        Text(L10n.string("sidebar_tasks"))
                             .font(layout.font(11, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, layout.value(12))
@@ -38,7 +38,7 @@ struct SidebarView: View {
 
                 VStack(alignment: .leading, spacing: layout.value(8)) {
                     HStack {
-                        Label("浏览器接管", systemImage: "safari")
+                        Label(L10n.string("browser_takeover"), systemImage: "safari")
                             .font(layout.font(12, weight: .semibold))
                             .foregroundStyle(.primary)
 
@@ -49,7 +49,7 @@ struct SidebarView: View {
                             .frame(width: layout.value(6), height: layout.value(6))
                     }
 
-                    Text("Safari + Chrome 扩展已就绪")
+                    Text(L10n.string("browser_extensions_ready"))
                         .font(layout.font(10.5))
                         .lineSpacing(layout.value(2))
                         .foregroundStyle(.secondary)

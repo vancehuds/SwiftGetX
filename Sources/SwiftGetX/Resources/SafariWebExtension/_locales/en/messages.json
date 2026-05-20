@@ -1,0 +1,11 @@
+{
+  "appName": {
+    "message": "SwiftGetX"
+  },
+  "contextSendLink": {
+    "message": "Download link with SwiftGetX"
+  },
+  "safariDescription": {
+    "message": "Send selected downloads to SwiftGetX."
+  }
+}

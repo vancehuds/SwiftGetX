@@ -27,7 +27,10 @@ struct ChromeExtensionInstallation: Equatable {
 
 struct ChromeExtensionDiscovery {
     static let defaultExtensionName = "SwiftGetX"
+    static let defaultLocalizedExtensionNameToken = "__MSG_appName__"
     static let defaultExtensionDescriptionPrefix = "Send links, pages, media, and detected downloads to SwiftGetX."
+    static let defaultChineseExtensionDescriptionPrefix = "发送链接、页面、媒体和检测到的下载到 SwiftGetX。"
+    static let defaultLocalizedExtensionDescriptionToken = "__MSG_appDescription__"
     static let defaultExtensionPopupPath = "popup.html"
 
     let browserConfigurations: [ChromiumBrowserConfiguration]
@@ -261,12 +264,12 @@ struct ChromeExtensionDiscovery {
     }
 
     private func isTargetManifest(_ manifest: [String: Any]) -> Bool {
-        guard let name = manifest["name"] as? String,
-              name.caseInsensitiveCompare(extensionName) == .orderedSame else {
+        guard let name = manifest["name"] as? String else {
             return false
         }
 
-        return true
+        return name.caseInsensitiveCompare(extensionName) == .orderedSame
+            || name == Self.defaultLocalizedExtensionNameToken
     }
 
     private func hasNativeMessagingPermission(_ manifest: [String: Any]) -> Bool {
@@ -277,7 +280,11 @@ struct ChromeExtensionDiscovery {
         let action = manifest["action"] as? [String: Any]
         let description = manifest["description"] as? String
         return action?["default_popup"] as? String == Self.defaultExtensionPopupPath
-            && description == Self.defaultExtensionDescriptionPrefix
+            && (
+                description == Self.defaultExtensionDescriptionPrefix
+                    || description == Self.defaultChineseExtensionDescriptionPrefix
+                    || description == Self.defaultLocalizedExtensionDescriptionToken
+            )
     }
 
     private func isDevelopmentExtensionPath(

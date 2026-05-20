@@ -130,7 +130,7 @@ enum DownloadKind: String, Codable, CaseIterable, Identifiable {
         case .http:
             "HTTP"
         case .torrentMagnet:
-            "磁力"
+            L10n.string("download_kind_magnet")
         case .torrentFile:
             "BT"
         }
@@ -161,17 +161,17 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .queued:
-            "等待中"
+            L10n.string("download_status_queued")
         case .running:
-            "下载中"
+            L10n.string("download_status_running")
         case .paused:
-            "已暂停"
+            L10n.string("download_status_paused")
         case .verifying:
-            "校验中"
+            L10n.string("download_status_verifying")
         case .completed:
-            "已完成"
+            L10n.string("download_status_completed")
         case .failed:
-            "失败"
+            L10n.string("download_status_failed")
         }
     }
 

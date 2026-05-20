@@ -59,17 +59,17 @@ struct SwiftGetXApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("新建下载任务") {
+                Button(L10n.string("command_new_download")) {
                     NotificationCenter.default.post(name: .showNewTaskSheet, object: nil)
                 }
                 .keyboardShortcut("n")
 
-                Button("暂停全部") {
+                Button(L10n.string("command_pause_all")) {
                     coordinator.pauseAll()
                 }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
 
-                Button("恢复全部") {
+                Button(L10n.string("command_resume_all")) {
                     coordinator.resumeAll()
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -135,29 +135,21 @@ struct SwiftGetXApp: App {
     @MainActor
     private func confirmChromePairing(_ request: BrowserSetupRequest) -> Bool {
         let alert = NSAlert()
-        alert.messageText = "允许 Chrome 插件连接 SwiftGetX？"
-        alert.informativeText = """
-        插件 ID：\(request.extensionID)
-
-        允许后，SwiftGetX 会把这个插件加入 Native Messaging 白名单，并自动修复 com.swiftgetx.native.json。
-        """
+        alert.messageText = L10n.string("alert_allow_chrome_pairing_title")
+        alert.informativeText = L10n.string("alert_allow_chrome_pairing_message", request.extensionID)
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "允许配对")
-        alert.addButton(withTitle: "拒绝")
+        alert.addButton(withTitle: L10n.string("action_allow_pairing"))
+        alert.addButton(withTitle: L10n.string("action_reject"))
         return alert.runModal() == .alertFirstButtonReturn
     }
 
     @MainActor
     private func showChromePairingRejectedAlert(extensionID: String) {
         let alert = NSAlert()
-        alert.messageText = "无法验证 Chrome 插件"
-        alert.informativeText = """
-        SwiftGetX 没有在 Chrome 配置中找到匹配的 SwiftGetX 插件，已拒绝配对。
-
-        插件 ID：\(extensionID)
-        """
+        alert.messageText = L10n.string("alert_chrome_pairing_rejected_title")
+        alert.informativeText = L10n.string("alert_chrome_pairing_rejected_message", extensionID)
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "好")
+        alert.addButton(withTitle: L10n.string("action_ok"))
         alert.runModal()
     }
 }

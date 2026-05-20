@@ -102,20 +102,20 @@ private struct ClipboardSuggestionBar: View {
         if let source = clipboardMonitor.suggestedSource {
             GlassSurface(level: .floating, cornerRadius: 16) {
                 HStack(spacing: layout.value(10)) {
-                    Label("检测到下载链接", systemImage: "doc.on.clipboard")
+                    Label(L10n.string("clipboard_detected_link"), systemImage: "doc.on.clipboard")
                         .font(layout.font(13, weight: .semibold))
                     Text(source)
                         .font(layout.font(12))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer()
-                    Button("忽略") {
+                    Button(L10n.string("action_ignore")) {
                         clipboardMonitor.dismissSuggestion()
                     }
                     Button {
                         clipboardMonitor.acceptSuggestion()
                     } label: {
-                        Label("添加", systemImage: "plus.circle.fill")
+                        Label(L10n.string("action_add"), systemImage: "plus.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
                 }
