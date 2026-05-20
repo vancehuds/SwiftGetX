@@ -11,7 +11,7 @@ SwiftGetX 是一个面向 macOS 14+ 的原生下载管理器原型，使用 Swif
 - HTTP/HTTPS 下载引擎支持元数据探测、`.part` 临时文件、Range 断点续传、多分段下载、聚合进度、暂停/恢复、重试、限速和重复文件保护。
 - 剪贴板链接检测，并在应用内显示液态玻璃风格的下载建议条。
 - 统一 `DownloadCoordinator` 协调 HTTP 和 BT 下载生命周期。
-- BT 下载通过 `TorrentEngineAdapter` 隔离实现，默认构建链接 native libtorrent 适配器；设置 `SWIFTGETX_DISABLE_LIBTORRENT=1` 可启用轻量 fallback 构建。
+- BT 下载通过 `TorrentEngineAdapter` 隔离实现；普通 SwiftPM 构建使用轻量 fallback，设置 `SWIFTGETX_ENABLE_LIBTORRENT=1` 可链接 native libtorrent 适配器。
 - Chrome Native Messaging 交接：浏览器扩展把下载请求发送给 `SwiftGetXNativeHost`，native host 再打开 `swiftgetx://download?...`。
 - Safari 和 Chrome 扩展资源已放入 app resources，便于后续接入正式扩展 target。
 - 单元和集成测试覆盖链接解析、Native Messaging framing、文件名冲突、分段计划、HTTP Range 下载和 BT 文件列表持久化。
@@ -78,7 +78,7 @@ swift run SwiftGetX
 swift test
 ```
 
-默认 SwiftPM 构建会链接 libtorrent。首次构建前运行 `Scripts/build-libtorrent.sh` 以获取固定版本源码并生成静态库。
+默认 SwiftPM 构建不链接 libtorrent，适合日常开发和 CI。需要真实 BT native 适配器时，先运行 `Scripts/build-libtorrent.sh` 以获取固定版本源码并生成静态库。
 
 ## libtorrent 构建
 
@@ -88,22 +88,22 @@ swift test
 Scripts/build-libtorrent.sh
 ```
 
-脚本会按固定 tag/commit 拉取或校验 `Vendor/libtorrent`，初始化所需子模块，并构建静态库。然后正常构建和测试：
+脚本会按固定 tag/commit 拉取或校验 `Vendor/libtorrent`，初始化所需子模块，并构建静态库。然后启用 native libtorrent 构建和测试：
 
 ```sh
-swift build
-swift test
+SWIFTGETX_ENABLE_LIBTORRENT=1 swift build
+SWIFTGETX_ENABLE_LIBTORRENT=1 swift test
 ```
 
 `Package.swift` 默认使用 `/opt/homebrew` 查找 OpenSSL 和 Boost。如果 Homebrew 安装在其他位置，可以设置：
 
 ```sh
-SWIFTGETX_HOMEBREW_PREFIX=/path/to/homebrew swift build
+SWIFTGETX_ENABLE_LIBTORRENT=1 SWIFTGETX_HOMEBREW_PREFIX=/path/to/homebrew swift build
 ```
 
 当前 native BT 能力包括 magnet 和 `.torrent` 输入、DHT、PEX、tracker 更新、元数据获取、文件列表上报、文件选择优先级、暂停/恢复、recheck、上传/下载限速，以及达到设置分享率后停止做种。仍待增强的生产能力包括 resume data 持久化、受控真实种子测试和 release 签名打包。
 
-无原生依赖的排障构建可以显式禁用 libtorrent：
+无原生依赖的排障构建可以直接使用默认 SwiftPM 命令；如需覆盖脚本里的 native 打包路径，也可以显式禁用 libtorrent：
 
 ```sh
 SWIFTGETX_DISABLE_LIBTORRENT=1 swift build
@@ -176,13 +176,13 @@ swift test
 
 ### libtorrent 构建失败
 
-如果提示找不到 `.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a`，先运行：
+如果 native 构建提示找不到 `.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a`，先运行：
 
 ```sh
 Scripts/build-libtorrent.sh
 ```
 
-如果只想排查非 BT 功能，可以临时设置 `SWIFTGETX_DISABLE_LIBTORRENT=1 swift build`。
+如果只想排查非 BT 功能，可以直接运行 `swift build`，或在打包脚本中临时设置 `SWIFTGETX_DISABLE_LIBTORRENT=1`。
 
 ### OpenSSL 出现 macOS deployment target linker warning
 

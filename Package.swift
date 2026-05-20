@@ -4,13 +4,14 @@ import PackageDescription
 import Foundation
 
 let disableNativeLibtorrent = ProcessInfo.processInfo.environment["SWIFTGETX_DISABLE_LIBTORRENT"] == "1"
-let enableNativeLibtorrent = !disableNativeLibtorrent
+let requestNativeLibtorrent = ProcessInfo.processInfo.environment["SWIFTGETX_ENABLE_LIBTORRENT"] == "1"
+let enableNativeLibtorrent = requestNativeLibtorrent && !disableNativeLibtorrent
 let packageDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 let homebrewPrefix = ProcessInfo.processInfo.environment["SWIFTGETX_HOMEBREW_PREFIX"] ?? "/opt/homebrew"
 let libtorrentArchivePath = "\(packageDirectory)/.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a"
 
 if enableNativeLibtorrent && !FileManager.default.fileExists(atPath: libtorrentArchivePath) {
-    fatalError("SwiftGetX builds with libtorrent by default and requires \(libtorrentArchivePath). Run Scripts/build-libtorrent.sh first, or set SWIFTGETX_DISABLE_LIBTORRENT=1 for the lightweight fallback build.")
+    fatalError("SwiftGetX native libtorrent builds require \(libtorrentArchivePath). Run Scripts/build-libtorrent.sh first, or unset SWIFTGETX_ENABLE_LIBTORRENT for the lightweight fallback build.")
 }
 
 var swiftGetXDependencies: [Target.Dependency] = ["SwiftGetXCore"]

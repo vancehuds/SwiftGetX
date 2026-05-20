@@ -28,6 +28,7 @@ esac
 
 if [[ "${SWIFTGETX_DISABLE_LIBTORRENT:-}" != "1" ]]; then
     Scripts/build-libtorrent.sh
+    export SWIFTGETX_ENABLE_LIBTORRENT=1
 fi
 
 if [[ "$CONFIGURATION" == "release" ]]; then

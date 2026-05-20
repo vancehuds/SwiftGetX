@@ -1,6 +1,6 @@
 # Torrent Engine Boundary
 
-`TorrentDownloadEngine` is wired into the same coordinator and UI as HTTP tasks. The libtorrent binding is isolated behind `TorrentEngineAdapter` and is enabled by default; `SWIFTGETX_DISABLE_LIBTORRENT=1` keeps a lightweight placeholder fallback available for troubleshooting.
+`TorrentDownloadEngine` is wired into the same coordinator and UI as HTTP tasks. The libtorrent binding is isolated behind `TorrentEngineAdapter`; default SwiftPM builds use the lightweight placeholder fallback, and `SWIFTGETX_ENABLE_LIBTORRENT=1` enables the native adapter after the static library is built.
 
 ## Native Build
 
@@ -13,14 +13,14 @@ brew install cmake boost openssl
 Scripts/build-libtorrent.sh
 ```
 
-Then build the app normally:
+Then build the app with native libtorrent enabled:
 
 ```sh
-swift build
-swift test
+SWIFTGETX_ENABLE_LIBTORRENT=1 swift build
+SWIFTGETX_ENABLE_LIBTORRENT=1 swift test
 ```
 
-By default, `Package.swift` compiles `Sources/CSwiftGetXLibtorrent/src/CSwiftGetXLibtorrent.cpp`, links the CMake-built `libtorrent-rasterbar.a`, and makes `canImport(CSwiftGetXLibtorrent)` true for `Sources/SwiftGetX/Services/LibtorrentAdapter.swift`.
+With `SWIFTGETX_ENABLE_LIBTORRENT=1`, `Package.swift` compiles `Sources/CSwiftGetXLibtorrent/src/CSwiftGetXLibtorrent.cpp`, links the CMake-built `libtorrent-rasterbar.a`, and makes `canImport(CSwiftGetXLibtorrent)` true for `Sources/SwiftGetX/Services/LibtorrentAdapter.swift`.
 
 ## Adapter Contract
 
