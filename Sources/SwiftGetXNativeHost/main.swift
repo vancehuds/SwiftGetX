@@ -26,7 +26,10 @@ do {
 
         let context = BrowserDownloadContext.context(from: message)
         let payload = try context.map { try JSONEncoder().encode($0) }
-        let ackServer = try NativeHandoffAckServer.start(payload: payload)
+        let ackServer = try NativeHandoffAckServer.start(
+            payload: payload,
+            expiresAt: Date().addingTimeInterval(nativeHandoffAckTimeout)
+        )
         guard let url = DeepLinkBuilder.downloadURL(
             for: source,
             browser: message.browser,

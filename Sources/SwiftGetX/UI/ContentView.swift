@@ -59,7 +59,12 @@ struct ContentView: View {
         }
         .frame(minWidth: 720, minHeight: 450)
         .onReceive(NotificationCenter.default.publisher(for: .showNewTaskSheet)) { notification in
-            newTaskDraft = notification.object as? DownloadDraft
+            let incomingDraft = notification.object as? DownloadDraft
+            PendingNativeHandoffPolicy.rejectIfReplaced(
+                current: newTaskDraft,
+                incoming: incomingDraft
+            )
+            newTaskDraft = incomingDraft
             showingNewTask = true
         }
         .onChange(of: showingNewTask) { _, isShowing in

@@ -101,17 +101,36 @@ Next step:
 
 ## Large Check 1: Browser Takeover Foundation
 
-Status: [ ]
+Status: [x]
 
 Review requirement drift, native-host failure modes, extension rollback behavior, deep-link security, build/test status, and docs for Tasks 1-3. Fix discovered issues before marking complete.
 
 Work performed:
 
+- Audited Tasks 1-3 against the browser takeover section of `Docs/FunctionalImprovementOpportunities.md`, covering native-host ack semantics, extension fallback/cancel behavior, authenticated context transfer, tokenized localhost payload handoff, diagnostics visibility, Chromium variant registration, and localization.
+- Verified that the Chrome extension only cancels/erases browser downloads after a positive native-host/App decision and falls back to Chrome download on native-host runtime error, rejection, timeout, or unexpected exception.
+- Added short-lived expiry metadata to native handoff ack deep links and propagated it from `SwiftGetXNativeHost` through `DeepLinkBuilder` and `DeepLinkParser`.
+- Added `PendingNativeHandoffPolicy` to reject expired native handoffs and to reject an existing pending confirmation if a newer handoff replaces it before the user responds.
+- Updated App and new-task confirmation handling so expired handoffs are rejected before payload fetch/task creation and before confirmed Add creates tasks, and superseded handoffs immediately notify the native host instead of waiting for the timeout.
+- Added focused tests for preserving handoff expiry through deep links, rejecting expired handoffs, and rejecting superseded pending handoffs.
+
 Verification evidence:
+
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `swift test --filter NativeMessageHost --filter ChromeExtensionDiscovery --filter ChromeNativeHostRegistrar --filter HTTPDownloadEngine` passed with 56 tests across 4 suites.
+- `swift test` passed with 91 tests across 12 suites.
+- `git diff --check` passed.
+- Static inspection confirmed the extension download takeover path calls `suggest()` fallback unless `sendToSwiftGetX` returns `ok`, and only then calls Chrome `downloads.cancel` and `downloads.erase`.
 
 Remaining risk:
 
+- Native handoff expiry is enforced in App-side handling and confirmation actions, but the public `swiftgetx://download` surface still needs the broader payload length, scheme, task-count, and trusted-source validation scheduled in Task 4.
+- The ack timeout remains fixed at 60 seconds; later takeover policy work should make timeout and user-facing fallback behavior more configurable.
+- Browser extension rollback was verified by static inspection and tests around native-host decisions, not by end-to-end Chrome automation.
+
 Next step:
+
+- Task 4: Deep-Link Safety and Payload Limits.
 
 ## Task 4: Deep-Link Safety and Payload Limits
 

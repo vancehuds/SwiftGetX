@@ -179,6 +179,11 @@ struct NewTaskSheet: View {
                 Spacer()
 
                 Button {
+                    guard !rejectExpiredNativeHandoffIfNeeded() else {
+                        dismiss()
+                        return
+                    }
+
                     let tasks: [DownloadTask]
                     if previews.contains(where: { $0.kind == .torrentMagnet || $0.kind == .torrentFile }) {
                         tasks = coordinator.add(
@@ -224,6 +229,16 @@ struct NewTaskSheet: View {
         sourceText = draft?.source ?? ""
         suggestedFilename = draft?.suggestedFilename
         didResolveNativeHandoff = false
+    }
+
+    private func rejectExpiredNativeHandoffIfNeeded() -> Bool {
+        guard let resolution = PendingNativeHandoffPolicy.expirationResolution(draft: draft) else {
+            return false
+        }
+
+        didResolveNativeHandoff = true
+        PendingNativeHandoffPolicy.acknowledge(resolution)
+        return true
     }
 
     private func chooseDirectory() {

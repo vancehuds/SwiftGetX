@@ -5,11 +5,18 @@ public struct NativeHandoffAck: Codable, Equatable, Sendable {
     public var requestID: String
     public var token: String
     public var port: UInt16
+    public var expiresAt: Date?
 
-    public init(requestID: String, token: String, port: UInt16) {
+    public init(requestID: String, token: String, port: UInt16, expiresAt: Date? = nil) {
         self.requestID = requestID
         self.token = token
         self.port = port
+        self.expiresAt = expiresAt
+    }
+
+    public func isExpired(now: Date = .now) -> Bool {
+        guard let expiresAt else { return false }
+        return now >= expiresAt
     }
 }
 
@@ -169,6 +176,7 @@ public final class NativeHandoffAckServer: @unchecked Sendable {
 
     public static func start(
         payload: Data? = nil,
+        expiresAt: Date? = nil,
         startupTimeout: TimeInterval = 2
     ) throws -> NativeHandoffAckServer {
         let parameters = NWParameters.tcp
@@ -180,7 +188,8 @@ public final class NativeHandoffAckServer: @unchecked Sendable {
             handoff: NativeHandoffAck(
                 requestID: UUID().uuidString,
                 token: UUID().uuidString.replacingOccurrences(of: "-", with: ""),
-                port: 0
+                port: 0,
+                expiresAt: expiresAt
             ),
             payload: payload
         )

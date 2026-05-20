@@ -91,6 +91,11 @@ struct SwiftGetXApp: App {
 
     @MainActor
     private func handleDownloadDraft(_ draft: DownloadDraft) {
+        if let resolution = PendingNativeHandoffPolicy.expirationResolution(draft: draft) {
+            PendingNativeHandoffPolicy.acknowledge(resolution)
+            return
+        }
+
         if let handoffAck = draft.handoffAck {
             Task {
                 var enrichedDraft = draft
@@ -107,6 +112,11 @@ struct SwiftGetXApp: App {
 
     @MainActor
     private func handleDownloadDraftWithContext(_ draft: DownloadDraft) {
+        if let resolution = PendingNativeHandoffPolicy.expirationResolution(draft: draft) {
+            PendingNativeHandoffPolicy.acknowledge(resolution)
+            return
+        }
+
         if draft.isBrowserTakeover, appSettings.confirmBrowserTakeoverDownloads {
             NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
         } else {
@@ -281,7 +291,19 @@ enum DeepLinkParser {
             return nil
         }
 
-        return NativeHandoffAck(requestID: requestID, token: token, port: port)
+        return NativeHandoffAck(
+            requestID: requestID,
+            token: token,
+            port: port,
+            expiresAt: ackExpiresAt(in: components)
+        )
+    }
+
+    private static func ackExpiresAt(in components: URLComponents) -> Date? {
+        guard let value = queryValue("ackExpiresAt", in: components) else { return nil }
+        guard let timestamp = TimeInterval(value), timestamp > 0 else { return Date(timeIntervalSince1970: 0) }
+
+        return Date(timeIntervalSince1970: timestamp)
     }
 }
 

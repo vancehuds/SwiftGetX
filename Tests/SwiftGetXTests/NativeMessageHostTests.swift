@@ -94,6 +94,29 @@ struct NativeMessageHostTests {
         #expect(draft.handoffAck == handoffAck)
     }
 
+    @Test("download deep links preserve native handoff expiry")
+    func downloadDeepLinksPreserveNativeHandoffExpiry() throws {
+        let expiresAt = Date(timeIntervalSince1970: 1_850_000_000)
+        let handoffAck = NativeHandoffAck(
+            requestID: "request-1",
+            token: "secret-token",
+            port: 49152,
+            expiresAt: expiresAt
+        )
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "https://example.com/file.dmg",
+            browser: "Chrome",
+            handoffSource: "download-takeover",
+            handoffAck: handoffAck
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.handoffAck == handoffAck)
+        #expect(draft.handoffAck?.isExpired(now: expiresAt.addingTimeInterval(-1)) == false)
+        #expect(draft.handoffAck?.isExpired(now: expiresAt) == true)
+    }
+
     @Test("ack server returns accepted decisions from app callback")
     func ackServerReturnsAcceptedDecisions() async throws {
         let server = try NativeHandoffAckServer.start()
@@ -191,6 +214,83 @@ struct NativeMessageHostTests {
         #expect(decision.accepted == true)
         #expect(decision.queued == true)
         #expect(decision.requiresUserConfirmation == true)
+    }
+
+    @Test("pending native handoff is rejected when expired")
+    func pendingNativeHandoffIsRejectedWhenExpired() throws {
+        let expiry = Date(timeIntervalSince1970: 1_850_000_000)
+        let handoff = NativeHandoffAck(
+            requestID: "request-1",
+            token: "token-1",
+            port: 49152,
+            expiresAt: expiry
+        )
+        let draft = DownloadDraft(
+            source: "https://example.com/file.zip",
+            handoffSource: "download-takeover",
+            handoffAck: handoff
+        )
+
+        #expect(
+            PendingNativeHandoffPolicy.expirationResolution(
+                draft: draft,
+                now: expiry.addingTimeInterval(-1)
+            ) == nil
+        )
+
+        let resolution = try #require(
+            PendingNativeHandoffPolicy.expirationResolution(
+                draft: draft,
+                now: expiry
+            )
+        )
+
+        #expect(resolution.handoff == handoff)
+        #expect(resolution.decision.accepted == false)
+        #expect(resolution.decision.requiresUserConfirmation == true)
+        #expect(resolution.decision.rejectedReason == "expired")
+    }
+
+    @Test("pending native handoff is rejected when replaced")
+    func pendingNativeHandoffIsRejectedWhenReplaced() throws {
+        let currentHandoff = NativeHandoffAck(
+            requestID: "request-1",
+            token: "token-1",
+            port: 49152
+        )
+        let incomingHandoff = NativeHandoffAck(
+            requestID: "request-2",
+            token: "token-2",
+            port: 49153
+        )
+        let current = DownloadDraft(
+            source: "https://example.com/one.zip",
+            handoffSource: "download-takeover",
+            handoffAck: currentHandoff
+        )
+        let incoming = DownloadDraft(
+            source: "https://example.com/two.zip",
+            handoffSource: "download-takeover",
+            handoffAck: incomingHandoff
+        )
+
+        let resolution = try #require(
+            PendingNativeHandoffPolicy.replacementResolution(
+                current: current,
+                incoming: incoming
+            )
+        )
+
+        #expect(resolution.handoff == currentHandoff)
+        #expect(resolution.decision.accepted == false)
+        #expect(resolution.decision.requiresUserConfirmation == true)
+        #expect(resolution.decision.rejectedReason == "supersededByNewRequest")
+        #expect(
+            PendingNativeHandoffPolicy.replacementResolution(
+                current: current,
+                incoming: current
+            ) == nil
+        )
     }
 
     @Test("parses browser setup deep links")

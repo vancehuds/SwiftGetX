@@ -25,6 +25,13 @@ public enum DeepLinkBuilder {
             appendQueryItem("ackRequestID", value: handoffAck.requestID, to: &components)
             appendQueryItem("ackToken", value: handoffAck.token, to: &components)
             appendQueryItem("ackPort", value: String(handoffAck.port), to: &components)
+            if let expiresAt = handoffAck.expiresAt {
+                appendQueryItem(
+                    "ackExpiresAt",
+                    value: String(expiresAt.timeIntervalSince1970),
+                    to: &components
+                )
+            }
         }
         return components.url
     }
