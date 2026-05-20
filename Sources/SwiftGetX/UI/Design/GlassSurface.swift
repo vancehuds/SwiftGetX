@@ -9,6 +9,7 @@ struct GlassSurface<Content: View>: View {
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.responsiveLayout) private var layout
 
     var level: Level = .panel
     var cornerRadius: CGFloat = 18
@@ -43,7 +44,7 @@ struct GlassSurface<Content: View>: View {
     }
 
     private var shape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        RoundedRectangle(cornerRadius: layout.value(cornerRadius), style: .continuous)
     }
 
     @ViewBuilder
@@ -111,16 +112,16 @@ struct GlassSurface<Content: View>: View {
     private var shadowRadius: CGFloat {
         switch level {
         case .background: 0
-        case .panel: 6
-        case .floating: 16
+        case .panel: layout.value(6)
+        case .floating: layout.value(16)
         }
     }
 
     private var shadowY: CGFloat {
         switch level {
         case .background: 0
-        case .panel: 1
-        case .floating: 6
+        case .panel: layout.value(1)
+        case .floating: layout.value(6)
         }
     }
 }
@@ -128,6 +129,7 @@ struct GlassSurface<Content: View>: View {
 struct ContentSurfaceBackground: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.responsiveLayout) private var layout
 
     var isSelected = false
     var isHovered = false
@@ -135,7 +137,7 @@ struct ContentSurfaceBackground: View {
     var cornerRadius: CGFloat = 8
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: layout.value(cornerRadius), style: .continuous)
 
         shape
             .fill(baseFill)
@@ -201,6 +203,7 @@ struct LiquidProgressBar: View {
     var progress: Double
     var tint: Color
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.responsiveLayout) private var layout
 
     var body: some View {
         GeometryReader { proxy in
@@ -216,10 +219,10 @@ struct LiquidProgressBar: View {
 
                 Capsule()
                     .fill(tint)
-                    .frame(width: max(width, progress > 0 ? 6 : 0))
+                    .frame(width: max(width, progress > 0 ? layout.value(6) : 0))
             }
         }
-        .frame(height: 6)
+        .frame(height: layout.value(6))
         .accessibilityLabel("下载进度")
         .accessibilityValue(progress.formatted(.percent.precision(.fractionLength(0))))
     }
@@ -265,11 +268,12 @@ struct GlassIconButtonBackground: View {
 struct IconButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.responsiveLayout) private var layout
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 14, weight: .semibold))
-            .frame(width: 34, height: 34)
+            .font(layout.font(14, weight: .semibold))
+            .frame(width: layout.value(34), height: layout.value(34))
             .background(
                 GlassIconButtonBackground(isPressed: configuration.isPressed)
             )

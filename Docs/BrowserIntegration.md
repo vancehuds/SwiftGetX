@@ -14,7 +14,7 @@ SwiftGetX uses explicit browser handoff plus an opt-out Chrome download takeover
 - The extension uses `chrome.runtime.sendNativeMessage("com.swiftgetx.native", ...)`.
 - Context menus can send links, the current page, selected text, and media URLs to SwiftGetX.
 - The popup can send the current page, send the current selection, scan a page for likely download links, and toggle Chrome download takeover.
-- Chrome download takeover is enabled by default. When Chrome creates a supported HTTP, HTTPS, magnet, or `.torrent` download, the extension pauses the Chrome item, sends it to SwiftGetX, then cancels and erases the Chrome item only after the native host accepts it. If handoff fails, the extension resumes the original Chrome download.
+- Chrome download takeover is enabled by default. When Chrome creates a supported HTTP, HTTPS, magnet, or `.torrent` download, the extension immediately cancels and erases the Chrome item, then sends the URL to SwiftGetX through the native host. If native handoff fails, the extension shows a failure badge because the original Chrome download has already been stopped.
 - Build the native host with `swift build`.
 - Install the Native Messaging host manifest with:
 

@@ -136,7 +136,7 @@ Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHo
 
 Chrome 扩展调用 `chrome.runtime.sendNativeMessage("com.swiftgetx.native", ...)`，`SwiftGetXNativeHost` 读取 4-byte little-endian length-prefixed JSON 后打开 `swiftgetx://download?url=...`，主 app 通过 `onOpenURL` 接收。
 
-Chrome 下载接管默认开启。扩展在 Chrome 创建支持的 HTTP、HTTPS、magnet 或 `.torrent` 下载后，会先暂停 Chrome 原任务，发送到 SwiftGetX；只有 native host 接受后才取消并清除 Chrome 原任务。如果发送失败，扩展会恢复 Chrome 原下载。可以在扩展 popup 里关闭“接管 Chrome 下载”。
+Chrome 下载接管默认开启。扩展在 Chrome 创建支持的 HTTP、HTTPS、magnet 或 `.torrent` 下载后，会立即取消并清除 Chrome 原任务，再通过 native host 发送到 SwiftGetX；如果发送失败，扩展会显示失败角标，因为原 Chrome 下载已经被停止。可以在扩展 popup 里关闭“接管 Chrome 下载”。
 
 ### Safari
 

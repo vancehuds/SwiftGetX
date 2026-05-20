@@ -5,60 +5,67 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppSettings.self) private var settings
     @Environment(DownloadCoordinator.self) private var coordinator
+    @Environment(\.responsiveLayout) private var parentLayout
 
     var body: some View {
         @Bindable var settings = settings
 
-        GlassSurface(level: .panel, cornerRadius: 18) {
-            Form {
-                Section("下载") {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("默认下载目录")
-                            Text(settings.defaultDownloadDirectory.path)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer()
-                        Button("选择") {
-                            chooseDirectory()
-                        }
-                    }
-                    Stepper("同时下载任务：\(settings.concurrentTaskLimit)", value: $settings.concurrentTaskLimit, in: 1...12)
-                    Toggle("启用 HTTP 多线程下载", isOn: $settings.httpMultithreadingEnabled)
-                    Stepper("HTTP 线程数：\(settings.httpSegmentCount)", value: $settings.httpSegmentCount, in: 1...32)
-                        .disabled(!settings.httpMultithreadingEnabled)
-                    Toggle("隐藏 HTTP 分块临时文件", isOn: $settings.hideHTTPTemporaryFiles)
-                    Stepper("失败重试次数：\(settings.retryLimit)", value: $settings.retryLimit, in: 0...10)
-                    SpeedLimitSettingsRow(
-                        title: "下载限速",
-                        value: $settings.globalDownloadLimitBytes,
-                        values: [0, 1_000_000, 5_000_000, 10_000_000, 20_000_000]
-                    )
-                }
+        GeometryReader { proxy in
+            let settingsScale = min(max(proxy.size.width, 1) / 520, max(proxy.size.height, 1) / 480)
+            let layout = ResponsiveLayout(scale: max(parentLayout.scale, settingsScale))
 
-                Section("BT") {
-                    SpeedLimitSettingsRow(
-                        title: "上传限速",
-                        value: $settings.globalUploadLimitBytes,
-                        values: [0, 256_000, 512_000, 1_000_000, 5_000_000]
-                    )
-                    Slider(value: $settings.stopSeedingAtRatio, in: 0...5, step: 0.1) {
-                        Text("分享率限制")
+            GlassSurface(level: .panel, cornerRadius: 18) {
+                Form {
+                    Section("下载") {
+                        HStack {
+                            VStack(alignment: .leading, spacing: layout.value(4)) {
+                                Text("默认下载目录")
+                                Text(settings.defaultDownloadDirectory.path)
+                                    .font(layout.font(12))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Button("选择") {
+                                chooseDirectory()
+                            }
+                        }
+                        Stepper("同时下载任务：\(settings.concurrentTaskLimit)", value: $settings.concurrentTaskLimit, in: 1...12)
+                        Toggle("启用 HTTP 多线程下载", isOn: $settings.httpMultithreadingEnabled)
+                        Stepper("HTTP 线程数：\(settings.httpSegmentCount)", value: $settings.httpSegmentCount, in: 1...32)
+                            .disabled(!settings.httpMultithreadingEnabled)
+                        Toggle("隐藏 HTTP 分块临时文件", isOn: $settings.hideHTTPTemporaryFiles)
+                        Stepper("失败重试次数：\(settings.retryLimit)", value: $settings.retryLimit, in: 0...10)
+                        SpeedLimitSettingsRow(
+                            title: "下载限速",
+                            value: $settings.globalDownloadLimitBytes,
+                            values: [0, 1_000_000, 5_000_000, 10_000_000, 20_000_000]
+                        )
                     }
-                    Text("分享率达到 \(settings.stopSeedingAtRatio, specifier: "%.1f") 后停止做种")
-                        .foregroundStyle(.secondary)
-                }
 
-                Section("系统") {
-                    Toggle("完成后通知", isOn: $settings.completionNotificationsEnabled)
-                    Toggle("剪贴板链接检测", isOn: $settings.clipboardDetectionEnabled)
+                    Section("BT") {
+                        SpeedLimitSettingsRow(
+                            title: "上传限速",
+                            value: $settings.globalUploadLimitBytes,
+                            values: [0, 256_000, 512_000, 1_000_000, 5_000_000]
+                        )
+                        Slider(value: $settings.stopSeedingAtRatio, in: 0...5, step: 0.1) {
+                            Text("分享率限制")
+                        }
+                        Text("分享率达到 \(settings.stopSeedingAtRatio, specifier: "%.1f") 后停止做种")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Section("系统") {
+                        Toggle("完成后通知", isOn: $settings.completionNotificationsEnabled)
+                        Toggle("剪贴板链接检测", isOn: $settings.clipboardDetectionEnabled)
+                    }
                 }
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .padding(layout.value(10))
             }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .padding(10)
+            .environment(\.responsiveLayout, layout)
         }
         .padding(1)
         .onChange(of: settings.defaultDownloadDirectory) { _, _ in persistSettings() }

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TaskListView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
+    @Environment(\.responsiveLayout) private var layout
     let tasks: [DownloadTask]
     @State private var taskToDelete: DownloadTask?
 
@@ -12,19 +13,19 @@ struct TaskListView: View {
         GlassSurface(level: .panel, cornerRadius: 18) {
             VStack(spacing: 0) {
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: layout.value(2)) {
                         Text(coordinator.activeFilter.title)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(layout.font(16, weight: .semibold))
                             .foregroundStyle(Color.primary)
                         Text(summary(for: tasks))
-                            .font(.system(size: 11.5, weight: .medium))
+                            .font(layout.font(11.5, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer()
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 14)
+                .padding(.horizontal, layout.value(18))
+                .padding(.vertical, layout.value(14))
 
                 Divider()
                     .opacity(0.24)
@@ -34,7 +35,7 @@ struct TaskListView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 7) {
+                        LazyVStack(spacing: layout.value(7)) {
                             ForEach(tasks) { task in
                                 TaskRowView(
                                     task: task,
@@ -68,7 +69,7 @@ struct TaskListView: View {
                                 }
                             }
                         }
-                        .padding(12)
+                        .padding(layout.value(12))
                     }
                 }
             }
@@ -128,103 +129,104 @@ extension Notification.Name {
 private struct TaskRowView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.responsiveLayout) private var layout
     let task: DownloadTask
     let isSelected: Bool
 
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: layout.value(12)) {
             Image(systemName: task.kind.symbolName)
-                .font(.system(size: 16, weight: .medium))
+                .font(layout.font(16, weight: .medium))
                 .foregroundStyle(statusColor)
-                .frame(width: 34, height: 34)
-                .background(statusColor.opacity(colorScheme == .dark ? 0.14 : 0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .frame(width: layout.value(34), height: layout.value(34))
+                .background(statusColor.opacity(colorScheme == .dark ? 0.14 : 0.09), in: RoundedRectangle(cornerRadius: layout.value(7), style: .continuous))
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: layout.value(6)) {
+                HStack(spacing: layout.value(8)) {
                     Text(task.name)
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(layout.font(13.5, weight: .semibold))
                         .lineLimit(1)
                         .foregroundStyle(Color.primary)
 
                     Label(task.status.title, systemImage: task.status.symbolName)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(layout.font(10, weight: .semibold))
                         .foregroundStyle(statusColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, layout.value(6))
+                        .padding(.vertical, layout.value(2))
                         .background(statusColor.opacity(colorScheme == .dark ? 0.16 : 0.09), in: Capsule())
 
                     Spacer()
 
                     Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: task.totalBytes))
-                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                        .font(layout.font(11.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
 
                 LiquidProgressBar(progress: task.progress, tint: statusColor)
 
-                HStack(spacing: 14) {
-                    HStack(spacing: 4) {
+                HStack(spacing: layout.value(14)) {
+                    HStack(spacing: layout.value(4)) {
                         Image(systemName: "globe")
-                            .font(.system(size: 10))
+                            .font(layout.font(10))
                         Text(task.source)
                             .lineLimit(1)
                     }
-                    .frame(maxWidth: 180, alignment: .leading)
+                    .frame(maxWidth: layout.value(180), alignment: .leading)
 
                     Spacer()
 
                     if task.status == .running {
-                        HStack(spacing: 3) {
+                        HStack(spacing: layout.value(3)) {
                             Image(systemName: "arrow.down")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(layout.font(9, weight: .bold))
                             Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond) + "/s")
                         }
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(layout.font(11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.green)
 
-                        HStack(spacing: 3) {
+                        HStack(spacing: layout.value(3)) {
                             Image(systemName: "clock")
-                                .font(.system(size: 9))
+                                .font(layout.font(9))
                             Text(task.etaSeconds.map(TimeFormatter.eta) ?? "--")
                         }
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(layout.font(11, design: .monospaced))
                         .foregroundStyle(.secondary)
                     } else if task.status == .completed {
-                        HStack(spacing: 3) {
+                        HStack(spacing: layout.value(3)) {
                             Image(systemName: "checkmark.shield")
-                                .font(.system(size: 9))
+                                .font(layout.font(9))
                             Text("已安全就绪")
                         }
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(layout.font(11, weight: .semibold))
                         .foregroundStyle(Color.green)
                     } else if task.status == .paused {
                         Text("已暂停")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(layout.font(11, weight: .medium))
                             .foregroundStyle(.orange)
                     } else if task.status == .failed {
                         Text("失败：\(task.errorMessage ?? "未知错误")")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(layout.font(11, weight: .medium))
                             .lineLimit(1)
                             .foregroundStyle(.red)
                     } else {
                         Text(task.status.title)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(layout.font(11, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
                 }
-                .font(.system(size: 11))
+                .font(layout.font(11))
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(12)
+        .padding(layout.value(12))
         .background {
             GlassCellBackground(isSelected: isSelected, tint: statusColor, cornerRadius: 8)
         }
         .overlay(alignment: .topTrailing) {
             if isHovered {
-                HStack(spacing: 6) {
+                HStack(spacing: layout.value(6)) {
                     Button {
                         if task.status == .running {
                             coordinator.pause(task)
@@ -233,9 +235,9 @@ private struct TaskRowView: View {
                         }
                     } label: {
                         Image(systemName: task.status == .running ? "pause.fill" : "play.fill")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(layout.font(10, weight: .bold))
                             .foregroundStyle(Color.primary)
-                            .frame(width: 26, height: 26)
+                            .frame(width: layout.value(26), height: layout.value(26))
                             .background(Color.primary.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
@@ -246,9 +248,9 @@ private struct TaskRowView: View {
                         NSWorkspace.shared.activateFileViewerSelecting([url])
                     } label: {
                         Image(systemName: "folder.fill")
-                            .font(.system(size: 10))
+                            .font(layout.font(10))
                             .foregroundStyle(Color.primary)
-                            .frame(width: 26, height: 26)
+                            .frame(width: layout.value(26), height: layout.value(26))
                             .background(Color.primary.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
@@ -259,22 +261,22 @@ private struct TaskRowView: View {
                         NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
                     } label: {
                         Image(systemName: "trash.fill")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(layout.font(10, weight: .bold))
                             .foregroundStyle(.red)
-                            .frame(width: 26, height: 26)
+                            .frame(width: layout.value(26), height: layout.value(26))
                             .background(Color.red.opacity(colorScheme == .dark ? 0.20 : 0.10), in: Circle())
                     }
                     .buttonStyle(.plain)
                     .help("删除任务")
                 }
-                .padding(4)
+                .padding(layout.value(4))
                 .background(.regularMaterial, in: Capsule())
                 .overlay {
                     Capsule()
                         .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 1)
                 }
-                .padding(.top, 10)
-                .padding(.trailing, 10)
+                .padding(.top, layout.value(10))
+                .padding(.trailing, layout.value(10))
                 .transition(.opacity)
             }
         }
@@ -303,25 +305,27 @@ private struct TaskRowView: View {
 }
 
 private struct EmptyTaskView: View {
+    @Environment(\.responsiveLayout) private var layout
+
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: layout.value(16)) {
             Image(systemName: "arrow.down.doc")
-                .font(.system(size: 34, weight: .light))
+                .font(layout.font(34, weight: .light))
                 .foregroundStyle(.secondary)
-                .frame(width: 72, height: 72)
+                .frame(width: layout.value(72), height: layout.value(72))
                 .background(ContentSurfaceBackground(cornerRadius: 36))
 
-            VStack(spacing: 6) {
+            VStack(spacing: layout.value(6)) {
                 Text("还没有下载任务")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(layout.font(16, weight: .semibold))
                     .foregroundStyle(Color.primary)
                 Text("点击左上角加号，粘贴直链、磁力链接或种子文件地址。")
-                    .font(.system(size: 12.5))
+                    .font(layout.font(12.5))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 30)
+                    .padding(.horizontal, layout.value(30))
             }
         }
-        .padding(40)
+        .padding(layout.value(40))
     }
 }

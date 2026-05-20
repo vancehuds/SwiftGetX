@@ -73,7 +73,7 @@ struct SwiftGetXApp: App {
                 .environment(appSettings)
                 .environment(coordinator)
                 .modelContainer(modelContainer)
-                .frame(width: 520, height: 480)
+                .frame(minWidth: 420, idealWidth: 520, minHeight: 390, idealHeight: 480)
         }
     }
 

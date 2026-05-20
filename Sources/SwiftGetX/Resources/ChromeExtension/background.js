@@ -4,6 +4,9 @@ const DEFAULT_OPTIONS = {
   takeoverDownloadsUserSet: false
 };
 const DOWNLOAD_SOURCE_PATTERN = /(magnet:\?|https?:\/\/|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)/i;
+const TAKEOVER_ID_RETENTION_MS = 60000;
+let currentOptions = { ...DEFAULT_OPTIONS };
+const takeoverDownloadIds = new Set();
 
 const MENU_ITEMS = [
   {
@@ -49,6 +52,22 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+refreshOptions();
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local") {
+    return;
+  }
+
+  if (changes.takeoverDownloads) {
+    currentOptions.takeoverDownloads = Boolean(changes.takeoverDownloads.newValue);
+  }
+
+  if (changes.takeoverDownloadsUserSet) {
+    currentOptions.takeoverDownloadsUserSet = Boolean(changes.takeoverDownloadsUserSet.newValue);
+  }
+});
+
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   handleContextMenuClick(info, tab);
 });
@@ -75,28 +94,85 @@ chrome.downloads.onCreated.addListener((downloadItem) => {
   });
 });
 
+chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
+  handleDownloadDeterminingFilename(downloadItem, suggest).catch((error) => {
+    markFailure(error.message || String(error));
+  });
+  return true;
+});
+
+async function handleDownloadDeterminingFilename(downloadItem, suggest) {
+  let didSuggest = false;
+  const allowChromeFilename = () => {
+    if (!didSuggest) {
+      didSuggest = true;
+      suggest();
+    }
+  };
+
+  try {
+    if (!shouldTakeOverDownload(downloadItem)) {
+      allowChromeFilename();
+      return;
+    }
+
+    await takeOverDownload(downloadItem);
+    allowChromeFilename();
+  } catch (error) {
+    allowChromeFilename();
+    throw error;
+  }
+}
+
 async function handleDownloadCreated(downloadItem) {
-  const options = await getOptions();
-  if (!options.takeoverDownloads || !isSupportedSource(downloadItem.url)) {
+  if (!shouldTakeOverDownload(downloadItem)) {
     return;
   }
 
-  await callDownloads("pause", downloadItem.id);
+  takeOverDownload(downloadItem);
+}
 
-  const result = await sendToSwiftGetX({
-    url: downloadItem.url,
-    suggestedFilename: filenameFromPath(downloadItem.filename) || filenameFromURL(downloadItem.url),
+async function takeOverDownload(downloadItem) {
+  if (takeoverDownloadIds.has(downloadItem.id)) {
+    return;
+  }
+
+  takeoverDownloadIds.add(downloadItem.id);
+  setTimeout(() => takeoverDownloadIds.delete(downloadItem.id), TAKEOVER_ID_RETENTION_MS);
+
+  const url = downloadSourceURL(downloadItem);
+  const payload = {
+    url,
+    suggestedFilename: filenameFromPath(downloadItem.filename) || filenameFromURL(url),
     sourcePageUrl: downloadItem.referrer,
     source: "download-takeover"
-  });
+  };
 
-  if (result.ok) {
-    await callDownloads("cancel", downloadItem.id);
-    await callDownloads("erase", { id: downloadItem.id });
+  const cancelled = await callDownloads("cancel", downloadItem.id);
+  await callDownloads("erase", { id: downloadItem.id });
+
+  if (!cancelled) {
+    markFailure("Chrome 下载无法取消，未接管该任务");
     return;
   }
 
-  await callDownloads("resume", downloadItem.id);
+  sendToSwiftGetX(payload)
+    .then((result) => {
+      if (!result.ok) {
+        markFailure(result.message || "SwiftGetX 未接受该任务，Chrome 下载已取消");
+      }
+    })
+    .catch((error) => {
+      markFailure(error.message || String(error));
+    });
+}
+
+function shouldTakeOverDownload(downloadItem) {
+  return Boolean(currentOptions.takeoverDownloads && isSupportedSource(downloadSourceURL(downloadItem)));
+}
+
+function downloadSourceURL(downloadItem) {
+  return downloadItem.finalUrl || downloadItem.url || "";
 }
 
 async function handleContextMenuClick(info, tab) {
@@ -226,6 +302,10 @@ function getOptions() {
       resolve({ ...DEFAULT_OPTIONS, ...options });
     });
   });
+}
+
+async function refreshOptions() {
+  currentOptions = await getOptions();
 }
 
 function callDownloads(method, ...args) {

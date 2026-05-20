@@ -9,46 +9,55 @@ struct ContentView: View {
     @State private var showingNewTask = false
 
     var body: some View {
-        @Bindable var coordinator = coordinator
-        let visibleTasks = filteredTasks()
+        GeometryReader { proxy in
+            let layout = ResponsiveLayout(windowSize: proxy.size)
+            let columnSpacing = layout.value(14)
+            let horizontalPadding = layout.value(22)
+            let availablePanelWidth = max(proxy.size.width - horizontalPadding * 2 - columnSpacing * 2, 1)
+            let requestedPanelWidth = layout.value(210 + 520 + 340)
+            let panelFitScale = min(1, availablePanelWidth / max(requestedPanelWidth, 1))
+            let visibleTasks = filteredTasks()
 
-        ZStack {
-            AppBackground()
+            ZStack {
+                AppBackground()
 
-            VStack(spacing: 14) {
-                ToolbarView(
-                    showingNewTask: $showingNewTask
-                )
+                VStack(spacing: columnSpacing) {
+                    ToolbarView(
+                        showingNewTask: $showingNewTask
+                    )
 
-                HStack(spacing: 14) {
-                    SidebarView(tasks: allTasks)
-                        .frame(width: 210)
+                    HStack(spacing: columnSpacing) {
+                        SidebarView(tasks: allTasks)
+                            .frame(width: layout.value(210) * panelFitScale)
 
-                    TaskListView(tasks: visibleTasks)
-                        .frame(minWidth: 520)
+                        TaskListView(tasks: visibleTasks)
+                            .frame(minWidth: layout.value(520) * panelFitScale)
 
-                    InspectorView()
-                        .frame(width: 340)
+                        InspectorView()
+                            .frame(width: layout.value(340) * panelFitScale)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 14)
-            .padding(.bottom, 18)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.top, layout.value(14))
+                .padding(.bottom, layout.value(18))
 
-            VStack {
-                ClipboardSuggestionBar()
-                    .padding(.top, 64)
-                Spacer()
+                VStack {
+                    ClipboardSuggestionBar()
+                        .padding(.top, layout.value(64))
+                    Spacer()
+                }
+                .padding(.horizontal, horizontalPadding)
+                .allowsHitTesting(clipboardMonitor.suggestedSource != nil)
             }
-            .padding(.horizontal, 22)
-            .allowsHitTesting(clipboardMonitor.suggestedSource != nil)
+            .environment(\.responsiveLayout, layout)
+            .sheet(isPresented: $showingNewTask) {
+                NewTaskSheet()
+                    .environment(\.responsiveLayout, layout)
+                    .frame(minWidth: layout.value(420), idealWidth: layout.value(560), maxWidth: layout.value(720))
+            }
         }
-        .frame(minWidth: 1080, minHeight: 680)
-        .sheet(isPresented: $showingNewTask) {
-            NewTaskSheet()
-                .frame(width: 560)
-        }
+        .frame(minWidth: 720, minHeight: 450)
         .onReceive(NotificationCenter.default.publisher(for: .showNewTaskSheet)) { _ in
             showingNewTask = true
         }
@@ -78,15 +87,16 @@ struct ContentView: View {
 
 private struct ClipboardSuggestionBar: View {
     @Environment(ClipboardMonitor.self) private var clipboardMonitor
+    @Environment(\.responsiveLayout) private var layout
 
     var body: some View {
         if let source = clipboardMonitor.suggestedSource {
             GlassSurface(level: .floating, cornerRadius: 16) {
-                HStack(spacing: 10) {
+                HStack(spacing: layout.value(10)) {
                     Label("检测到下载链接", systemImage: "doc.on.clipboard")
-                        .font(.callout.weight(.semibold))
+                        .font(layout.font(13, weight: .semibold))
                     Text(source)
-                        .font(.caption)
+                        .font(layout.font(12))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer()
@@ -100,10 +110,10 @@ private struct ClipboardSuggestionBar: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .padding(.horizontal, layout.value(14))
+                .padding(.vertical, layout.value(10))
             }
-            .frame(maxWidth: 760)
+            .frame(maxWidth: layout.value(760))
             .transition(.move(edge: .top).combined(with: .opacity))
         }
     }

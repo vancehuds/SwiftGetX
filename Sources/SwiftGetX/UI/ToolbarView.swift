@@ -5,6 +5,7 @@ struct ToolbarView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.openSettings) private var openSettings
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.responsiveLayout) private var layout
     @Binding var showingNewTask: Bool
 
     @Query private var allTasks: [DownloadTask]
@@ -18,23 +19,23 @@ struct ToolbarView: View {
         @Bindable var coordinator = coordinator
 
         GlassSurface(level: .floating, cornerRadius: 16) {
-            HStack(spacing: 12) {
-                HStack(spacing: 9) {
+            HStack(spacing: layout.value(12)) {
+                HStack(spacing: layout.value(9)) {
                     Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 21, weight: .semibold))
+                        .font(layout.font(21, weight: .semibold))
                         .foregroundStyle(Color.accentColor)
 
                     Text("SwiftGetX")
-                        .font(.system(size: 14.5, weight: .semibold))
+                        .font(layout.font(14.5, weight: .semibold))
                         .foregroundStyle(.primary)
                 }
-                .padding(.trailing, 2)
+                .padding(.trailing, layout.value(2))
 
                 Divider()
-                    .frame(height: 22)
+                    .frame(height: layout.value(22))
                     .opacity(0.28)
 
-                HStack(spacing: 8) {
+                HStack(spacing: layout.value(8)) {
                     Button {
                         showingNewTask = true
                     } label: {
@@ -69,31 +70,31 @@ struct ToolbarView: View {
                 }
 
                 Divider()
-                    .frame(height: 20)
+                    .frame(height: layout.value(20))
                     .opacity(0.35)
 
-                HStack(spacing: 8) {
+                HStack(spacing: layout.value(8)) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(layout.font(13, weight: .medium))
                         .foregroundStyle(.secondary)
 
                     TextField("搜索任务、链接或文件名...", text: $coordinator.searchText)
                         .textFieldStyle(.plain)
                         .focused($isSearchFocused)
-                        .font(.system(size: 13))
+                        .font(layout.font(13))
                 }
-                .padding(.horizontal, 12)
-                .frame(height: 34)
-                .frame(width: 280)
+                .padding(.horizontal, layout.value(12))
+                .frame(height: layout.value(34))
+                .frame(width: layout.value(280))
                 .background {
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    RoundedRectangle(cornerRadius: layout.value(9), style: .continuous)
                         .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.64 : 0.70))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            RoundedRectangle(cornerRadius: layout.value(9), style: .continuous)
                                 .fill(Color.primary.opacity(colorScheme == .dark ? 0.05 : 0.035))
                         }
                         .overlay {
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            RoundedRectangle(cornerRadius: layout.value(9), style: .continuous)
                                 .strokeBorder(
                                     isSearchFocused
                                         ? Color.accentColor.opacity(0.55)
@@ -106,21 +107,21 @@ struct ToolbarView: View {
 
                 Spacer()
 
-                HStack(spacing: 8) {
+                HStack(spacing: layout.value(8)) {
                     Circle()
                         .fill(totalDownloadSpeed > 0 ? Color.green : Color.secondary.opacity(0.4))
-                        .frame(width: 7, height: 7)
+                        .frame(width: layout.value(7), height: layout.value(7))
 
                     Image(systemName: "arrow.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(layout.font(10, weight: .semibold))
                         .foregroundStyle(.secondary)
 
                     Text(totalDownloadSpeed > 0 ? ByteCountFormatter.downloadFormatter.string(fromByteCount: totalDownloadSpeed) + "/s" : "0 KB/s")
-                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                        .font(layout.font(11.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, layout.value(12))
+                .padding(.vertical, layout.value(6))
                 .background(Color.primary.opacity(0.04), in: Capsule())
                 .overlay {
                     Capsule()
@@ -131,10 +132,10 @@ struct ToolbarView: View {
                 }
 
                 Divider()
-                    .frame(height: 20)
+                    .frame(height: layout.value(20))
                     .opacity(0.35)
 
-                HStack(spacing: 8) {
+                HStack(spacing: layout.value(8)) {
                     SpeedLimitMenu()
                     
                     Button {
@@ -146,14 +147,15 @@ struct ToolbarView: View {
                     .help("设置")
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, layout.value(12))
+            .padding(.vertical, layout.value(7))
         }
     }
 }
 
 private struct SpeedLimitMenu: View {
     @Environment(DownloadCoordinator.self) private var coordinator
+    @Environment(\.responsiveLayout) private var layout
 
     var body: some View {
         Menu {
@@ -172,8 +174,8 @@ private struct SpeedLimitMenu: View {
         } label: {
             Label("限速", systemImage: "speedometer")
                 .labelStyle(.iconOnly)
-                .font(.system(size: 14, weight: .semibold))
-                .frame(width: 34, height: 34)
+                .font(layout.font(14, weight: .semibold))
+                .frame(width: layout.value(34), height: layout.value(34))
                 .background(
                     GlassIconButtonBackground(isPressed: false)
                 )

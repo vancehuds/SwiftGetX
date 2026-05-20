@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InspectorView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
+    @Environment(\.responsiveLayout) private var layout
     @State private var selectedTab: InspectorTab = .overview
 
     var body: some View {
@@ -17,14 +18,14 @@ struct InspectorView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
+                    .padding(.horizontal, layout.value(14))
+                    .padding(.bottom, layout.value(12))
 
                     Divider()
                         .opacity(0.24)
 
                     ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: layout.value(14)) {
                             switch selectedTab {
                             case .overview:
                                 OverviewPanel(task: task)
@@ -36,19 +37,19 @@ struct InspectorView: View {
                                 LogsPanel(task: task)
                             }
                         }
-                        .padding(14)
+                        .padding(layout.value(14))
                     }
                     .transition(.opacity)
                 } else {
-                    VStack(spacing: 16) {
+                    VStack(spacing: layout.value(16)) {
                         Image(systemName: "sidebar.right")
-                            .font(.system(size: 26, weight: .light))
+                            .font(layout.font(26, weight: .light))
                             .foregroundStyle(.secondary)
-                            .frame(width: 64, height: 64)
+                            .frame(width: layout.value(64), height: layout.value(64))
                             .background(ContentSurfaceBackground(cornerRadius: 32))
 
                         Text("选择任务查看详情")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(layout.font(14, weight: .semibold))
                             .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -58,24 +59,24 @@ struct InspectorView: View {
     }
 
     private func header(for task: DownloadTask) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: layout.value(12)) {
+            HStack(alignment: .top, spacing: layout.value(10)) {
                 Image(systemName: task.status.symbolName)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(layout.font(16, weight: .semibold))
                     .foregroundStyle(statusColor(for: task.status))
-                    .padding(.top, 2)
+                    .padding(.top, layout.value(2))
                 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: layout.value(4)) {
                     Text(task.name)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(layout.font(14, weight: .semibold))
                         .lineLimit(2)
                         .foregroundStyle(Color.primary)
                     
                     Text(task.kind.title + " 下载")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(layout.font(10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, layout.value(6))
+                        .padding(.vertical, layout.value(2))
                         .background(Color.primary.opacity(0.06), in: Capsule())
                 }
             }
@@ -84,22 +85,22 @@ struct InspectorView: View {
             
             HStack {
                 Text(task.progress.formatted(.percent.precision(.fractionLength(1))))
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(layout.font(12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(statusColor(for: task.status))
                 
                 Spacer()
                 
                 Text(task.status.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(layout.font(11, weight: .medium))
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
+        .padding(layout.value(14))
         .background {
             ContentSurfaceBackground(tint: statusColor(for: task.status), cornerRadius: 10)
         }
-        .padding(14)
-        .padding(.bottom, 2)
+        .padding(layout.value(14))
+        .padding(.bottom, layout.value(2))
     }
 
     private func statusColor(for status: DownloadStatus) -> Color {
@@ -151,15 +152,17 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
 }
 
 private struct OverviewPanel: View {
+    @Environment(\.responsiveLayout) private var layout
     let task: DownloadTask
-    private let columns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10)
-    ]
 
     var body: some View {
-        VStack(spacing: 12) {
-            LazyVGrid(columns: columns, spacing: 10) {
+        let columns = [
+            GridItem(.flexible(), spacing: layout.value(10)),
+            GridItem(.flexible(), spacing: layout.value(10))
+        ]
+
+        VStack(spacing: layout.value(12)) {
+            LazyVGrid(columns: columns, spacing: layout.value(10)) {
                 MetricCard(
                     title: "任务状态",
                     value: task.status.title,
@@ -193,7 +196,7 @@ private struct OverviewPanel: View {
                 )
             }
 
-            VStack(spacing: 8) {
+            VStack(spacing: layout.value(8)) {
                 DetailRow(title: "文件总大小", value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.totalBytes))
                 DetailRow(title: "保存路径", value: task.savePath)
                 DetailRow(title: "下载链接/种子源", value: task.source)
@@ -221,29 +224,30 @@ private struct OverviewPanel: View {
 }
 
 private struct MetricCard: View {
+    @Environment(\.responsiveLayout) private var layout
     let title: String
     let value: String
     let symbol: String
     let color: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
             HStack {
                 Text(title)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(layout.font(10, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(layout.font(11, weight: .semibold))
                     .foregroundStyle(color)
             }
 
             Text(value)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .font(layout.font(13, weight: .semibold, design: .monospaced))
                 .lineLimit(1)
                 .foregroundStyle(Color.primary)
         }
-        .padding(12)
+        .padding(layout.value(12))
         .background {
             ContentSurfaceBackground(cornerRadius: 8)
         }
@@ -252,15 +256,16 @@ private struct MetricCard: View {
 
 private struct FilesPanel: View {
     @Environment(DownloadCoordinator.self) private var coordinator
+    @Environment(\.responsiveLayout) private var layout
     let task: DownloadTask
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: layout.value(12)) {
             if task.torrentFiles.isEmpty {
                 Text("BT 文件列表会在 metadata 获取后展示。")
-                    .font(.system(size: 12))
+                    .font(layout.font(12))
                     .foregroundStyle(.secondary)
-                    .padding(12)
+                    .padding(layout.value(12))
             } else {
                 HStack {
                     Button("全选") {
@@ -269,19 +274,19 @@ private struct FilesPanel: View {
                             selectedFileIndexes: task.torrentFiles.map(\.index)
                         )
                     }
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(layout.font(11, weight: .semibold))
                     .buttonStyle(.bordered)
                     
                     Button("清空") {
                         coordinator.setTorrentFileSelection(task, selectedFileIndexes: [])
                     }
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(layout.font(11, weight: .semibold))
                     .buttonStyle(.bordered)
                     
                     Spacer()
                     
                     Text("\(task.selectedFileIndexes.count) / \(task.torrentFiles.count) 个文件")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(layout.font(11, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
 
@@ -289,14 +294,14 @@ private struct FilesPanel: View {
                     Button {
                         toggle(file)
                     } label: {
-                        HStack(spacing: 12) {
+                        HStack(spacing: layout.value(12)) {
                             Image(systemName: task.selectedFileIndexes.contains(file.index) ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(layout.font(14, weight: .semibold))
                                 .foregroundStyle(task.selectedFileIndexes.contains(file.index) ? .green : .secondary)
                             
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: layout.value(4)) {
                                 Text(file.path)
-                                    .font(.system(size: 12, weight: .medium))
+                                    .font(layout.font(12, weight: .medium))
                                     .lineLimit(1)
                                     .foregroundStyle(Color.primary)
                                 
@@ -306,10 +311,10 @@ private struct FilesPanel: View {
                             Spacer()
                             
                             Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(layout.font(11, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(10)
+                        .padding(layout.value(10))
                         .background {
                             ContentSurfaceBackground(cornerRadius: 8)
                         }
@@ -332,10 +337,11 @@ private struct FilesPanel: View {
 }
 
 private struct ConnectionsPanel: View {
+    @Environment(\.responsiveLayout) private var layout
     let task: DownloadTask
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: layout.value(8)) {
             DetailRow(title: "DHT 状态", value: "已启动 (接收正常)")
             DetailRow(title: "PEX 交换", value: "已启用")
             DetailRow(title: "本地监听端口", value: "端口分配就绪")
@@ -346,30 +352,31 @@ private struct ConnectionsPanel: View {
 }
 
 private struct LogsPanel: View {
+    @Environment(\.responsiveLayout) private var layout
     let task: DownloadTask
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: layout.value(6)) {
             if task.logEntries.isEmpty {
                 Text("暂无日志记录")
-                    .font(.system(size: 12))
+                    .font(layout.font(12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(20)
+                    .padding(layout.value(20))
             } else {
                 ForEach(task.logEntries, id: \.self) { entry in
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .top, spacing: layout.value(8)) {
                         Text("•")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(layout.font(12, weight: .semibold))
                             .foregroundStyle(Color.blue)
                         
                         Text(entry)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(layout.font(11, design: .monospaced))
                             .textSelection(.enabled)
-                            .lineSpacing(2)
+                            .lineSpacing(layout.value(2))
                             .foregroundStyle(Color.primary)
                     }
-                    .padding(8)
+                    .padding(layout.value(8))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background {
                         ContentSurfaceBackground(cornerRadius: 8)
@@ -381,23 +388,24 @@ private struct LogsPanel: View {
 }
 
 private struct DetailRow: View {
+    @Environment(\.responsiveLayout) private var layout
     let title: String
     let value: String
     var color: Color = .primary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: layout.value(4)) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(layout.font(10, weight: .semibold))
                 .foregroundStyle(.secondary)
             
             Text(value)
-                .font(.system(size: 12, design: .monospaced))
+                .font(layout.font(12, design: .monospaced))
                 .foregroundStyle(color)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
+        .padding(layout.value(12))
         .background {
             ContentSurfaceBackground(cornerRadius: 8)
         }
