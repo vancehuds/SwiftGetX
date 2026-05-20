@@ -18,7 +18,12 @@ final class BrowserBridge {
             return
         }
 
-        coordinator?.add(source: message.url)
-        lastMessage = "已从 \(message.browser) 接收下载任务"
+        guard let url = message.url, !url.isEmpty else {
+            lastMessage = "浏览器消息缺少下载地址"
+            return
+        }
+
+        coordinator?.add(source: url)
+        lastMessage = "已从 \(message.browser ?? "浏览器") 接收下载任务"
     }
 }

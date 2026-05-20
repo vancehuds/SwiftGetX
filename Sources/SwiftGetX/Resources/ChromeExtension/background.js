@@ -4,9 +4,7 @@ const DEFAULT_OPTIONS = {
   takeoverDownloadsUserSet: false
 };
 const DOWNLOAD_SOURCE_PATTERN = /(magnet:\?|https?:\/\/|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)/i;
-const TAKEOVER_ID_RETENTION_MS = 60000;
 let currentOptions = { ...DEFAULT_OPTIONS };
-const takeoverDownloadIds = new Set();
 
 const MENU_ITEMS = [
   {
@@ -73,25 +71,35 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (!message || message.type !== "swiftgetx-download") {
+  if (!message) {
     return false;
   }
 
-  sendToSwiftGetX(message.payload)
-    .then(sendResponse)
-    .catch((error) => {
-      sendResponse({
-        ok: false,
-        message: error.message || String(error)
+  if (message.type === "swiftgetx-download") {
+    sendToSwiftGetX(message.payload)
+      .then(sendResponse)
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error.message || String(error)
+        });
       });
-    });
-  return true;
-});
+    return true;
+  }
 
-chrome.downloads.onCreated.addListener((downloadItem) => {
-  handleDownloadCreated(downloadItem).catch((error) => {
-    markFailure(error.message || String(error));
-  });
+  if (message.type === "swiftgetx-ping") {
+    pingSwiftGetX()
+      .then(sendResponse)
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error.message || String(error)
+        });
+      });
+    return true;
+  }
+
+  return false;
 });
 
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
@@ -116,55 +124,31 @@ async function handleDownloadDeterminingFilename(downloadItem, suggest) {
       return;
     }
 
-    await takeOverDownload(downloadItem);
-    allowChromeFilename();
+    const url = downloadSourceURL(downloadItem);
+    const payload = {
+      url,
+      suggestedFilename: filenameFromPath(downloadItem.filename) || filenameFromURL(url),
+      sourcePageUrl: downloadItem.referrer,
+      source: "download-takeover"
+    };
+
+    // Send to SwiftGetX FIRST — only cancel Chrome download after confirmation.
+    const result = await sendToSwiftGetX(payload);
+
+    if (!result.ok) {
+      // Native host unreachable or rejected — fall back to Chrome download.
+      allowChromeFilename();
+      return;
+    }
+
+    // SwiftGetX accepted the task — cancel and erase the Chrome download.
+    await callDownloads("cancel", downloadItem.id);
+    await callDownloads("erase", { id: downloadItem.id });
   } catch (error) {
+    // On any unexpected error, let Chrome proceed with the download.
     allowChromeFilename();
     throw error;
   }
-}
-
-async function handleDownloadCreated(downloadItem) {
-  if (!shouldTakeOverDownload(downloadItem)) {
-    return;
-  }
-
-  takeOverDownload(downloadItem);
-}
-
-async function takeOverDownload(downloadItem) {
-  if (takeoverDownloadIds.has(downloadItem.id)) {
-    return;
-  }
-
-  takeoverDownloadIds.add(downloadItem.id);
-  setTimeout(() => takeoverDownloadIds.delete(downloadItem.id), TAKEOVER_ID_RETENTION_MS);
-
-  const url = downloadSourceURL(downloadItem);
-  const payload = {
-    url,
-    suggestedFilename: filenameFromPath(downloadItem.filename) || filenameFromURL(url),
-    sourcePageUrl: downloadItem.referrer,
-    source: "download-takeover"
-  };
-
-  const cancelled = await callDownloads("cancel", downloadItem.id);
-  await callDownloads("erase", { id: downloadItem.id });
-
-  if (!cancelled) {
-    markFailure("Chrome 下载无法取消，未接管该任务");
-    return;
-  }
-
-  sendToSwiftGetX(payload)
-    .then((result) => {
-      if (!result.ok) {
-        markFailure(result.message || "SwiftGetX 未接受该任务，Chrome 下载已取消");
-      }
-    })
-    .catch((error) => {
-      markFailure(error.message || String(error));
-    });
 }
 
 function shouldTakeOverDownload(downloadItem) {
@@ -291,6 +275,29 @@ async function sendToSwiftGetX(payload) {
       resolve({
         ok,
         message: response?.message || (ok ? "已发送到 SwiftGetX" : "发送失败")
+      });
+    });
+  });
+}
+
+function pingSwiftGetX() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
+      action: "ping"
+    }, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        resolve({
+          ok: false,
+          message: runtimeError.message
+        });
+        return;
+      }
+
+      resolve({
+        ok: response?.ok !== false,
+        message: response?.message || "connected",
+        version: response?.version
       });
     });
   });

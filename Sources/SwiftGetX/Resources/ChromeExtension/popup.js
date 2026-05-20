@@ -13,11 +13,15 @@ const candidatePanel = document.getElementById("candidate-panel");
 const candidateCount = document.getElementById("candidate-count");
 const candidateList = document.getElementById("candidate-list");
 const sendCandidatesButton = document.getElementById("send-candidates");
+const connectionIndicator = document.getElementById("connection-indicator");
+const connectionLabel = document.getElementById("connection-label");
+const connectionDetail = document.getElementById("connection-detail");
 
 document.getElementById("send-current").addEventListener("click", sendCurrentPage);
 document.getElementById("send-selection").addEventListener("click", sendSelection);
 document.getElementById("scan-links").addEventListener("click", scanLinks);
 sendCandidatesButton.addEventListener("click", sendAllCandidates);
+document.getElementById("check-connection").addEventListener("click", checkConnection);
 takeoverDownloads.addEventListener("change", () => {
   chrome.storage.local.set({
     takeoverDownloads: takeoverDownloads.checked,
@@ -35,6 +39,8 @@ async function init() {
   chrome.storage.local.get(DEFAULT_OPTIONS, (options) => {
     takeoverDownloads.checked = Boolean(options.takeoverDownloads);
   });
+
+  checkConnection();
 }
 
 async function sendCurrentPage() {
@@ -164,6 +170,31 @@ function renderCandidates() {
 function setStatus(text, state) {
   statusLabel.textContent = text;
   statusLabel.className = `status ${state || ""}`.trim();
+}
+
+async function checkConnection() {
+  setConnectionState("checking", "检查中…", "");
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "swiftgetx-ping"
+    });
+
+    if (response?.ok) {
+      const version = response.version ? `v${response.version}` : "";
+      setConnectionState("ok", "已连接", version ? `Native Host ${version}` : "Native Host 运行正常");
+    } else {
+      setConnectionState("error", "连接失败", response?.message || "Native Host 未响应");
+    }
+  } catch (error) {
+    setConnectionState("error", "连接失败", error.message || "无法与 Native Host 通信");
+  }
+}
+
+function setConnectionState(state, label, detail) {
+  connectionIndicator.className = `connection-indicator ${state}`;
+  connectionLabel.textContent = label;
+  connectionDetail.textContent = detail;
 }
 
 function filenameFromURL(value) {

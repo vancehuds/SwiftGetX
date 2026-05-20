@@ -126,6 +126,59 @@ button:disabled {
   accent-color: #2774c7;
 }
 
+.connection-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #d8dee6;
+}
+
+.connection-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #303944;
+}
+
+.connection-header .text-button {
+  margin-left: auto;
+}
+
+.connection-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #b0b8c3;
+  flex-shrink: 0;
+}
+
+.connection-indicator.ok {
+  background: #2da55e;
+}
+
+.connection-indicator.error {
+  background: #d13a2f;
+}
+
+.connection-indicator.checking {
+  background: #d0a420;
+  animation: pulse-dot 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-dot {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+.connection-detail {
+  max-width: none;
+  margin: 5px 0 0;
+  color: #667280;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .candidate-panel {
   margin-top: 12px;
   padding-top: 12px;
@@ -203,13 +256,19 @@ li:first-child {
   main,
   .candidate-title,
   .candidate-header,
+  .connection-header,
   .toggle {
     color: #edf2f7;
   }
 
   .candidate-panel,
+  .connection-section,
   li {
     border-color: #303842;
+  }
+
+  .connection-detail {
+    color: #a9b4c0;
   }
 
   button:disabled {

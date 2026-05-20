@@ -2,28 +2,45 @@ import AppKit
 import Foundation
 import SwiftGetXCore
 
+let nativeHostVersion = "0.2.0"
+
 do {
     guard let message = try NativeMessageHost.readMessage() else {
         throw NativeHostError.emptyInput
     }
 
-    guard message.action == "download" else {
+    switch message.action {
+    case "ping":
+        let response = NativeMessageResponse(
+            ok: true,
+            message: "SwiftGetX native host is running",
+            version: nativeHostVersion
+        )
+        FileHandle.standardOutput.write(try NativeMessageHost.encodeResponse(response))
+
+    case "download":
+        guard let source = message.url, !source.isEmpty else {
+            throw NativeHostError.invalidDownloadSource
+        }
+
+        guard let url = DeepLinkBuilder.downloadURL(for: source) else {
+            throw NativeHostError.invalidDownloadSource
+        }
+
+        guard NSWorkspace.shared.open(url) else {
+            throw NativeHostError.openFailed
+        }
+
+        let response = NativeMessageResponse(
+            ok: true,
+            message: "accepted download",
+            version: nativeHostVersion
+        )
+        FileHandle.standardOutput.write(try NativeMessageHost.encodeResponse(response))
+
+    default:
         throw NativeHostError.unsupportedAction(message.action)
     }
-
-    guard let url = DeepLinkBuilder.downloadURL(for: message.url) else {
-        throw NativeHostError.invalidDownloadSource
-    }
-
-    guard NSWorkspace.shared.open(url) else {
-        throw NativeHostError.openFailed
-    }
-
-    let response = NativeMessageResponse(
-        ok: true,
-        message: "accepted download"
-    )
-    FileHandle.standardOutput.write(try NativeMessageHost.encodeResponse(response))
 } catch {
     let response = NativeMessageResponse(
         ok: false,
@@ -53,3 +70,4 @@ private enum NativeHostError: LocalizedError {
         }
     }
 }
+

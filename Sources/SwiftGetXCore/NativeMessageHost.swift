@@ -63,10 +63,12 @@ public enum NativeMessageHost {
 public struct NativeMessageResponse: Codable, Equatable, Sendable {
     public var ok: Bool
     public var message: String
+    public var version: String?
 
-    public init(ok: Bool, message: String) {
+    public init(ok: Bool, message: String, version: String? = nil) {
         self.ok = ok
         self.message = message
+        self.version = version
     }
 }
 
