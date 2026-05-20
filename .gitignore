@@ -7,3 +7,5 @@ Vendor/libtorrent/
 *.xcodeproj/xcuserdata/
 .DS_Store
 !Vendor/libtorrent.version
+dist/
+
