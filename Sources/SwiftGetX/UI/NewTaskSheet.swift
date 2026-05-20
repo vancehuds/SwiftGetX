@@ -87,7 +87,7 @@ struct NewTaskSheet: View {
                 Spacer()
             }
 
-            if let draft {
+            if let draft, draft.isTrustedNativeHandoff, draft.isBrowserTakeover {
                 BrowserTakeoverBanner(draft: draft)
             }
 
@@ -203,7 +203,8 @@ struct NewTaskSheet: View {
                     acknowledgeNativeHandoffIfNeeded(
                         decision: NativeHandoffDecisionFactory.decision(
                             queuedTaskCount: tasks.count,
-                            requiresUserConfirmation: draft?.isBrowserTakeover == true
+                            requiresUserConfirmation: draft?.requiresUserConfirmation == true
+                                || draft?.isBrowserTakeover == true
                         )
                     )
                     dismiss()
@@ -219,7 +220,7 @@ struct NewTaskSheet: View {
     }
 
     private var subtitle: String {
-        if let draft, draft.isBrowserTakeover {
+        if let draft, draft.isTrustedNativeHandoff, draft.isBrowserTakeover {
             return L10n.string("new_task_browser_takeover_subtitle")
         }
         return L10n.string("new_task_subtitle")
@@ -355,7 +356,8 @@ struct NewTaskSheet: View {
         acknowledgeNativeHandoffIfNeeded(
             decision: .rejected(
                 reason: reason,
-                requiresUserConfirmation: draft?.isBrowserTakeover == true,
+                requiresUserConfirmation: draft?.requiresUserConfirmation == true
+                    || draft?.isBrowserTakeover == true,
                 message: "SwiftGetX download confirmation was cancelled"
             )
         )
@@ -363,6 +365,7 @@ struct NewTaskSheet: View {
 
     private func acknowledgeNativeHandoffIfNeeded(decision: NativeHandoffAckDecision) {
         guard !didResolveNativeHandoff,
+              draft?.canAcknowledgeNativeHandoff == true,
               let handoffAck = draft?.handoffAck
         else {
             return

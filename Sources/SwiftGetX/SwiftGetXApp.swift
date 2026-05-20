@@ -48,6 +48,8 @@ struct SwiftGetXApp: App {
                     NSApp.activate(ignoringOtherApps: true)
                     if let draft = DeepLinkParser.downloadDraft(from: url) {
                         handleDownloadDraft(draft)
+                    } else if DeepLinkParser.isDownloadURL(url) {
+                        return
                     } else if let setupRequest = DeepLinkParser.browserSetupRequest(from: url) {
                         handleBrowserSetupRequest(setupRequest)
                     } else if DeepLinkParser.isBrowserSetupURL(url) {
@@ -96,13 +98,16 @@ struct SwiftGetXApp: App {
             return
         }
 
-        if let handoffAck = draft.handoffAck {
+        if draft.isTrustedNativeHandoff, let handoffAck = draft.handoffAck {
             Task {
-                var enrichedDraft = draft
-                if let context = try? await NativeHandoffPayloadClient.fetchContext(handoff: handoffAck) {
+                do {
+                    var enrichedDraft = draft
+                    let context = try await NativeHandoffPayloadClient.fetchContext(handoff: handoffAck)
                     enrichedDraft.browserContext = context
+                    handleDownloadDraftWithContext(enrichedDraft)
+                } catch {
+                    handleDownloadDraftWithContext(draft.publicLinkFallback)
                 }
-                handleDownloadDraftWithContext(enrichedDraft)
             }
             return
         }
@@ -117,7 +122,9 @@ struct SwiftGetXApp: App {
             return
         }
 
-        if draft.isBrowserTakeover, appSettings.confirmBrowserTakeoverDownloads {
+        if draft.requiresUserConfirmation
+            || (draft.isTrustedNativeHandoff && draft.isBrowserTakeover && appSettings.confirmBrowserTakeoverDownloads)
+        {
             NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
         } else {
             let tasks = coordinator.add(
@@ -232,26 +239,56 @@ enum DeepLinkParser {
             return nil
         }
 
+        guard components.queryItems?.filter({ $0.name == "url" }).count == 1 else {
+            return nil
+        }
+
         guard let source = queryValue("url", in: components), !source.isEmpty else {
             return nil
+        }
+
+        let handoffAck = handoffAck(in: components)
+        let handoffSource = queryValue("source", in: components)
+        guard let validation = DownloadDeepLinkPolicy.validation(
+            for: url,
+            components: components,
+            source: source,
+            handoffSource: handoffSource,
+            handoffAck: handoffAck
+        ) else {
+            return nil
+        }
+
+        let isTrustedNativeHandoff = validation.linkTrust == .trustedNativeHandoff
+        let hasExpiredNativeHandoff = DownloadDeepLinkPolicy.isNativeHandoffSource(handoffSource)
+            && handoffAck?.expiresAt != nil
+            && handoffAck?.isExpired() == true
+        let shouldKeepNativeHandoff = isTrustedNativeHandoff || hasExpiredNativeHandoff
+        let browserContext: BrowserDownloadContext?
+        if isTrustedNativeHandoff {
+            browserContext = BrowserDownloadContext(
+                referrer: queryValue("sourcePageUrl", in: components),
+                originalURL: source,
+                suggestedFilename: queryValue("filename", in: components),
+                sourcePageTitle: queryValue("sourcePageTitle", in: components),
+                sourcePageURL: queryValue("sourcePageUrl", in: components),
+                handoffSource: handoffSource
+            )
+        } else {
+            browserContext = nil
         }
 
         return DownloadDraft(
             source: source,
             suggestedFilename: queryValue("filename", in: components),
             browser: queryValue("browser", in: components),
-            handoffSource: queryValue("source", in: components),
-            sourcePageTitle: queryValue("sourcePageTitle", in: components),
-            sourcePageUrl: queryValue("sourcePageUrl", in: components),
-            handoffAck: handoffAck(in: components),
-            browserContext: BrowserDownloadContext(
-                referrer: queryValue("sourcePageUrl", in: components),
-                originalURL: source,
-                suggestedFilename: queryValue("filename", in: components),
-                sourcePageTitle: queryValue("sourcePageTitle", in: components),
-                sourcePageURL: queryValue("sourcePageUrl", in: components),
-                handoffSource: queryValue("source", in: components)
-            )
+            handoffSource: shouldKeepNativeHandoff ? handoffSource : nil,
+            sourcePageTitle: isTrustedNativeHandoff ? queryValue("sourcePageTitle", in: components) : nil,
+            sourcePageUrl: isTrustedNativeHandoff ? queryValue("sourcePageUrl", in: components) : nil,
+            handoffAck: shouldKeepNativeHandoff ? handoffAck : nil,
+            browserContext: browserContext,
+            linkTrust: validation.linkTrust,
+            sourceCount: validation.sourceCount
         )
     }
 
@@ -274,6 +311,10 @@ enum DeepLinkParser {
 
     static func isBrowserSetupURL(_ url: URL) -> Bool {
         url.scheme == "swiftgetx" && url.host == "browser-setup"
+    }
+
+    static func isDownloadURL(_ url: URL) -> Bool {
+        url.scheme == "swiftgetx" && url.host == "download"
     }
 
     private static func queryValue(_ name: String, in components: URLComponents) -> String? {

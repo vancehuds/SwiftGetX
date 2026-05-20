@@ -73,7 +73,13 @@ struct NativeMessageHostTests {
 
     @Test("builds download deep links with browser takeover metadata")
     func buildsDownloadDeepLinksWithMetadata() throws {
-        let handoffAck = NativeHandoffAck(requestID: "request-1", token: "secret-token", port: 49152)
+        let expiresAt = Date(timeIntervalSince1970: 1_850_000_100)
+        let handoffAck = NativeHandoffAck(
+            requestID: "request-1",
+            token: "secret-token",
+            port: 49152,
+            expiresAt: expiresAt
+        )
         let url = try #require(DeepLinkBuilder.downloadURL(
             for: "https://example.com/file.dmg?token=a b",
             browser: "Chrome",
@@ -92,6 +98,9 @@ struct NativeMessageHostTests {
         #expect(draft.handoffSource == "download-takeover")
         #expect(draft.isBrowserTakeover)
         #expect(draft.handoffAck == handoffAck)
+        #expect(draft.isTrustedNativeHandoff)
+        #expect(draft.requiresUserConfirmation == false)
+        #expect(draft.browserContext?.originalURL == "https://example.com/file.dmg?token=a b")
     }
 
     @Test("download deep links preserve native handoff expiry")
@@ -115,6 +124,233 @@ struct NativeMessageHostTests {
         #expect(draft.handoffAck == handoffAck)
         #expect(draft.handoffAck?.isExpired(now: expiresAt.addingTimeInterval(-1)) == false)
         #expect(draft.handoffAck?.isExpired(now: expiresAt) == true)
+    }
+
+    @Test("public download deep links require confirmation and carry no browser context")
+    func publicDownloadDeepLinksRequireConfirmation() throws {
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "https://example.com/file.zip",
+            browser: "Chrome",
+            suggestedFilename: "file.zip",
+            sourcePageTitle: "Downloads",
+            sourcePageUrl: "https://example.com"
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.source == "https://example.com/file.zip")
+        #expect(draft.sourceCount == 1)
+        #expect(draft.isTrustedNativeHandoff == false)
+        #expect(draft.requiresUserConfirmation)
+        #expect(draft.browserContext == nil)
+    }
+
+    @Test("public download deep links allow bounded multi-link confirmation")
+    func publicDownloadDeepLinksAllowBoundedMultiLinkConfirmation() throws {
+        let source = "https://example.com/one.zip\nhttps://example.com/two.zip"
+        let url = try #require(downloadURL(source: source))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.sourceCount == 2)
+        #expect(draft.requiresUserConfirmation)
+        #expect(draft.isTrustedNativeHandoff == false)
+    }
+
+    @Test("public local torrent deep links require confirmation")
+    func publicLocalTorrentDeepLinksRequireConfirmation() throws {
+        let localSources = [
+            "file:///tmp/demo.torrent",
+            "/tmp/demo.torrent"
+        ]
+
+        for source in localSources {
+            let url = try #require(downloadURL(source: source))
+            let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+            #expect(draft.source == source)
+            #expect(draft.sourceCount == 1)
+            #expect(draft.requiresUserConfirmation)
+            #expect(draft.isTrustedNativeHandoff == false)
+        }
+    }
+
+    @Test("download deep links reject oversized payloads")
+    func downloadDeepLinksRejectOversizedPayloads() throws {
+        let source = "https://example.com/" + String(
+            repeating: "a",
+            count: DownloadDeepLinkPolicy.maximumURLLength
+        )
+        let url = try #require(downloadURL(source: source))
+
+        #expect(DeepLinkParser.downloadDraft(from: url) == nil)
+        #expect(DeepLinkParser.isDownloadURL(url))
+    }
+
+    @Test("public download deep links reject too many tasks")
+    func publicDownloadDeepLinksRejectTooManyTasks() throws {
+        let source = (0...DownloadDeepLinkPolicy.maximumPublicTaskCount)
+            .map { "https://example.com/file-\($0).zip" }
+            .joined(separator: "\n")
+        let url = try #require(downloadURL(source: source))
+
+        #expect(DeepLinkParser.downloadDraft(from: url) == nil)
+        #expect(DeepLinkParser.isDownloadURL(url))
+    }
+
+    @Test("public download deep links reject dangerous sources")
+    func publicDownloadDeepLinksRejectDangerousSources() throws {
+        let dangerousSources = [
+            "javascript:alert(1)",
+            "data:text/plain,hello",
+            "swiftgetx://download?url=https://example.com/file.zip"
+        ]
+
+        for source in dangerousSources {
+            let url = try #require(downloadURL(source: source))
+            #expect(DeepLinkParser.downloadDraft(from: url) == nil)
+            #expect(DeepLinkParser.isDownloadURL(url))
+        }
+    }
+
+    @Test("download deep links reject control characters")
+    func downloadDeepLinksRejectControlCharacters() throws {
+        let url = try #require(downloadURL(source: "https://example.com/file.zip\u{0000}"))
+
+        #expect(DeepLinkParser.downloadDraft(from: url) == nil)
+        #expect(DeepLinkParser.isDownloadURL(url))
+    }
+
+    @Test("download deep links reject bidi control characters")
+    func downloadDeepLinksRejectBidiControlCharacters() throws {
+        let url = try #require(downloadURL(source: "https://example.com/file\u{202E}gpj.zip"))
+
+        #expect(DeepLinkParser.downloadDraft(from: url) == nil)
+        #expect(DeepLinkParser.isDownloadURL(url))
+    }
+
+    @Test("native handoff without expiry is not trusted")
+    func nativeHandoffWithoutExpiryIsNotTrusted() throws {
+        let handoffAck = NativeHandoffAck(requestID: "request-1", token: "secret-token", port: 49152)
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "https://example.com/file.zip",
+            browser: "Chrome",
+            handoffSource: "download-takeover",
+            handoffAck: handoffAck
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.handoffAck == nil)
+        #expect(draft.handoffSource == nil)
+        #expect(draft.isTrustedNativeHandoff == false)
+        #expect(draft.requiresUserConfirmation)
+        #expect(draft.browserContext == nil)
+        #expect(draft.canAcknowledgeNativeHandoff == false)
+    }
+
+    @Test("complete ack metadata from known native source is trusted")
+    func completeAckMetadataFromKnownNativeSourceIsTrusted() throws {
+        let handoffAck = NativeHandoffAck(
+            requestID: "request-1",
+            token: "secret-token",
+            port: 49152,
+            expiresAt: Date(timeIntervalSince1970: 1_850_000_100)
+        )
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "https://example.com/file.zip",
+            browser: "Chrome",
+            handoffSource: "context-menu-link",
+            sourcePageTitle: "Downloads",
+            sourcePageUrl: "https://example.com",
+            handoffAck: handoffAck
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.handoffAck == handoffAck)
+        #expect(draft.handoffSource == "context-menu-link")
+        #expect(draft.sourcePageTitle == "Downloads")
+        #expect(draft.sourcePageUrl == "https://example.com")
+        #expect(draft.isTrustedNativeHandoff)
+        #expect(draft.requiresUserConfirmation == false)
+        #expect(draft.browserContext?.handoffSource == "context-menu-link")
+        #expect(draft.canAcknowledgeNativeHandoff)
+    }
+
+    @Test("complete ack metadata from unknown source is stripped")
+    func completeAckMetadataFromUnknownSourceIsStripped() throws {
+        let handoffAck = NativeHandoffAck(
+            requestID: "request-1",
+            token: "secret-token",
+            port: 49152,
+            expiresAt: Date(timeIntervalSince1970: 1_850_000_100)
+        )
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "https://example.com/file.zip",
+            browser: "Chrome",
+            handoffSource: "external-script",
+            sourcePageTitle: "Downloads",
+            sourcePageUrl: "https://example.com",
+            handoffAck: handoffAck
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.handoffAck == nil)
+        #expect(draft.handoffSource == nil)
+        #expect(draft.sourcePageTitle == nil)
+        #expect(draft.sourcePageUrl == nil)
+        #expect(draft.isTrustedNativeHandoff == false)
+        #expect(draft.requiresUserConfirmation)
+        #expect(draft.browserContext == nil)
+        #expect(draft.canAcknowledgeNativeHandoff == false)
+    }
+
+    @Test("expired native handoff is rejected rather than trusted")
+    func expiredNativeHandoffIsRejectedRatherThanTrusted() throws {
+        let handoffAck = NativeHandoffAck(
+            requestID: "request-1",
+            token: "secret-token",
+            port: 49152,
+            expiresAt: Date(timeIntervalSince1970: 1)
+        )
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "https://example.com/file.zip",
+            browser: "Chrome",
+            handoffSource: "download-takeover",
+            sourcePageTitle: "Downloads",
+            sourcePageUrl: "https://example.com",
+            handoffAck: handoffAck
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.handoffAck == handoffAck)
+        #expect(draft.handoffSource == "download-takeover")
+        #expect(draft.sourcePageTitle == nil)
+        #expect(draft.sourcePageUrl == nil)
+        #expect(draft.isTrustedNativeHandoff == false)
+        #expect(draft.requiresUserConfirmation)
+        #expect(draft.browserContext == nil)
+        #expect(draft.canAcknowledgeNativeHandoff)
+
+        let resolution = try #require(PendingNativeHandoffPolicy.expirationResolution(
+            draft: draft,
+            now: Date(timeIntervalSince1970: 2)
+        ))
+        #expect(resolution.handoff == handoffAck)
+        #expect(resolution.decision.rejectedReason == "expired")
+    }
+
+    @Test("download deep links reject duplicate source parameters")
+    func downloadDeepLinksRejectDuplicateSourceParameters() throws {
+        let url = try #require(URL(
+            string: "swiftgetx://download?url=https://example.com/one.zip&url=https://example.com/two.zip"
+        ))
+
+        #expect(DeepLinkParser.downloadDraft(from: url) == nil)
+        #expect(DeepLinkParser.isDownloadURL(url))
     }
 
     @Test("ack server returns accepted decisions from app callback")
@@ -228,7 +464,8 @@ struct NativeMessageHostTests {
         let draft = DownloadDraft(
             source: "https://example.com/file.zip",
             handoffSource: "download-takeover",
-            handoffAck: handoff
+            handoffAck: handoff,
+            linkTrust: .trustedNativeHandoff
         )
 
         #expect(
@@ -253,25 +490,30 @@ struct NativeMessageHostTests {
 
     @Test("pending native handoff is rejected when replaced")
     func pendingNativeHandoffIsRejectedWhenReplaced() throws {
+        let expiresAt = Date(timeIntervalSince1970: 1_850_000_100)
         let currentHandoff = NativeHandoffAck(
             requestID: "request-1",
             token: "token-1",
-            port: 49152
+            port: 49152,
+            expiresAt: expiresAt
         )
         let incomingHandoff = NativeHandoffAck(
             requestID: "request-2",
             token: "token-2",
-            port: 49153
+            port: 49153,
+            expiresAt: expiresAt
         )
         let current = DownloadDraft(
             source: "https://example.com/one.zip",
             handoffSource: "download-takeover",
-            handoffAck: currentHandoff
+            handoffAck: currentHandoff,
+            linkTrust: .trustedNativeHandoff
         )
         let incoming = DownloadDraft(
             source: "https://example.com/two.zip",
             handoffSource: "download-takeover",
-            handoffAck: incomingHandoff
+            handoffAck: incomingHandoff,
+            linkTrust: .trustedNativeHandoff
         )
 
         let resolution = try #require(
@@ -321,5 +563,15 @@ struct NativeMessageHostTests {
         var data = Data(bytes: &length, count: 4)
         data.append(payload)
         return data
+    }
+
+    private func downloadURL(source: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "swiftgetx"
+        components.host = "download"
+        components.queryItems = [
+            URLQueryItem(name: "url", value: source)
+        ]
+        return components.url
     }
 }

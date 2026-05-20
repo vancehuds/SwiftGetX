@@ -134,17 +134,35 @@ Next step:
 
 ## Task 4: Deep-Link Safety and Payload Limits
 
-Status: [ ]
+Status: [x]
 
 Add safety limits and validation for public `swiftgetx://download` links: task count, URL length, dangerous schemes/characters, multi-link confirmation defaults, and trusted/native-host handoff distinction. Add tests for malicious or oversized payloads.
 
 Work performed:
 
+- Added `DownloadDeepLinkPolicy` to validate `swiftgetx://download` payload length, parsed task count, allowed source types, dangerous top-level schemes, control characters, and bidirectional override characters.
+- Added deep-link trust metadata to `DownloadDraft`, including public-vs-native handoff state, parsed source count, confirmation requirements, and native-handoff acknowledgment eligibility.
+- Updated `DeepLinkParser.downloadDraft` to reject duplicate or invalid `url` parameters, swallow invalid download deep links instead of falling through to generic task creation, and strip browser/native metadata from ordinary public links.
+- Changed public download deep links, including multi-link and local torrent/file URL drafts, to default to the new-task confirmation sheet rather than automatic task creation.
+- Kept trusted native-host handoffs distinct by requiring complete, unexpired ack metadata from known extension/native-host source labels, while preserving expired native handoffs only long enough to reject them back through the ack channel.
+- Updated native-host payload creation to always provide a token-protected context payload for native handoffs, even when the browser message contains only legacy top-level fields.
+- Updated new-task confirmation and pending-handoff policy so only eligible native handoffs are acknowledged, while browser takeover confirmation semantics still report confirmation to the native host.
+- Added deep-link tests for public confirmation defaults, bounded multi-link payloads, local torrent confirmation, oversized payloads, too many tasks, dangerous schemes, control/bidi characters, duplicate URL parameters, incomplete ack metadata, expired handoffs, known native sources, and unknown forged ack-looking sources.
+
 Verification evidence:
+
+- `swift test --filter NativeMessageHost` passed with 28 tests in 1 suite.
+- `swift test` passed with 104 tests across 12 suites.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- The native-source allow list is intentionally scoped to the extension source labels currently emitted by the bundled Chrome extension. Future extension scanning/takeover work must update this list or replace it with a stronger signed/IPC identity model if new source labels or payload paths are added.
+- Public local torrent/file URL deep links are confirmation-only rather than rejected, matching the plan guidance, but they still rely on the user reviewing the confirmation sheet before adding.
+
 Next step:
+
+- Task 5: Extension Scanning and Takeover Rules.
 
 ## Task 5: Extension Scanning and Takeover Rules
 

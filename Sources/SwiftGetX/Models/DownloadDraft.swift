@@ -1,6 +1,11 @@
 import Foundation
 import SwiftGetXCore
 
+enum DownloadLinkTrust: Equatable, Sendable {
+    case publicLink
+    case trustedNativeHandoff
+}
+
 struct DownloadDraft: Equatable, Sendable {
     var source: String
     var suggestedFilename: String?
@@ -10,8 +15,33 @@ struct DownloadDraft: Equatable, Sendable {
     var sourcePageUrl: String?
     var handoffAck: NativeHandoffAck?
     var browserContext: BrowserDownloadContext?
+    var linkTrust: DownloadLinkTrust = .publicLink
+    var sourceCount: Int = 1
 
     var isBrowserTakeover: Bool {
         handoffSource == "download-takeover"
+    }
+
+    var isTrustedNativeHandoff: Bool {
+        linkTrust == .trustedNativeHandoff
+    }
+
+    var requiresUserConfirmation: Bool {
+        !isTrustedNativeHandoff || sourceCount > 1
+    }
+
+    var canAcknowledgeNativeHandoff: Bool {
+        handoffAck?.expiresAt != nil
+    }
+
+    var publicLinkFallback: DownloadDraft {
+        var draft = self
+        draft.handoffSource = nil
+        draft.sourcePageTitle = nil
+        draft.sourcePageUrl = nil
+        draft.handoffAck = nil
+        draft.browserContext = nil
+        draft.linkTrust = .publicLink
+        return draft
     }
 }

@@ -13,6 +13,7 @@ enum PendingNativeHandoffPolicy {
     ) -> PendingNativeHandoffResolution? {
         guard let draft,
               let handoffAck = draft.handoffAck,
+              draft.canAcknowledgeNativeHandoff,
               handoffAck.isExpired(now: now)
         else {
             return nil
@@ -22,7 +23,7 @@ enum PendingNativeHandoffPolicy {
             handoff: handoffAck,
             decision: .rejected(
                 reason: "expired",
-                requiresUserConfirmation: draft.isBrowserTakeover,
+                requiresUserConfirmation: draft.requiresUserConfirmation || draft.isBrowserTakeover,
                 message: "SwiftGetX download confirmation expired before it was accepted"
             )
         )
@@ -34,6 +35,7 @@ enum PendingNativeHandoffPolicy {
     ) -> PendingNativeHandoffResolution? {
         guard let current,
               let handoffAck = current.handoffAck,
+              current.canAcknowledgeNativeHandoff,
               current.handoffAck != incoming?.handoffAck
         else {
             return nil
@@ -43,7 +45,7 @@ enum PendingNativeHandoffPolicy {
             handoff: handoffAck,
             decision: .rejected(
                 reason: "supersededByNewRequest",
-                requiresUserConfirmation: current.isBrowserTakeover,
+                requiresUserConfirmation: current.requiresUserConfirmation || current.isBrowserTakeover,
                 message: "SwiftGetX download confirmation was replaced by another request"
             )
         )

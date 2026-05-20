@@ -24,8 +24,15 @@ do {
             throw NativeHostError.invalidDownloadSource
         }
 
-        let context = BrowserDownloadContext.context(from: message)
-        let payload = try context.map { try JSONEncoder().encode($0) }
+        let handoffSource = message.source ?? "native-host"
+        let context = BrowserDownloadContext.context(from: message) ?? BrowserDownloadContext(
+            originalURL: source,
+            suggestedFilename: message.suggestedFilename,
+            sourcePageTitle: message.sourcePageTitle,
+            sourcePageURL: message.sourcePageUrl,
+            handoffSource: handoffSource
+        )
+        let payload = try JSONEncoder().encode(context)
         let ackServer = try NativeHandoffAckServer.start(
             payload: payload,
             expiresAt: Date().addingTimeInterval(nativeHandoffAckTimeout)
@@ -34,7 +41,7 @@ do {
             for: source,
             browser: message.browser,
             suggestedFilename: message.suggestedFilename,
-            handoffSource: message.source,
+            handoffSource: handoffSource,
             sourcePageTitle: message.sourcePageTitle,
             sourcePageUrl: message.sourcePageUrl,
             handoffAck: ackServer.handoff
