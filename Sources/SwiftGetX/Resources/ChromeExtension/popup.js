@@ -21,7 +21,9 @@ document.getElementById("send-current").addEventListener("click", sendCurrentPag
 document.getElementById("send-selection").addEventListener("click", sendSelection);
 document.getElementById("scan-links").addEventListener("click", scanLinks);
 sendCandidatesButton.addEventListener("click", sendAllCandidates);
-document.getElementById("check-connection").addEventListener("click", checkConnection);
+document.getElementById("check-connection").addEventListener("click", () => {
+  checkConnection({ allowSetup: true, forceSetupOpen: true });
+});
 takeoverDownloads.addEventListener("change", () => {
   chrome.storage.local.set({
     takeoverDownloads: takeoverDownloads.checked,
@@ -40,7 +42,7 @@ async function init() {
     takeoverDownloads.checked = Boolean(options.takeoverDownloads);
   });
 
-  checkConnection();
+  checkConnection({ allowSetup: false });
 }
 
 async function sendCurrentPage() {
@@ -137,7 +139,8 @@ async function sendDownload(payload) {
   setStatus("发送中", "");
   const response = await chrome.runtime.sendMessage({
     type: "swiftgetx-download",
-    payload
+    payload,
+    forceSetupOpen: true
   });
 
   if (response?.ok) {
@@ -172,17 +175,26 @@ function setStatus(text, state) {
   statusLabel.className = `status ${state || ""}`.trim();
 }
 
-async function checkConnection() {
+async function checkConnection(options = {}) {
   setConnectionState("checking", "检查中…", "");
 
   try {
     const response = await chrome.runtime.sendMessage({
-      type: "swiftgetx-ping"
+      type: "swiftgetx-ping",
+      allowSetup: options.allowSetup !== false,
+      forceSetupOpen: Boolean(options.forceSetupOpen),
+      reason: "manual-check"
     });
 
     if (response?.ok) {
       const version = response.version ? `v${response.version}` : "";
       setConnectionState("ok", "已连接", version ? `Native Host ${version}` : "Native Host 运行正常");
+    } else if (response?.setupOpened || response?.setupThrottled) {
+      setConnectionState(
+        "checking",
+        "等待配对",
+        response.message || "已打开 SwiftGetX，请在软件中允许插件配对后再次检查。"
+      );
     } else {
       setConnectionState("error", "连接失败", response?.message || "Native Host 未响应");
     }

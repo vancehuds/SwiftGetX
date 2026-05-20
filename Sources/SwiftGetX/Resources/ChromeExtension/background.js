@@ -101,7 +101,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "swiftgetx-download") {
-    sendToSwiftGetX(message.payload, { allowSetup: true })
+    sendToSwiftGetX(message.payload, {
+      allowSetup: true,
+      forceSetupOpen: Boolean(message.forceSetupOpen)
+    })
       .then(sendResponse)
       .catch((error) => {
         sendResponse({
@@ -113,7 +116,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "swiftgetx-ping") {
-    ensureNativeHostHealthy({ allowSetup: true, reason: "manual-check" })
+    ensureNativeHostHealthy({
+      allowSetup: message.allowSetup !== false,
+      forceSetupOpen: Boolean(message.forceSetupOpen),
+      reason: message.reason || "manual-check"
+    })
       .then(sendResponse)
       .catch((error) => {
         sendResponse({
@@ -193,7 +200,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-link"
-    }, { allowSetup: true });
+    }, { allowSetup: true, forceSetupOpen: true });
     break;
   case "send-page":
     await sendToSwiftGetX({
@@ -202,7 +209,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-page"
-    }, { allowSetup: true });
+    }, { allowSetup: true, forceSetupOpen: true });
     break;
   case "send-selection":
     await sendToSwiftGetX({
@@ -211,7 +218,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-selection"
-    }, { allowSetup: true });
+    }, { allowSetup: true, forceSetupOpen: true });
     break;
   case "send-media":
     await sendToSwiftGetX({
@@ -220,7 +227,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-media"
-    }, { allowSetup: true });
+    }, { allowSetup: true, forceSetupOpen: true });
     break;
   case "scan-page":
     await scanTabAndSend(tab);
@@ -285,12 +292,17 @@ async function sendToSwiftGetX(payload, options = {}) {
   let result = await sendNativeMessage(message);
   if (result.runtimeError && allowSetup) {
     markFailure(result.message);
-    const repairResult = await repairNativeHost(payload.source || "download");
+    const repairResult = await repairNativeHost(payload.source || "download", {
+      forceOpen: Boolean(options.forceSetupOpen)
+    });
     if (repairResult.ok) {
       result = await sendNativeMessage(message);
+    } else {
+      result = {
+        ...result,
+        message: repairResult.message || result.message
+      };
     }
-  } else if (result.runtimeError) {
-    repairNativeHost(payload.source || "download-runtime-error");
   }
 
   if (result.runtimeError) {
@@ -345,19 +357,37 @@ async function ensureNativeHostHealthy(options = {}) {
     return ping;
   }
 
-  const repairResult = await repairNativeHost(options.reason || "health-check");
-  return repairResult.ok ? repairResult : ping;
+  const repairResult = await repairNativeHost(options.reason || "health-check", {
+    forceOpen: Boolean(options.forceSetupOpen)
+  });
+  return repairResult.ok || repairResult.setupOpened || repairResult.setupThrottled ? repairResult : ping;
 }
 
-async function repairNativeHost(reason) {
+async function repairNativeHost(reason, options = {}) {
   if (!activeNativeRepair) {
     activeNativeRepair = (async () => {
-      await openBrowserSetup(reason);
+      const setupResult = await openBrowserSetup(reason, {
+        forceOpen: Boolean(options.forceOpen)
+      });
+      if (!setupResult.ok) {
+        return setupResult;
+      }
+
       const result = await waitForNativeHost(NATIVE_SETUP_RETRY_TIMEOUT_MS);
       if (result.ok) {
         await setNativePairingConfirmed();
+        return result;
       }
-      return result;
+
+      return {
+        ...result,
+        setupOpened: Boolean(setupResult.opened),
+        setupThrottled: Boolean(setupResult.throttled),
+        message: setupResult.throttled
+          ? "已请求 SwiftGetX 配对，请在软件中允许配对后重新检查。"
+          : "已打开 SwiftGetX 配对请求，请在软件中点击“允许配对”后重新检查。",
+        detailMessage: result.message
+      };
     })().finally(() => {
       activeNativeRepair = undefined;
     });
@@ -366,13 +396,13 @@ async function repairNativeHost(reason) {
   return activeNativeRepair;
 }
 
-async function openBrowserSetup(reason = "repair") {
+async function openBrowserSetup(reason = "repair", options = {}) {
   const now = Date.now();
   const stored = await getLocalStorage({
     [NATIVE_SETUP_LAST_OPENED_KEY]: 0
   });
   const lastOpenedAt = Number(stored[NATIVE_SETUP_LAST_OPENED_KEY] || 0);
-  if (now - lastOpenedAt < NATIVE_SETUP_THROTTLE_MS) {
+  if (!options.forceOpen && now - lastOpenedAt < NATIVE_SETUP_THROTTLE_MS) {
     return {
       ok: true,
       throttled: true
@@ -390,7 +420,7 @@ async function openBrowserSetup(reason = "repair") {
   setupURL.searchParams.set("reason", reason);
 
   return new Promise((resolve) => {
-    chrome.tabs.create({ url: setupURL.toString(), active: false }, () => {
+    chrome.tabs.create({ url: setupURL.toString(), active: Boolean(options.forceOpen) }, () => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
         console.warn(`SwiftGetX setup: ${runtimeError.message}`);
@@ -402,7 +432,8 @@ async function openBrowserSetup(reason = "repair") {
       }
 
       resolve({
-        ok: true
+        ok: true,
+        opened: true
       });
     });
   });

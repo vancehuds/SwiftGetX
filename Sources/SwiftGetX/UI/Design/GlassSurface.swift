@@ -1,5 +1,40 @@
 import SwiftUI
 
+struct MonochromeWindowBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            baseColor
+
+            LinearGradient(
+                colors: [topEdgeTint, .clear],
+                startPoint: .top,
+                endPoint: .center
+            )
+
+            LinearGradient(
+                colors: [.clear, bottomEdgeTint],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+        }
+        .ignoresSafeArea()
+    }
+
+    private var baseColor: Color {
+        colorScheme == .dark ? .black : .white
+    }
+
+    private var topEdgeTint: Color {
+        colorScheme == .dark ? .white.opacity(0.035) : .black.opacity(0.025)
+    }
+
+    private var bottomEdgeTint: Color {
+        colorScheme == .dark ? .white.opacity(0.018) : .black.opacity(0.016)
+    }
+}
+
 struct GlassSurface<Content: View>: View {
     enum Level {
         case background
@@ -64,35 +99,35 @@ struct GlassSurface<Content: View>: View {
     private var material: Material {
         switch level {
         case .background:
-            .ultraThinMaterial
-        case .panel:
-            .ultraThinMaterial
-        case .floating:
             .thinMaterial
+        case .panel:
+            .thinMaterial
+        case .floating:
+            .regularMaterial
         }
     }
 
     private var solidFallback: Color {
         colorScheme == .dark
-            ? Color(nsColor: .windowBackgroundColor)
-            : Color(nsColor: .controlBackgroundColor)
+            ? Color.white.opacity(level == .floating ? 0.13 : 0.09)
+            : Color.black.opacity(level == .floating ? 0.055 : 0.04)
     }
 
     private var surfaceTint: Color {
         switch (level, colorScheme) {
-        case (.background, .dark): Color.white.opacity(0.012)
-        case (.background, _): Color.white.opacity(0.05)
-        case (.panel, .dark): Color.white.opacity(0.018)
-        case (.panel, _): Color.white.opacity(0.08)
-        case (.floating, .dark): Color.white.opacity(0.035)
-        case (.floating, _): Color.white.opacity(0.14)
+        case (.background, .dark): Color.white.opacity(0.03)
+        case (.background, _): Color.white.opacity(0.62)
+        case (.panel, .dark): Color.white.opacity(0.055)
+        case (.panel, _): Color.white.opacity(0.70)
+        case (.floating, .dark): Color.white.opacity(0.085)
+        case (.floating, _): Color.white.opacity(0.78)
         }
     }
 
     private var borderColor: Color {
         colorScheme == .dark
-            ? Color.white.opacity(level == .floating ? 0.18 : 0.13)
-            : Color.black.opacity(level == .floating ? 0.09 : 0.07)
+            ? Color.white.opacity(level == .floating ? 0.22 : 0.15)
+            : Color.black.opacity(level == .floating ? 0.14 : 0.10)
     }
 
     private var borderWidth: CGFloat {
@@ -105,8 +140,8 @@ struct GlassSurface<Content: View>: View {
 
     private var shadowColor: Color {
         colorScheme == .dark
-            ? Color.black.opacity(level == .floating ? 0.24 : 0.10)
-            : Color.black.opacity(level == .floating ? 0.10 : 0.045)
+            ? Color.black.opacity(level == .floating ? 0.55 : 0.36)
+            : Color.black.opacity(level == .floating ? 0.12 : 0.055)
     }
 
     private var shadowRadius: CGFloat {
@@ -151,12 +186,14 @@ struct ContentSurfaceBackground: View {
 
     private var baseFill: Color {
         if reduceTransparency {
-            return Color(nsColor: .controlBackgroundColor)
+            return colorScheme == .dark
+                ? Color.white.opacity(0.10)
+                : Color.black.opacity(0.045)
         }
 
         return colorScheme == .dark
-            ? Color(nsColor: .controlBackgroundColor).opacity(0.58)
-            : Color(nsColor: .controlBackgroundColor).opacity(0.64)
+            ? Color.white.opacity(0.055)
+            : Color.black.opacity(0.035)
     }
 
     private var selectionFill: Color {
@@ -172,8 +209,8 @@ struct ContentSurfaceBackground: View {
         }
 
         return colorScheme == .dark
-            ? Color.white.opacity(0.10)
-            : Color.black.opacity(0.06)
+            ? Color.white.opacity(0.11)
+            : Color.black.opacity(0.075)
     }
 }
 

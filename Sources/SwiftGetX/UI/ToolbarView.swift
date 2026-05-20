@@ -23,7 +23,7 @@ struct ToolbarView: View {
                 HStack(spacing: layout.value(9)) {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(layout.font(21, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.primary)
 
                     Text("SwiftGetX")
                         .font(layout.font(14.5, weight: .semibold))
@@ -88,16 +88,16 @@ struct ToolbarView: View {
                 .frame(width: layout.value(280))
                 .background {
                     RoundedRectangle(cornerRadius: layout.value(9), style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.64 : 0.70))
+                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.075 : 0.035))
                         .overlay {
                             RoundedRectangle(cornerRadius: layout.value(9), style: .continuous)
-                                .fill(Color.primary.opacity(colorScheme == .dark ? 0.05 : 0.035))
+                                .fill(Color.primary.opacity(isSearchFocused ? 0.025 : 0))
                         }
                         .overlay {
                             RoundedRectangle(cornerRadius: layout.value(9), style: .continuous)
                                 .strokeBorder(
                                     isSearchFocused
-                                        ? Color.accentColor.opacity(0.55)
+                                        ? Color.primary.opacity(colorScheme == .dark ? 0.36 : 0.24)
                                         : Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08),
                                     lineWidth: 1
                                 )

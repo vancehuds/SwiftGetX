@@ -173,13 +173,18 @@ private struct SettingsPanel: View {
     let chooseDirectory: () -> Void
 
     var body: some View {
-        GlassSurface(level: .panel, cornerRadius: 18) {
-            SettingsForm(
-                settings: settings,
-                diagnostics: diagnostics,
-                layout: layout,
-                chooseDirectory: chooseDirectory
-            )
+        ZStack {
+            MonochromeWindowBackground()
+
+            GlassSurface(level: .panel, cornerRadius: 18) {
+                SettingsForm(
+                    settings: settings,
+                    diagnostics: diagnostics,
+                    layout: layout,
+                    chooseDirectory: chooseDirectory
+                )
+            }
+            .padding(layout.value(10))
         }
     }
 }
@@ -203,7 +208,6 @@ private struct SettingsForm: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
-        .padding(layout.value(10))
     }
 }
 

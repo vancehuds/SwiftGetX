@@ -21,7 +21,7 @@ struct ContentView: View {
             let visibleTasks = filteredTasks()
 
             ZStack {
-                AppBackground()
+                MonochromeWindowBackground()
 
                 VStack(spacing: columnSpacing) {
                     ToolbarView(
@@ -125,37 +125,5 @@ private struct ClipboardSuggestionBar: View {
             .frame(maxWidth: layout.value(760))
             .transition(.move(edge: .top).combined(with: .opacity))
         }
-    }
-}
-
-private struct AppBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        ZStack {
-            Color(nsColor: colorScheme == .dark ? .windowBackgroundColor : .underPageBackgroundColor)
-
-            LinearGradient(
-                colors: [
-                    Color.accentColor.opacity(colorScheme == .dark ? 0.16 : 0.12),
-                    Color.clear
-                ],
-                startPoint: .topLeading,
-                endPoint: .center
-            )
-            .blendMode(colorScheme == .dark ? .screen : .normal)
-
-            LinearGradient(
-                colors: [
-                    Color(nsColor: .systemTeal).opacity(colorScheme == .dark ? 0.08 : 0.07),
-                    Color.clear,
-                    Color(nsColor: .systemOrange).opacity(colorScheme == .dark ? 0.05 : 0.04)
-                ],
-                startPoint: .bottomLeading,
-                endPoint: .topTrailing
-            )
-            .blendMode(colorScheme == .dark ? .screen : .normal)
-        }
-        .ignoresSafeArea()
     }
 }

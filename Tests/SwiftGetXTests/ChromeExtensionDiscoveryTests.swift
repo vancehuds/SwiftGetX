@@ -62,6 +62,36 @@ struct ChromeExtensionDiscoveryTests {
         #expect(discovery.discoverExtensionIDs().isEmpty)
     }
 
+    @Test("discovers unpacked development extension from local path and extension shape")
+    func discoversUnpackedDevelopmentExtension() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let extensionDirectory = root
+            .appendingPathComponent("Sources/SwiftGetX/Resources/ChromeExtension")
+        try FileManager.default.createDirectory(at: extensionDirectory, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: extensionDirectory.appendingPathComponent("manifest.json"))
+
+        try writeSettings(
+            to: root.appendingPathComponent("Default/Secure Preferences"),
+            settings: [
+                "bcdefghijklmnopabcdefghijklmnopa": [
+                    "path": extensionDirectory.path,
+                    "manifest": manifest(
+                        name: "__MSG_extensionName__",
+                        description: ChromeExtensionDiscovery.defaultExtensionDescriptionPrefix,
+                        permissions: ["nativeMessaging"],
+                        action: ["default_popup": ChromeExtensionDiscovery.defaultExtensionPopupPath]
+                    )
+                ]
+            ]
+        )
+
+        let discovery = ChromeExtensionDiscovery(userDataDirectory: root)
+
+        #expect(discovery.discoverExtensionIDs() == ["bcdefghijklmnopabcdefghijklmnopa"])
+    }
+
     @Test("merges existing valid origins and removes placeholders")
     func mergesExistingOrigins() {
         let origins = ChromeNativeMessagingOrigin.merge(
@@ -116,9 +146,18 @@ struct ChromeExtensionDiscoveryTests {
         to url: URL,
         extensions: [String: [String: Any]]
     ) throws {
-        let settings = extensions.mapValues { extensionManifest in
+        try writeSettings(
+            to: url,
+            settings: extensions.mapValues { extensionManifest in
             ["manifest": extensionManifest]
-        }
+            }
+        )
+    }
+
+    private func writeSettings(
+        to url: URL,
+        settings: [String: [String: Any]]
+    ) throws {
         let root: [String: Any] = [
             "extensions": [
                 "settings": settings
@@ -133,10 +172,22 @@ struct ChromeExtensionDiscoveryTests {
         try data.write(to: url)
     }
 
-    private func manifest(name: String, permissions: [String]) -> [String: Any] {
-        [
+    private func manifest(
+        name: String,
+        description: String? = nil,
+        permissions: [String],
+        action: [String: Any]? = nil
+    ) -> [String: Any] {
+        var manifest: [String: Any] = [
             "name": name,
             "permissions": permissions
         ]
+        if let description {
+            manifest["description"] = description
+        }
+        if let action {
+            manifest["action"] = action
+        }
+        return manifest
     }
 }

@@ -19,15 +19,19 @@ struct NewTaskSheet: View {
     var body: some View {
         let layout = ResponsiveLayout(scale: min(max(parentLayout.scale, 0.92), 1.08))
 
-        ScrollView(.vertical) {
-            GlassSurface(level: .floating, cornerRadius: 18) {
-                content(layout: layout)
-                    .padding(layout.value(22))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        ZStack {
+            MonochromeWindowBackground()
+
+            ScrollView(.vertical) {
+                GlassSurface(level: .floating, cornerRadius: 18) {
+                    content(layout: layout)
+                        .padding(layout.value(22))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(1)
             }
-            .padding(1)
+            .scrollIndicators(.visible)
         }
-        .scrollIndicators(.visible)
         .environment(\.responsiveLayout, layout)
         .onAppear {
             saveDirectory = settings.defaultDownloadDirectory
@@ -51,11 +55,11 @@ struct NewTaskSheet: View {
             HStack(spacing: layout.value(12)) {
                 ZStack {
                     RoundedRectangle(cornerRadius: layout.value(10), style: .continuous)
-                        .fill(Color.accentColor.opacity(0.10))
+                        .fill(Color.primary.opacity(0.07))
                         .frame(width: layout.value(42), height: layout.value(42))
                     Image(systemName: "doc.badge.plus")
                         .font(layout.font(18, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.primary)
                 }
 
                 VStack(alignment: .leading, spacing: layout.value(3)) {
@@ -96,9 +100,9 @@ struct NewTaskSheet: View {
             HStack(spacing: layout.value(12)) {
                 Image(systemName: "folder.fill")
                     .font(layout.font(16))
-                    .foregroundStyle(Color.orange)
+                    .foregroundStyle(Color.primary)
                     .padding(layout.value(8))
-                    .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: layout.value(8), style: .continuous))
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: layout.value(8), style: .continuous))
 
                 VStack(alignment: .leading, spacing: layout.value(3)) {
                     Text("保存目录")
@@ -180,7 +184,7 @@ private struct BrowserTakeoverBanner: View {
         HStack(alignment: .top, spacing: layout.value(10)) {
             Image(systemName: "safari")
                 .font(layout.font(16, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.primary)
                 .frame(width: layout.value(24), height: layout.value(24))
 
             VStack(alignment: .leading, spacing: layout.value(3)) {
@@ -224,7 +228,7 @@ private struct SourcePreviewView: View {
                 Spacer()
                 Text("已识别 \(sources.count) 个任务")
                     .font(layout.font(10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(sources.isEmpty ? .secondary : Color.green)
+                    .foregroundStyle(sources.isEmpty ? .secondary : Color.primary)
             }
 
             if sources.isEmpty {

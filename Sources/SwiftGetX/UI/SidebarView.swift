@@ -45,7 +45,7 @@ struct SidebarView: View {
                         Spacer()
 
                         Circle()
-                            .fill(Color.green)
+                            .fill(Color.primary.opacity(0.72))
                             .frame(width: layout.value(6), height: layout.value(6))
                     }
 
@@ -123,7 +123,7 @@ private extension DownloadFilter {
     var statusColor: Color {
         switch self {
         case .all:
-            .accentColor
+            .primary
         case .running:
             .blue
         case .queued:

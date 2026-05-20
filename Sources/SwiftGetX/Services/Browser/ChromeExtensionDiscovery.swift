@@ -2,18 +2,23 @@ import Foundation
 
 struct ChromeExtensionDiscovery {
     static let defaultExtensionName = "SwiftGetX"
+    static let defaultExtensionDescriptionPrefix = "Send links, pages, media, and detected downloads to SwiftGetX."
+    static let defaultExtensionPopupPath = "popup.html"
 
     let userDataDirectory: URL
     let extensionName: String
     let fileManager: FileManager
+    let developmentExtensionDirectory: URL?
 
     init(
         userDataDirectory: URL = ChromeExtensionDiscovery.defaultChromeUserDataDirectory(),
         extensionName: String = ChromeExtensionDiscovery.defaultExtensionName,
+        developmentExtensionDirectory: URL? = ChromeExtensionDiscovery.defaultDevelopmentExtensionDirectory(),
         fileManager: FileManager = .default
     ) {
         self.userDataDirectory = userDataDirectory
         self.extensionName = extensionName
+        self.developmentExtensionDirectory = developmentExtensionDirectory?.standardizedFileURL
         self.fileManager = fileManager
     }
 
@@ -21,6 +26,10 @@ struct ChromeExtensionDiscovery {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {
         homeDirectory.appendingPathComponent("Library/Application Support/Google/Chrome")
+    }
+
+    static func defaultDevelopmentExtensionDirectory(bundle: Bundle = .main) -> URL? {
+        bundle.url(forResource: "ChromeExtension", withExtension: nil)
     }
 
     func discoverExtensionIDs() -> [String] {
@@ -44,8 +53,7 @@ struct ChromeExtensionDiscovery {
         return settings.compactMap { extensionID, rawSettings in
             guard ChromeNativeMessagingOrigin.isValidExtensionID(extensionID),
                   let settings = rawSettings as? [String: Any],
-                  let manifest = settings["manifest"] as? [String: Any],
-                  isTargetManifest(manifest) else {
+                  isTargetSettings(settings) else {
                 return nil
             }
             return extensionID
@@ -78,13 +86,55 @@ struct ChromeExtensionDiscovery {
         urls.filter { fileManager.fileExists(atPath: $0.path) }
     }
 
+    private func isTargetSettings(_ settings: [String: Any]) -> Bool {
+        guard let manifest = settings["manifest"] as? [String: Any],
+              hasNativeMessagingPermission(manifest) else {
+            return false
+        }
+
+        if isTargetManifest(manifest) {
+            return true
+        }
+
+        if let path = settings["path"] as? String,
+           isDevelopmentExtensionPath(path),
+           isSwiftGetXChromeExtensionShape(manifest) {
+            return true
+        }
+
+        return false
+    }
+
     private func isTargetManifest(_ manifest: [String: Any]) -> Bool {
         guard let name = manifest["name"] as? String,
               name.caseInsensitiveCompare(extensionName) == .orderedSame else {
             return false
         }
 
-        return permissions(in: manifest).contains("nativeMessaging")
+        return true
+    }
+
+    private func hasNativeMessagingPermission(_ manifest: [String: Any]) -> Bool {
+        permissions(in: manifest).contains("nativeMessaging")
+    }
+
+    private func isSwiftGetXChromeExtensionShape(_ manifest: [String: Any]) -> Bool {
+        let action = manifest["action"] as? [String: Any]
+        let description = manifest["description"] as? String
+        return action?["default_popup"] as? String == Self.defaultExtensionPopupPath
+            && description == Self.defaultExtensionDescriptionPrefix
+    }
+
+    private func isDevelopmentExtensionPath(_ path: String) -> Bool {
+        guard path.hasPrefix("/") else { return false }
+
+        let extensionPath = URL(fileURLWithPath: path).standardizedFileURL
+        if let developmentExtensionDirectory,
+           extensionPath == developmentExtensionDirectory {
+            return true
+        }
+
+        return fileManager.fileExists(atPath: extensionPath.appendingPathComponent("manifest.json").path)
     }
 
     private func permissions(in manifest: [String: Any]) -> [String] {
