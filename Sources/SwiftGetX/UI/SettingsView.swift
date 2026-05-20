@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var parentLayout
+    @State private var diagnostics = NativeHostDiagnostics()
 
     var body: some View {
         @Bindable var settings = settings
@@ -60,6 +61,10 @@ struct SettingsView: View {
                         Toggle("完成后通知", isOn: $settings.completionNotificationsEnabled)
                         Toggle("剪贴板链接检测", isOn: $settings.clipboardDetectionEnabled)
                     }
+
+                    Section("浏览器集成") {
+                        BrowserIntegrationRow(diagnostics: diagnostics, layout: layout)
+                    }
                 }
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
@@ -79,6 +84,11 @@ struct SettingsView: View {
         .onChange(of: settings.completionNotificationsEnabled) { _, _ in persistSettings() }
         .onChange(of: settings.clipboardDetectionEnabled) { _, _ in persistSettings() }
         .onChange(of: settings.stopSeedingAtRatio) { _, _ in persistSettings() }
+        .onAppear {
+            if diagnostics.status == .unchecked {
+                diagnostics.check()
+            }
+        }
     }
 
     private func chooseDirectory() {
@@ -127,5 +137,81 @@ private struct SpeedLimitSettingsRow: View {
     private func label(for value: Int64) -> String {
         guard value > 0 else { return "不限速" }
         return ByteCountFormatter.downloadFormatter.string(fromByteCount: value) + "/s"
+    }
+}
+
+private struct BrowserIntegrationRow: View {
+    @Bindable var diagnostics: NativeHostDiagnostics
+    let layout: ResponsiveLayout
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            HStack(spacing: layout.value(8)) {
+                statusDot
+                VStack(alignment: .leading, spacing: layout.value(2)) {
+                    Text("Chrome Native Host")
+                    Text(diagnostics.statusMessage)
+                        .font(layout.font(12))
+                        .foregroundStyle(statusColor)
+                }
+                Spacer()
+                actionButtons
+            }
+
+            if !diagnostics.detailMessage.isEmpty {
+                Text(diagnostics.detailMessage)
+                    .font(layout.font(11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var statusDot: some View {
+        Circle()
+            .fill(statusColor)
+            .frame(width: layout.value(8), height: layout.value(8))
+            .opacity(diagnostics.status == .checking ? 0.6 : 1)
+            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                        value: diagnostics.status == .checking)
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        HStack(spacing: layout.value(6)) {
+            if diagnostics.isRepairable {
+                Button("尝试修复") {
+                    diagnostics.repair()
+                }
+                .disabled(diagnostics.isChecking)
+            }
+
+            Button("检查") {
+                diagnostics.check()
+            }
+            .disabled(diagnostics.isChecking)
+
+            Button {
+                diagnostics.revealManifest()
+            } label: {
+                Image(systemName: "folder")
+            }
+            .buttonStyle(.borderless)
+            .help("在 Finder 中显示配置文件")
+        }
+    }
+
+    private var statusColor: Color {
+        switch diagnostics.status {
+        case .unchecked, .checking:
+            .secondary
+        case .ok:
+            .green
+        case .warning:
+            .orange
+        case .error:
+            .red
+        }
     }
 }
