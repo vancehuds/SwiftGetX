@@ -58,6 +58,27 @@ struct TaskListView: View {
                                     Button(L10n.string("action_recheck")) {
                                         coordinator.recheck(task)
                                     }
+                                    if task.isQueueManageable {
+                                        Divider()
+                                        Button(L10n.string("queue_move_top")) {
+                                            coordinator.moveQueueItemToTop(task)
+                                        }
+                                        Button(L10n.string("queue_move_up")) {
+                                            coordinator.moveQueueItemUp(task)
+                                        }
+                                        Button(L10n.string("queue_move_down")) {
+                                            coordinator.moveQueueItemDown(task)
+                                        }
+                                        Menu(L10n.string("queue_priority")) {
+                                            ForEach(DownloadQueuePriority.allCases) { priority in
+                                                Button {
+                                                    coordinator.setQueuePriority(task, priority: priority)
+                                                } label: {
+                                                    Label(priority.title, systemImage: priority.symbolName)
+                                                }
+                                            }
+                                        }
+                                    }
                                     Divider()
                                     Button(L10n.string("action_reveal_in_finder")) {
                                         let url = URL(fileURLWithPath: task.savePath)
@@ -157,6 +178,15 @@ private struct TaskRowView: View {
                         .padding(.horizontal, layout.value(6))
                         .padding(.vertical, layout.value(2))
                         .background(statusColor.opacity(colorScheme == .dark ? 0.16 : 0.09), in: Capsule())
+
+                    if task.isQueueManageable {
+                        Label(task.queuePriority.title, systemImage: task.queuePriority.symbolName)
+                            .font(layout.font(10, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, layout.value(6))
+                            .padding(.vertical, layout.value(2))
+                            .background(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.06), in: Capsule())
+                    }
 
                     Spacer()
 

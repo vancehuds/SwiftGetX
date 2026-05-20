@@ -35,6 +35,10 @@ final class DownloadTask {
     var browserContextJSON: String?
     var httpResponseMetadataJSON: String?
     var httpOptionsJSON: String?
+    var queuePosition: Double = 0
+    var queuePriorityRawValue: String = DownloadQueuePriority.normal.rawValue
+    var queueFailureCount: Int = 0
+    var nextQueueRetryAt: Date?
     var logEntries: [String]
 
     init(
@@ -69,6 +73,10 @@ final class DownloadTask {
         browserContext: BrowserDownloadContext? = nil,
         httpResponseMetadata: HTTPResponseMetadata? = nil,
         httpOptions: HTTPDownloadOptions? = nil,
+        queuePosition: Double = 0,
+        queuePriority: DownloadQueuePriority = .normal,
+        queueFailureCount: Int = 0,
+        nextQueueRetryAt: Date? = nil,
         logEntries: [String] = []
     ) {
         self.id = id
@@ -102,6 +110,10 @@ final class DownloadTask {
         self.browserContextJSON = Self.encode(browserContext)
         self.httpResponseMetadataJSON = Self.encode(httpResponseMetadata)
         self.httpOptionsJSON = Self.encodeHTTPOptions(httpOptions)
+        self.queuePosition = queuePosition
+        self.queuePriorityRawValue = queuePriority.rawValue
+        self.queueFailureCount = queueFailureCount
+        self.nextQueueRetryAt = nextQueueRetryAt
         self.logEntries = logEntries
     }
 
@@ -124,8 +136,30 @@ final class DownloadTask {
         status == .completed || status == .failed
     }
 
+    var usesActiveDownloadSlot: Bool {
+        status == .running || status == .verifying
+    }
+
+    var isQueueManageable: Bool {
+        status == .queued || status == .paused || status == .failed
+    }
+
     var hasFinishedDownloading: Bool {
         status == .completed || status == .seeding
+    }
+
+    var queuePriority: DownloadQueuePriority {
+        get { DownloadQueuePriority(rawValue: queuePriorityRawValue) ?? .normal }
+        set { queuePriorityRawValue = newValue.rawValue }
+    }
+
+    var effectiveQueuePosition: Double {
+        queuePosition > 0 ? queuePosition : createdAt.timeIntervalSinceReferenceDate
+    }
+
+    func isQueueRetryDue(at date: Date = .now) -> Bool {
+        guard let nextQueueRetryAt else { return true }
+        return nextQueueRetryAt <= date
     }
 
     var displaySource: String {
@@ -332,6 +366,36 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             "checkmark.circle.fill"
         case .failed:
             "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+enum DownloadQueuePriority: String, Codable, CaseIterable, Identifiable {
+    case high = "0_high"
+    case normal = "1_normal"
+    case low = "2_low"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .high:
+            L10n.string("queue_priority_high")
+        case .normal:
+            L10n.string("queue_priority_normal")
+        case .low:
+            L10n.string("queue_priority_low")
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .high:
+            "arrow.up.circle"
+        case .normal:
+            "equal.circle"
+        case .low:
+            "arrow.down.circle"
         }
     }
 }

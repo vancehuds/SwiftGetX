@@ -80,6 +80,9 @@ private struct SettingsSnapshot: Equatable {
     let completionNotificationsEnabled: Bool
     let clipboardDetectionEnabled: Bool
     let confirmBrowserTakeoverDownloads: Bool
+    let downloadRestartPolicy: DownloadRestartPolicy
+    let automaticallyRequeuesFailedTasks: Bool
+    let queueFailureRetryLimit: Int
     let stopSeedingAtRatio: Double
     let torrentDHTEnabled: Bool
     let torrentPEXEnabled: Bool
@@ -103,6 +106,9 @@ private struct SettingsSnapshot: Equatable {
         completionNotificationsEnabled = settings.completionNotificationsEnabled
         clipboardDetectionEnabled = settings.clipboardDetectionEnabled
         confirmBrowserTakeoverDownloads = settings.confirmBrowserTakeoverDownloads
+        downloadRestartPolicy = settings.downloadRestartPolicy
+        automaticallyRequeuesFailedTasks = settings.automaticallyRequeuesFailedTasks
+        queueFailureRetryLimit = settings.queueFailureRetryLimit
         stopSeedingAtRatio = settings.stopSeedingAtRatio
         torrentDHTEnabled = settings.torrentDHTEnabled
         torrentPEXEnabled = settings.torrentPEXEnabled
@@ -253,6 +259,18 @@ private struct DownloadSettingsSection: View {
                 value: $settings.retryLimit,
                 in: 0...10
             )
+            Picker(L10n.string("queue_restart_policy"), selection: $settings.downloadRestartPolicy) {
+                ForEach(DownloadRestartPolicy.allCases) { policy in
+                    Text(policy.title).tag(policy)
+                }
+            }
+            Toggle(L10n.string("queue_auto_requeue_failed"), isOn: $settings.automaticallyRequeuesFailedTasks)
+            Stepper(
+                L10n.string("queue_retry_limit", settings.queueFailureRetryLimit),
+                value: $settings.queueFailureRetryLimit,
+                in: 0...10
+            )
+            .disabled(!settings.automaticallyRequeuesFailedTasks)
             SpeedLimitSettingsRow(
                 title: L10n.string("download_speed_limit"),
                 value: $settings.globalDownloadLimitBytes,

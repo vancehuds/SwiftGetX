@@ -20,6 +20,9 @@ final class AppSettings {
     var completionNotificationsEnabled = true
     var clipboardDetectionEnabled = true
     var confirmBrowserTakeoverDownloads = true
+    var downloadRestartPolicy: DownloadRestartPolicy = .restorePaused
+    var automaticallyRequeuesFailedTasks = false
+    var queueFailureRetryLimit: Int = 3
     var stopSeedingAtRatio: Double = 1.0
     var torrentDHTEnabled = true
     var torrentPEXEnabled = true
@@ -42,6 +45,9 @@ final class AppSettings {
         completionNotificationsEnabled = record.completionNotificationsEnabled
         clipboardDetectionEnabled = record.clipboardDetectionEnabled
         confirmBrowserTakeoverDownloads = record.confirmBrowserTakeoverDownloads
+        downloadRestartPolicy = DownloadRestartPolicy(rawValue: record.downloadRestartPolicyRawValue) ?? .restorePaused
+        automaticallyRequeuesFailedTasks = record.automaticallyRequeuesFailedTasks
+        queueFailureRetryLimit = record.queueFailureRetryLimit
         stopSeedingAtRatio = record.stopSeedingAtRatio
         torrentDHTEnabled = record.torrentDHTEnabled
         torrentPEXEnabled = record.torrentPEXEnabled
@@ -66,6 +72,9 @@ final class AppSettings {
             completionNotificationsEnabled: completionNotificationsEnabled,
             clipboardDetectionEnabled: clipboardDetectionEnabled,
             confirmBrowserTakeoverDownloads: confirmBrowserTakeoverDownloads,
+            downloadRestartPolicyRawValue: downloadRestartPolicy.rawValue,
+            automaticallyRequeuesFailedTasks: automaticallyRequeuesFailedTasks,
+            queueFailureRetryLimit: queueFailureRetryLimit,
             stopSeedingAtRatio: stopSeedingAtRatio,
             torrentDHTEnabled: torrentDHTEnabled,
             torrentPEXEnabled: torrentPEXEnabled,
@@ -90,6 +99,9 @@ final class AppSettings {
         record.completionNotificationsEnabled = completionNotificationsEnabled
         record.clipboardDetectionEnabled = clipboardDetectionEnabled
         record.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
+        record.downloadRestartPolicyRawValue = downloadRestartPolicy.rawValue
+        record.automaticallyRequeuesFailedTasks = automaticallyRequeuesFailedTasks
+        record.queueFailureRetryLimit = queueFailureRetryLimit
         record.stopSeedingAtRatio = stopSeedingAtRatio
         record.torrentDHTEnabled = torrentDHTEnabled
         record.torrentPEXEnabled = torrentPEXEnabled
@@ -116,6 +128,22 @@ final class AppSettings {
     }
 }
 
+enum DownloadRestartPolicy: String, Codable, CaseIterable, Identifiable {
+    case restorePaused
+    case autoResume
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .restorePaused:
+            L10n.string("restart_policy_restore_paused")
+        case .autoResume:
+            L10n.string("restart_policy_auto_resume")
+        }
+    }
+}
+
 @Model
 final class AppSettingsRecord {
     @Attribute(.unique) var id: String
@@ -130,6 +158,9 @@ final class AppSettingsRecord {
     var completionNotificationsEnabled: Bool
     var clipboardDetectionEnabled: Bool
     var confirmBrowserTakeoverDownloads: Bool = true
+    var downloadRestartPolicyRawValue: String = DownloadRestartPolicy.restorePaused.rawValue
+    var automaticallyRequeuesFailedTasks: Bool = false
+    var queueFailureRetryLimit: Int = 3
     var stopSeedingAtRatio: Double
     var torrentDHTEnabled: Bool = true
     var torrentPEXEnabled: Bool = true
@@ -153,6 +184,9 @@ final class AppSettingsRecord {
         completionNotificationsEnabled: Bool = true,
         clipboardDetectionEnabled: Bool = true,
         confirmBrowserTakeoverDownloads: Bool = true,
+        downloadRestartPolicyRawValue: String = DownloadRestartPolicy.restorePaused.rawValue,
+        automaticallyRequeuesFailedTasks: Bool = false,
+        queueFailureRetryLimit: Int = 3,
         stopSeedingAtRatio: Double = 1.0,
         torrentDHTEnabled: Bool = true,
         torrentPEXEnabled: Bool = true,
@@ -175,6 +209,9 @@ final class AppSettingsRecord {
         self.completionNotificationsEnabled = completionNotificationsEnabled
         self.clipboardDetectionEnabled = clipboardDetectionEnabled
         self.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
+        self.downloadRestartPolicyRawValue = downloadRestartPolicyRawValue
+        self.automaticallyRequeuesFailedTasks = automaticallyRequeuesFailedTasks
+        self.queueFailureRetryLimit = queueFailureRetryLimit
         self.stopSeedingAtRatio = stopSeedingAtRatio
         self.torrentDHTEnabled = torrentDHTEnabled
         self.torrentPEXEnabled = torrentPEXEnabled

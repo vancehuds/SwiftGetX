@@ -89,13 +89,13 @@ struct ContentView: View {
     }
 
     private func filteredTasks() -> [DownloadTask] {
-        allTasks.filter { task in
+        coordinator.sortedTasks(allTasks.filter { task in
             let matchesFilter = coordinator.activeFilter.matches(task)
             let matchesSearch = coordinator.searchText.isEmpty
                 || task.name.localizedCaseInsensitiveContains(coordinator.searchText)
                 || task.source.localizedCaseInsensitiveContains(coordinator.searchText)
             return matchesFilter && matchesSearch
-        }
+        })
     }
 }
 

@@ -12,6 +12,8 @@ final class DownloadCoordinator {
     private let torrentEngine = TorrentDownloadEngine()
     private var runtimeBrowserContexts: [UUID: BrowserDownloadContext] = [:]
     private var runtimeHTTPOptions: [UUID: HTTPDownloadOptions] = [:]
+    private var queueWakeTask: Task<Void, Never>?
+    private var queueWakeDate: Date?
 
     var selectedTaskID: UUID?
     var activeFilter: DownloadFilter = .all
@@ -49,6 +51,7 @@ final class DownloadCoordinator {
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
         )
+        normalizeMissingQueuePositions()
     }
 
     func reloadSettings(_ settings: AppSettings) {
@@ -64,6 +67,7 @@ final class DownloadCoordinator {
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
         )
+        scheduleQueue()
     }
 
     func restoreIncompleteTasks() {
@@ -77,10 +81,22 @@ final class DownloadCoordinator {
 
         guard let tasks = try? modelContext.fetch(descriptor) else { return }
         for task in tasks where task.status == .running || task.status == .seeding || task.status == .verifying {
-            task.status = .paused
-            task.appendLog(L10n.string("log_restored_paused_after_restart"))
+            task.speedBytesPerSecond = 0
+            task.errorMessage = nil
+            task.nextQueueRetryAt = nil
+            switch settings?.downloadRestartPolicy ?? .restorePaused {
+            case .restorePaused:
+                task.status = .paused
+                task.appendLog(L10n.string("log_restored_paused_after_restart"))
+            case .autoResume:
+                task.status = .queued
+                task.appendLog(L10n.string("log_restored_queued_after_restart"))
+            }
         }
         save()
+        if settings?.downloadRestartPolicy == .autoResume {
+            scheduleQueue()
+        }
     }
 
     func tasks(for filter: DownloadFilter = .all) -> [DownloadTask] {
@@ -96,11 +112,40 @@ final class DownloadCoordinator {
 
     func allTasks() -> [DownloadTask] {
         guard let modelContext else { return [] }
-        var descriptor = FetchDescriptor<DownloadTask>(
+        let descriptor = FetchDescriptor<DownloadTask>(
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        descriptor.fetchLimit = 500
-        return (try? modelContext.fetch(descriptor)) ?? []
+        return sortedTasks((try? modelContext.fetch(descriptor)) ?? [])
+    }
+
+    func sortedTasks(_ tasks: [DownloadTask]) -> [DownloadTask] {
+        tasks.sorted(by: Self.queuePrecedes)
+    }
+
+    func moveQueueItemToTop(_ task: DownloadTask) {
+        guard task.isQueueManageable else { return }
+        var queueTasks = queueManageableTasks().filter { $0.id != task.id }
+        queueTasks.insert(task, at: 0)
+        rewriteQueuePositions(queueTasks)
+        task.appendLog(L10n.string("log_queue_moved_top"))
+        save()
+        scheduleQueue()
+    }
+
+    func moveQueueItemUp(_ task: DownloadTask) {
+        moveQueueItem(task, offset: -1)
+    }
+
+    func moveQueueItemDown(_ task: DownloadTask) {
+        moveQueueItem(task, offset: 1)
+    }
+
+    func setQueuePriority(_ task: DownloadTask, priority: DownloadQueuePriority) {
+        guard task.queuePriority != priority else { return }
+        task.queuePriority = priority
+        task.appendLog(L10n.string("log_queue_priority_changed", priority.title))
+        save()
+        scheduleQueue()
     }
 
     @discardableResult
@@ -143,6 +188,7 @@ final class DownloadCoordinator {
         }
 
         guard let modelContext else { return tasks }
+        assignQueuePositions(to: tasks)
         for task in tasks {
             modelContext.insert(task)
             if let browserContext {
@@ -205,6 +251,7 @@ final class DownloadCoordinator {
         }
 
         guard let modelContext else { return tasks }
+        assignQueuePositions(to: tasks)
         for task in tasks {
             modelContext.insert(task)
             if let preview = previews.first(where: { $0.source == task.source }),
@@ -241,9 +288,17 @@ final class DownloadCoordinator {
     }
 
     func start(_ task: DownloadTask) {
+        start(task, resetsQueueFailureState: true)
+    }
+
+    private func start(_ task: DownloadTask, resetsQueueFailureState: Bool) {
         task.status = .running
         task.errorMessage = nil
         task.retryCount = 0
+        task.nextQueueRetryAt = nil
+        if resetsQueueFailureState {
+            task.queueFailureCount = 0
+        }
         task.appendLog(L10n.string("log_start_download"))
         let request = DownloadRequest(
             task: task,
@@ -272,6 +327,7 @@ final class DownloadCoordinator {
     func pause(_ task: DownloadTask) {
         task.status = .paused
         task.speedBytesPerSecond = 0
+        task.nextQueueRetryAt = nil
         task.appendLog(L10n.string("log_paused"))
         let request = DownloadRequest(task: task)
         save()
@@ -282,13 +338,23 @@ final class DownloadCoordinator {
     }
 
     func resume(_ task: DownloadTask) {
-        start(task)
+        task.status = .queued
+        task.errorMessage = nil
+        task.speedBytesPerSecond = 0
+        task.nextQueueRetryAt = nil
+        if task.queueFailureCount > 0 {
+            task.queueFailureCount = 0
+        }
+        task.appendLog(L10n.string("log_queued_for_resume"))
+        save()
+        scheduleQueue()
     }
 
     func cancel(_ task: DownloadTask) {
         task.status = .failed
         task.speedBytesPerSecond = 0
         task.errorMessage = L10n.string("error_task_cancelled")
+        task.nextQueueRetryAt = nil
         task.appendLog(L10n.string("log_task_cancelled"))
         let request = DownloadRequest(task: task)
         save()
@@ -323,6 +389,7 @@ final class DownloadCoordinator {
 
     func recheck(_ task: DownloadTask) {
         task.status = .verifying
+        task.nextQueueRetryAt = nil
         task.appendLog(L10n.string("log_start_recheck"))
         let request = DownloadRequest(task: task)
         save()
@@ -479,17 +546,23 @@ final class DownloadCoordinator {
         }
     }
 
-    private func scheduleQueue() {
-        let running = tasks().filter { $0.status == .running }.count
+    func scheduleQueue() {
+        let now = Date()
+        let tasks = allTasks()
+        let running = tasks.filter(\.usesActiveDownloadSlot).count
         let availableSlots = max(0, (settings?.concurrentTaskLimit ?? 3) - running)
+        scheduleNextQueueWake(from: tasks, now: now)
         guard availableSlots > 0 else { return }
 
-        for task in tasks().filter({ $0.status == .queued }).prefix(availableSlots) {
-            start(task)
+        for task in tasks
+            .filter({ $0.status == .queued && $0.isQueueRetryDue(at: now) })
+            .prefix(availableSlots)
+        {
+            start(task, resetsQueueFailureState: false)
         }
     }
 
-    private func apply(_ snapshot: DownloadSnapshot) {
+    func apply(_ snapshot: DownloadSnapshot) {
         guard let modelContext else { return }
         let taskID = snapshot.taskID
         let descriptor = FetchDescriptor<DownloadTask>(
@@ -555,6 +628,8 @@ final class DownloadCoordinator {
 
         switch snapshot.status {
         case .seeding:
+            task.queueFailureCount = 0
+            task.nextQueueRetryAt = nil
             if task.completedAt == nil {
                 task.completedAt = .now
                 task.appendLog(L10n.string("log_download_ready_seeding"))
@@ -567,6 +642,8 @@ final class DownloadCoordinator {
             runtimeHTTPOptions[task.id] = nil
         case .completed:
             task.speedBytesPerSecond = 0
+            task.queueFailureCount = 0
+            task.nextQueueRetryAt = nil
             if task.completedAt == nil {
                 task.completedAt = .now
                 task.appendLog(L10n.string("log_download_completed"))
@@ -579,7 +656,7 @@ final class DownloadCoordinator {
             runtimeHTTPOptions[task.id] = nil
         case .failed:
             task.speedBytesPerSecond = 0
-            task.appendLog(snapshot.errorMessage ?? L10n.string("error_download_failed"))
+            handleFailedTask(task, message: snapshot.errorMessage ?? L10n.string("error_download_failed"))
             scheduleQueue()
             runtimeBrowserContexts[task.id] = nil
             runtimeHTTPOptions[task.id] = nil
@@ -605,6 +682,153 @@ final class DownloadCoordinator {
         } catch {
             statusMessage = L10n.string("status_save_failed", error.localizedDescription)
         }
+    }
+
+    private func moveQueueItem(_ task: DownloadTask, offset: Int) {
+        var queueTasks = queueManageableTasks()
+        guard task.isQueueManageable,
+              let index = queueTasks.firstIndex(where: { $0.id == task.id })
+        else {
+            return
+        }
+        let targetIndex = index + offset
+        guard targetIndex >= 0,
+              targetIndex < queueTasks.count
+        else {
+            return
+        }
+
+        queueTasks.swapAt(index, targetIndex)
+        rewriteQueuePositions(queueTasks)
+        task.appendLog(offset < 0 ? L10n.string("log_queue_moved_up") : L10n.string("log_queue_moved_down"))
+        save()
+        scheduleQueue()
+    }
+
+    private func queueManageableTasks() -> [DownloadTask] {
+        allTasks().filter(\.isQueueManageable)
+    }
+
+    private func rewriteQueuePositions(_ tasks: [DownloadTask]) {
+        for (index, task) in tasks.enumerated() {
+            task.queuePosition = Double(index + 1)
+        }
+    }
+
+    private func handleFailedTask(_ task: DownloadTask, message: String) {
+        let shouldRequeue = settings?.automaticallyRequeuesFailedTasks == true
+            && task.queueFailureCount < max(0, settings?.queueFailureRetryLimit ?? 0)
+            && message != L10n.string("error_task_cancelled")
+
+        if shouldRequeue {
+            task.queueFailureCount += 1
+            task.status = .queued
+            task.errorMessage = message
+            task.nextQueueRetryAt = Date().addingTimeInterval(Self.queueRetryDelay(for: task.queueFailureCount))
+            task.appendLog(L10n.string("log_queue_retry_scheduled", task.queueFailureCount))
+            return
+        }
+
+        task.status = .failed
+        task.nextQueueRetryAt = nil
+        task.appendLog(message)
+    }
+
+    private func normalizeMissingQueuePositions() {
+        let tasks = allTasks()
+        var nextPosition = tasks.map(\.effectiveQueuePosition).max() ?? 0
+        var didChange = false
+        for task in tasks where task.queuePosition <= 0 {
+            nextPosition += 1
+            task.queuePosition = nextPosition
+            didChange = true
+        }
+        if didChange {
+            save()
+        }
+    }
+
+    private func assignQueuePositions(to tasks: [DownloadTask]) {
+        var nextPosition = allTasks().map(\.effectiveQueuePosition).max() ?? 0
+        for task in tasks where task.queuePosition <= 0 {
+            nextPosition += 1
+            task.queuePosition = nextPosition
+        }
+    }
+
+    private func scheduleNextQueueWake(from tasks: [DownloadTask], now: Date) {
+        let nextDate = tasks
+            .filter { $0.status == .queued }
+            .compactMap(\.nextQueueRetryAt)
+            .filter { $0 > now }
+            .min()
+        guard nextDate != queueWakeDate else { return }
+
+        queueWakeTask?.cancel()
+        queueWakeDate = nextDate
+        guard let nextDate else {
+            queueWakeTask = nil
+            return
+        }
+
+        queueWakeTask = Task { [weak self] in
+            let delay = max(0, nextDate.timeIntervalSinceNow)
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.queueWakeDate = nil
+                self?.queueWakeTask = nil
+                self?.scheduleQueue()
+            }
+        }
+    }
+
+    private static func queuePrecedes(_ lhs: DownloadTask, _ rhs: DownloadTask) -> Bool {
+        if lhs.usesActiveDownloadSlot != rhs.usesActiveDownloadSlot {
+            return lhs.usesActiveDownloadSlot
+        }
+
+        if lhs.isQueueManageable && rhs.isQueueManageable {
+            if lhs.queuePriorityRawValue != rhs.queuePriorityRawValue {
+                return lhs.queuePriorityRawValue < rhs.queuePriorityRawValue
+            }
+            if lhs.effectiveQueuePosition != rhs.effectiveQueuePosition {
+                return lhs.effectiveQueuePosition < rhs.effectiveQueuePosition
+            }
+        } else if lhs.isQueueManageable != rhs.isQueueManageable {
+            return lhs.isQueueManageable
+        } else if statusSortRank(lhs.status) != statusSortRank(rhs.status) {
+            return statusSortRank(lhs.status) < statusSortRank(rhs.status)
+        }
+
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt > rhs.createdAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func statusSortRank(_ status: DownloadStatus) -> Int {
+        switch status {
+        case .running:
+            0
+        case .verifying:
+            1
+        case .queued:
+            2
+        case .paused:
+            3
+        case .failed:
+            4
+        case .seeding:
+            5
+        case .completed:
+            6
+        }
+    }
+
+    private static func queueRetryDelay(for failureCount: Int) -> TimeInterval {
+        let attempt = max(1, failureCount)
+        return min(300, pow(2, Double(attempt - 1)) * 30)
     }
 }
 

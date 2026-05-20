@@ -341,17 +341,39 @@ Next step:
 
 ## Task 9: Queue Scheduling and Restart Policy
 
-Status: [ ]
+Status: [x]
 
 Implement queue ordering/reordering, priority, automatic queue fill when concurrency increases, failed-task backoff/requeue behavior, restart policy for incomplete tasks, and remove or replace fixed 500-task assumptions where they affect scheduling/statistics.
 
 Work performed:
 
+- Added persistent queue metadata to `DownloadTask`: queue position, priority, failure count, and next retry time, plus queue-priority display helpers and queue-sort helpers.
+- Added restart/requeue settings to `AppSettings` and `AppSettingsRecord`, including restart policy, automatic failed-task requeue, and retry-limit persistence.
+- Reworked `DownloadCoordinator` scheduling to sort all tasks by active state, queue priority, queue position, status, and creation date; removed the fixed 500-task fetch cap from coordinator task retrieval.
+- Added queue reordering APIs for move-to-top, move-up, move-down, and priority changes, with queue position rewriting and localized task logs.
+- Changed resume behavior to queue tasks first, then fill available slots through the scheduler, so concurrency limits are respected.
+- Added automatic queue fill on settings reload/concurrency increases, delayed queue wakeups for failed-task retry backoff, retry-limit handling, and restart policy handling for running/seeding/verifying tasks.
+- Assigned queue positions to newly added tasks and normalized existing zero/missing positions on coordinator attach.
+- Surfaced queue restart/retry settings in Settings and queue move/priority controls in task context menus; sorted the main task list through coordinator queue ordering.
+- Added English and Simplified Chinese localization for queue settings, priorities, actions, and logs.
+- Added coordinator tests covering large task sets beyond 500, priority/position scheduling, concurrency increase slot fill, failed-task backoff/retry limit, restart auto-resume, and queue move/priority ordering.
+
 Verification evidence:
+
+- `swift test --filter DownloadCoordinator` passed with 7 tests in the `DownloadCoordinator` suite.
+- `swift test` passed with 133 tests across 13 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Queue reordering is exposed through explicit context-menu actions rather than drag-and-drop; drag/drop remains a later UI improvement if the plan still requires it after Large Check 3.
+- Failed authenticated HTTP tasks can be requeued, but sensitive runtime-only browser/per-task headers are still unavailable after app restart by design until a secure storage strategy exists.
+- SwiftUI queue controls were compile/test verified and statically inspected, not screenshot-tested in this session.
+
 Next step:
+
+- Large Check 3: HTTP Task Control.
 
 ## Large Check 3: HTTP Task Control
 
