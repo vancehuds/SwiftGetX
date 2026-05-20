@@ -2,11 +2,27 @@ import Foundation
 import UserNotifications
 
 enum NotificationManager {
+    static var canUseUserNotifications: Bool {
+        canUseUserNotifications(bundleURL: Bundle.main.bundleURL)
+    }
+
+    static func canUseUserNotifications(bundleURL: URL) -> Bool {
+        bundleURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame
+    }
+
     static func requestAuthorization() {
+        guard canUseUserNotifications else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
+    static func setDelegate(_ delegate: (any UNUserNotificationCenterDelegate)?) {
+        guard canUseUserNotifications else { return }
+        UNUserNotificationCenter.current().delegate = delegate
+    }
+
     static func notifyCompletion(for task: DownloadTask) {
+        guard canUseUserNotifications else { return }
+
         let content = UNMutableNotificationContent()
         content.title = "下载完成"
         content.body = task.name

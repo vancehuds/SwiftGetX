@@ -2,7 +2,7 @@
 
 SwiftGetX 是一个面向 macOS 14+ 的原生下载管理器原型，使用 SwiftUI、SwiftData 和 Swift Package Manager 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及可选的 BT/libtorrent 下载能力。
 
-> 当前仓库更接近可运行的工程原型，而不是已经完成签名、沙盒、Safari 扩展和 notarization 的发布包。生产发布仍需要 Apple Developer ID、Xcode app/extension target、最终 Chrome 扩展 ID，以及部署目标匹配的 OpenSSL/libtorrent 打包方案。
+> 当前仓库更接近可运行的工程原型，而不是已经完成签名、沙盒、Safari 扩展和 notarization 的发布包。生产发布仍需要 Apple Developer ID、Xcode app/extension target，以及部署目标匹配的 OpenSSL/libtorrent 打包方案。
 
 ## 功能概览
 
@@ -116,27 +116,19 @@ Chrome 扩展资源位于：
 Sources/SwiftGetX/Resources/ChromeExtension
 ```
 
-构建 native host：
+构建 App 和 native host：
 
 ```sh
 swift build
 ```
 
-安装 Chrome Native Messaging host manifest：
-
-```sh
-Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHost <chrome-extension-id>
-```
-
-脚本会写入：
-
-```text
-~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.swiftgetx.native.json
-```
+安装并启动 SwiftGetX App 后，App 会自动扫描本机 Chrome profile 中已安装的 SwiftGetX 扩展，并写入或修复 Chrome Native Messaging host manifest。普通使用不需要复制 Chrome extension id，也不需要手动运行安装脚本。
 
 Chrome 扩展调用 `chrome.runtime.sendNativeMessage("com.swiftgetx.native", ...)`，`SwiftGetXNativeHost` 读取 4-byte little-endian length-prefixed JSON 后打开 `swiftgetx://download?url=...`，主 app 通过 `onOpenURL` 接收。
 
-Chrome 下载接管默认开启。扩展在 Chrome 创建支持的 HTTP、HTTPS、magnet 或 `.torrent` 下载后，会立即取消并清除 Chrome 原任务，再通过 native host 发送到 SwiftGetX；如果发送失败，扩展会显示失败角标，因为原 Chrome 下载已经被停止。可以在扩展 popup 里关闭“接管 Chrome 下载”。
+如果用户先安装扩展、后启动 App，启动时会自动完成配置；如果用户先启动 App、后安装扩展，下次激活 App 或在扩展 popup 中主动发送任务时会自动修复。`Scripts/install-native-host.sh` 仍可作为开发和排障工具使用。
+
+Chrome 下载接管默认开启。扩展在 Chrome 创建支持的 HTTP、HTTPS、magnet 或 `.torrent` 下载后，会先尝试通过 native host 发送到 SwiftGetX；SwiftGetX 接受后才取消并清除 Chrome 原任务。如果发送失败，Chrome 会继续原下载。可以在扩展 popup 里关闭“接管 Chrome 下载”。
 
 ### Safari
 
@@ -162,7 +154,7 @@ Scripts/package-dmg.sh release dist --dmg
 脚本会把主 app、`SwiftGetXNativeHost`、SwiftPM 资源 bundle 和 app 图标复制进 bundle，并使用 ad-hoc 签名，便于本地查看和调试。正式发布仍需要：
 
 1. 使用 Developer ID Application 证书签名。
-2. 确认 Safari/Chrome 扩展 ID 和 Native Messaging manifest。
+2. 确认 Safari/Chrome 扩展打包和 Native Messaging 自动注册流程。
 3. 使用 `xcrun notarytool` notarize，并用 `xcrun stapler` staple。
 
 ## 测试
@@ -205,9 +197,9 @@ Homebrew 的 OpenSSL bottle 可能会在 macOS 14 debug 构建时输出 deployme
 
 检查三件事：
 
-- `SwiftGetXNativeHost` 已通过 `swift build` 构建。
-- `Scripts/install-native-host.sh` 中传入的是实际 Chrome extension id。
-- `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.swiftgetx.native.json` 里的 `path` 指向可执行的 native host，例如 `.build/.../SwiftGetXNativeHost` 或 `SwiftGetX.app/Contents/MacOS/SwiftGetXNativeHost`，不要指向主 app 可执行文件。
+- `SwiftGetXNativeHost` 已通过 `swift build` 构建，或已随 `SwiftGetX.app` 打包。
+- Chrome 中已安装并启用 SwiftGetX 扩展。
+- 重新激活 SwiftGetX，或在扩展 popup 中主动发送一次任务，让 App 自动修复 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.swiftgetx.native.json`。开发排障时也可以运行 `Scripts/install-native-host.sh`。
 
 ### Chrome 没有自动接管下载
 

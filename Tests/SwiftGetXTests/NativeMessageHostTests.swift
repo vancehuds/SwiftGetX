@@ -78,6 +78,28 @@ struct NativeMessageHostTests {
         #expect(draft.isBrowserTakeover)
     }
 
+    @Test("parses browser setup deep links")
+    func parsesBrowserSetupDeepLinks() throws {
+        let url = try #require(URL(
+            string: "swiftgetx://browser-setup?browser=Chrome&extensionID=bcdefghijklmnopabcdefghijklmnopa&version=0.2.0"
+        ))
+
+        let request = try #require(DeepLinkParser.browserSetupRequest(from: url))
+
+        #expect(request.browser == "Chrome")
+        #expect(request.extensionID == "bcdefghijklmnopabcdefghijklmnopa")
+        #expect(request.version == "0.2.0")
+    }
+
+    @Test("rejects invalid browser setup extension IDs")
+    func rejectsInvalidBrowserSetupExtensionIDs() throws {
+        let url = try #require(URL(
+            string: "swiftgetx://browser-setup?browser=Chrome&extensionID=not-valid&version=0.2.0"
+        ))
+
+        #expect(DeepLinkParser.browserSetupRequest(from: url) == nil)
+    }
+
     private func encodeMessage(_ message: BrowserDownloadMessage) throws -> Data {
         let payload = try JSONEncoder().encode(message)
         var length = UInt32(payload.count).littleEndian

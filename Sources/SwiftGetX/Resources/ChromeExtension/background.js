@@ -1,4 +1,5 @@
 const NATIVE_HOST_NAME = "com.swiftgetx.native";
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 const DEFAULT_OPTIONS = {
   takeoverDownloads: true,
   takeoverDownloadsUserSet: false
@@ -48,9 +49,12 @@ chrome.runtime.onInstalled.addListener(() => {
     }
     chrome.storage.local.set(nextOptions);
   });
+
+  pingSwiftGetX();
 });
 
 refreshOptions();
+pingSwiftGetX();
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") {
@@ -76,7 +80,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "swiftgetx-download") {
-    sendToSwiftGetX(message.payload)
+    sendToSwiftGetX(message.payload, { allowSetup: true })
       .then(sendResponse)
       .catch((error) => {
         sendResponse({
@@ -133,7 +137,7 @@ async function handleDownloadDeterminingFilename(downloadItem, suggest) {
     };
 
     // Send to SwiftGetX FIRST — only cancel Chrome download after confirmation.
-    const result = await sendToSwiftGetX(payload);
+    const result = await sendToSwiftGetX(payload, { allowSetup: false });
 
     if (!result.ok) {
       // Native host unreachable or rejected — fall back to Chrome download.
@@ -168,7 +172,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-link"
-    });
+    }, { allowSetup: true });
     break;
   case "send-page":
     await sendToSwiftGetX({
@@ -177,7 +181,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-page"
-    });
+    }, { allowSetup: true });
     break;
   case "send-selection":
     await sendToSwiftGetX({
@@ -186,7 +190,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-selection"
-    });
+    }, { allowSetup: true });
     break;
   case "send-media":
     await sendToSwiftGetX({
@@ -195,7 +199,7 @@ async function handleContextMenuClick(info, tab) {
       sourcePageTitle: tab?.title,
       sourcePageUrl: tab?.url,
       source: "context-menu-media"
-    });
+    }, { allowSetup: true });
     break;
   case "scan-page":
     await scanTabAndSend(tab);
@@ -230,13 +234,14 @@ async function scanTabAndSend(tab) {
       sourcePageTitle: tab.title,
       sourcePageUrl: tab.url,
       source: "context-menu-scan"
-    });
+    }, { allowSetup: true });
   } catch (error) {
     markFailure(error.message || String(error));
   }
 }
 
-async function sendToSwiftGetX(payload) {
+async function sendToSwiftGetX(payload, options = {}) {
+  const allowSetup = options.allowSetup !== false;
   const url = (payload?.url || "").trim();
   if (!isSupportedSource(url)) {
     markFailure("没有可发送的下载地址");
@@ -259,6 +264,9 @@ async function sendToSwiftGetX(payload) {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
         markFailure(runtimeError.message);
+        if (allowSetup) {
+          openBrowserSetup();
+        }
         resolve({
           ok: false,
           message: runtimeError.message
@@ -271,12 +279,28 @@ async function sendToSwiftGetX(payload) {
         markSuccess();
       } else {
         markFailure(response?.message || "SwiftGetX 未接受该任务");
+        if (allowSetup) {
+          openBrowserSetup();
+        }
       }
       resolve({
         ok,
         message: response?.message || (ok ? "已发送到 SwiftGetX" : "发送失败")
       });
     });
+  });
+}
+
+function openBrowserSetup() {
+  const setupURL = new URL("swiftgetx://browser-setup");
+  setupURL.searchParams.set("browser", "Chrome");
+  setupURL.searchParams.set("extensionID", chrome.runtime.id);
+  setupURL.searchParams.set("version", EXTENSION_VERSION);
+  chrome.tabs.create({ url: setupURL.toString(), active: false }, () => {
+    const runtimeError = chrome.runtime.lastError;
+    if (runtimeError) {
+      console.warn(`SwiftGetX setup: ${runtimeError.message}`);
+    }
   });
 }
 

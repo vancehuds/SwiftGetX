@@ -115,7 +115,7 @@ private struct SettingsLifecycleModifier: ViewModifier {
 
     private func checkDiagnostics() {
         if diagnostics.status == .unchecked {
-            diagnostics.check()
+            diagnostics.repair()
         }
     }
 }
