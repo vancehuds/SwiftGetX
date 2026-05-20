@@ -92,6 +92,43 @@ struct ChromeExtensionDiscoveryTests {
         #expect(discovery.discoverExtensionIDs() == ["bcdefghijklmnopabcdefghijklmnopa"])
     }
 
+    @Test("discovers Atlas unpacked extension from path manifest")
+    func discoversAtlasUnpackedExtensionFromPathManifest() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let atlasDataDirectory = root.appendingPathComponent("Atlas")
+        let profileDirectory = atlasDataDirectory.appendingPathComponent("user-123")
+        let extensionDirectory = root.appendingPathComponent("Downloads/SwiftGetX-Chrome")
+        try FileManager.default.createDirectory(at: extensionDirectory, withIntermediateDirectories: true)
+        let manifestData = try JSONSerialization.data(
+            withJSONObject: manifest(name: "SwiftGetX", permissions: ["nativeMessaging"]),
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try manifestData.write(to: extensionDirectory.appendingPathComponent("manifest.json"))
+
+        try writeSettings(
+            to: profileDirectory.appendingPathComponent("Secure Preferences"),
+            settings: [
+                "mcblddhfakekibmceoppdodhhfjdjjfc": [
+                    "path": extensionDirectory.path
+                ]
+            ]
+        )
+
+        let atlasConfiguration = ChromiumBrowserConfiguration(
+            name: "Atlas",
+            userDataDirectory: atlasDataDirectory,
+            nativeMessagingHostDirectory: root.appendingPathComponent("OpenAI/ChatGPT Atlas/NativeMessagingHosts")
+        )
+        let discovery = ChromeExtensionDiscovery(browserConfigurations: [atlasConfiguration])
+
+        #expect(discovery.discoverExtensionIDs() == ["mcblddhfakekibmceoppdodhhfjdjjfc"])
+        let installation = try #require(discovery.discoverExtensionInstallations().first)
+        #expect(installation.extensionID == "mcblddhfakekibmceoppdodhhfjdjjfc")
+        #expect(installation.browserConfiguration == atlasConfiguration)
+    }
+
     @Test("merges existing valid origins and removes placeholders")
     func mergesExistingOrigins() {
         let origins = ChromeNativeMessagingOrigin.merge(

@@ -210,6 +210,72 @@ struct ChromeNativeHostRegistrarTests {
         #expect(fixture.registrar.readManifest() == nil)
     }
 
+    @Test("pairs Atlas extension and writes Atlas native host manifest")
+    func pairsAtlasExtensionAndWritesAtlasNativeHostManifest() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let atlasDataDirectory = root.appendingPathComponent("Atlas")
+        let atlasProfile = atlasDataDirectory.appendingPathComponent("user-123")
+        let atlasManifestDirectory = root.appendingPathComponent("OpenAI/ChatGPT Atlas/NativeMessagingHosts")
+        let chromeManifestDirectory = root.appendingPathComponent("Chrome/NativeMessagingHosts")
+        let nativeHost = root.appendingPathComponent("SwiftGetXNativeHost")
+        let extensionDirectory = root.appendingPathComponent("Downloads/SwiftGetX-Chrome")
+
+        try FileManager.default.createDirectory(at: extensionDirectory, withIntermediateDirectories: true)
+        let extensionManifest = try JSONSerialization.data(
+            withJSONObject: manifest(name: "SwiftGetX", permissions: ["nativeMessaging"]),
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try extensionManifest.write(to: extensionDirectory.appendingPathComponent("manifest.json"))
+        try writeSettings(
+            to: atlasProfile.appendingPathComponent("Secure Preferences"),
+            settings: [
+                "mcblddhfakekibmceoppdodhhfjdjjfc": [
+                    "path": extensionDirectory.path
+                ]
+            ]
+        )
+        try Data("#!/bin/sh\n".utf8).write(to: nativeHost)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o755))],
+            ofItemAtPath: nativeHost.path
+        )
+
+        let discovery = ChromeExtensionDiscovery(
+            browserConfigurations: [
+                ChromiumBrowserConfiguration(
+                    name: "Chrome",
+                    userDataDirectory: root.appendingPathComponent("Chrome"),
+                    nativeMessagingHostDirectory: chromeManifestDirectory
+                ),
+                ChromiumBrowserConfiguration(
+                    name: "Atlas",
+                    userDataDirectory: atlasDataDirectory,
+                    nativeMessagingHostDirectory: atlasManifestDirectory
+                )
+            ]
+        )
+        let registrar = ChromeNativeHostRegistrar(
+            manifestDirectory: ChromeNativeHostRegistrar.defaultManifestDirectory(),
+            extensionDiscovery: discovery,
+            pairingStore: ChromeNativeHostPairingStore(pairedExtensionIDs: []),
+            nativeHostSearchPaths: [nativeHost]
+        )
+
+        let result = registrar.pairAndRegister(extensionID: "mcblddhfakekibmceoppdodhhfjdjjfc")
+
+        #expect(result.status == .ok)
+        #expect(!FileManager.default.fileExists(atPath: chromeManifestDirectory.path))
+        let atlasManifestURL = atlasManifestDirectory.appendingPathComponent("com.swiftgetx.native.json")
+        let data = try Data(contentsOf: atlasManifestURL)
+        let manifest = try JSONDecoder().decode(ChromeNativeHostRegistrar.ManifestContent.self, from: data)
+        #expect(manifest.path == nativeHost.path)
+        #expect(manifest.allowed_origins == [
+            "chrome-extension://mcblddhfakekibmceoppdodhhfjdjjfc/"
+        ])
+    }
+
     private func makeFixture(
         extensions: [String: [String: Any]]
     ) throws -> RegistrarFixture {
@@ -259,6 +325,13 @@ struct ChromeNativeHostRegistrarTests {
         let settings = extensions.mapValues { extensionManifest in
             ["manifest": extensionManifest]
         }
+        try writeSettings(to: url, settings: settings)
+    }
+
+    private func writeSettings(
+        to url: URL,
+        settings: [String: [String: Any]]
+    ) throws {
         let root: [String: Any] = [
             "extensions": [
                 "settings": settings

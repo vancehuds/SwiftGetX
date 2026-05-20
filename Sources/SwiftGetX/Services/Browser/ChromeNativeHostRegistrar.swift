@@ -5,6 +5,7 @@ struct ChromeNativeHostRegistrar {
 
     let hostName: String
     let manifestDirectory: URL
+    let usesDefaultManifestDirectory: Bool
     let extensionDiscovery: ChromeExtensionDiscovery
     let pairingStore: ChromeNativeHostPairingStore
     let nativeHostSearchPaths: [URL]
@@ -24,6 +25,8 @@ struct ChromeNativeHostRegistrar {
     ) {
         self.hostName = hostName
         self.manifestDirectory = manifestDirectory
+        usesDefaultManifestDirectory = manifestDirectory.standardizedFileURL
+            == ChromeNativeHostRegistrar.defaultManifestDirectory().standardizedFileURL
         self.extensionDiscovery = extensionDiscovery
         self.pairingStore = pairingStore
         self.nativeHostSearchPaths = nativeHostSearchPaths
@@ -66,14 +69,41 @@ struct ChromeNativeHostRegistrar {
             )
         }
 
-        guard fileManager.fileExists(atPath: manifestDirectory.path) else {
+        let manifestTargets = registrationManifestTargets(for: pairedExtensionIDs)
+        guard !manifestTargets.isEmpty else {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "需要重新配对",
+                detailMessage: "没有在已支持的 Chromium 浏览器配置中找到已配对的 SwiftGetX 插件。",
+                isRepairable: false
+            )
+        }
+
+        let diagnoses = manifestTargets.map { diagnose(target: $0) }
+        if let blockingDiagnosis = diagnoses.first(where: { $0.status != .ok }) {
+            return blockingDiagnosis
+        }
+
+        let okCount = diagnoses.count
+        return ChromeNativeHostRegistrationResult(
+            status: .ok,
+            statusMessage: "一切正常",
+            detailMessage: "Native Host 已安装，已配置 \(okCount) 个浏览器配置",
+            isRepairable: false
+        )
+    }
+
+    private func diagnose(target: NativeHostManifestTarget) -> ChromeNativeHostRegistrationResult {
+        guard fileManager.fileExists(atPath: target.manifestDirectory.path) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
                 statusMessage: "Native Host 未安装",
-                detailMessage: "缺少 Chrome Native Messaging 配置目录",
+                detailMessage: "缺少 \(target.browserConfiguration.name) Native Messaging 配置目录",
                 isRepairable: true
             )
         }
+
+        let manifestURL = target.manifestURL(hostName: hostName)
 
         guard fileManager.fileExists(atPath: manifestURL.path) else {
             return ChromeNativeHostRegistrationResult(
@@ -84,7 +114,7 @@ struct ChromeNativeHostRegistrar {
             )
         }
 
-        guard let manifest = readManifest() else {
+        guard let manifest = readManifest(at: manifestURL) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
                 statusMessage: "配置文件损坏",
@@ -131,7 +161,7 @@ struct ChromeNativeHostRegistrar {
 
         let origins = manifest.allowed_origins ?? []
         let validOrigins = ChromeNativeMessagingOrigin.sanitizedOrigins(from: origins)
-        let pairedOrigins = pairedExtensionIDs.compactMap(ChromeNativeMessagingOrigin.origin)
+        let pairedOrigins = target.extensionIDs.compactMap(ChromeNativeMessagingOrigin.origin)
         let hasPlaceholder = origins.contains(where: ChromeNativeMessagingOrigin.isPlaceholder)
         let hasInvalidOrigins = origins.contains { origin in
             !ChromeNativeMessagingOrigin.isPlaceholder(origin)
@@ -187,7 +217,7 @@ struct ChromeNativeHostRegistrar {
         return ChromeNativeHostRegistrationResult(
             status: .ok,
             statusMessage: "一切正常",
-            detailMessage: "Native Host 已安装，已允许 \(validOrigins.count) 个 Chrome 插件来源",
+            detailMessage: "\(target.browserConfiguration.name) Native Host 已安装，已允许 \(validOrigins.count) 个插件来源",
             isRepairable: false
         )
     }
@@ -203,6 +233,16 @@ struct ChromeNativeHostRegistrar {
             )
         }
 
+        let manifestTargets = registrationManifestTargets(for: pairedExtensionIDs)
+        guard !manifestTargets.isEmpty else {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "需要重新配对",
+                detailMessage: "没有在已支持的 Chromium 浏览器配置中找到已配对的 SwiftGetX 插件。",
+                isRepairable: false
+            )
+        }
+
         guard let binaryPath = locateNativeHostBinary() else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
@@ -212,21 +252,22 @@ struct ChromeNativeHostRegistrar {
             )
         }
 
-        let allowedOrigins = ChromeNativeMessagingOrigin.merge(
-            existingOrigins: [],
-            discoveredExtensionIDs: pairedExtensionIDs
-        )
-
-        guard !allowedOrigins.isEmpty else {
-            return ChromeNativeHostRegistrationResult(
-                status: .warning,
-                statusMessage: "需要手动配对",
-                detailMessage: "没有可写入的已配对 Chrome 插件 ID。",
-                isRepairable: false
-            )
+        let results = manifestTargets.map { target in
+            writeAndVerifyManifest(binaryPath: binaryPath, target: target)
+        }
+        if let blockingResult = results.first(where: { $0.status != .ok }) {
+            return blockingResult
         }
 
-        return writeAndVerifyManifest(binaryPath: binaryPath, allowedOrigins: allowedOrigins)
+        let allowedOriginCount = manifestTargets.reduce(0) { partialResult, target in
+            partialResult + target.extensionIDs.count
+        }
+        return ChromeNativeHostRegistrationResult(
+            status: .ok,
+            statusMessage: "配置完成",
+            detailMessage: "Native Host 已自动配置 \(manifestTargets.count) 个浏览器配置，并写入 \(allowedOriginCount) 个插件来源",
+            isRepairable: false
+        )
     }
 
     func pairAndRegister(extensionID: String) -> ChromeNativeHostRegistrationResult {
@@ -265,16 +306,34 @@ struct ChromeNativeHostRegistrar {
     }
 
     func readManifest() -> ManifestContent? {
-        guard let data = fileManager.contents(atPath: manifestURL.path) else { return nil }
+        readManifest(at: manifestURL)
+    }
+
+    private func readManifest(at url: URL) -> ManifestContent? {
+        guard let data = fileManager.contents(atPath: url.path) else { return nil }
         return try? JSONDecoder().decode(ManifestContent.self, from: data)
     }
 
     private func writeAndVerifyManifest(
         binaryPath: String,
-        allowedOrigins: [String]
+        target: NativeHostManifestTarget
     ) -> ChromeNativeHostRegistrationResult {
+        let allowedOrigins = ChromeNativeMessagingOrigin.merge(
+            existingOrigins: [],
+            discoveredExtensionIDs: target.extensionIDs
+        )
+
+        guard !allowedOrigins.isEmpty else {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "需要手动配对",
+                detailMessage: "没有可写入的已配对 Chrome 插件 ID。",
+                isRepairable: false
+            )
+        }
+
         do {
-            try fileManager.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: target.manifestDirectory, withIntermediateDirectories: true)
             try writeManifest(
                 ManifestContent(
                     name: hostName,
@@ -282,7 +341,8 @@ struct ChromeNativeHostRegistrar {
                     path: binaryPath,
                     type: "stdio",
                     allowed_origins: allowedOrigins
-                )
+                ),
+                to: target.manifestURL(hostName: hostName)
             )
         } catch {
             return ChromeNativeHostRegistrationResult(
@@ -293,7 +353,7 @@ struct ChromeNativeHostRegistrar {
             )
         }
 
-        let verifyResult = diagnose()
+        let verifyResult = diagnose(target: target)
         guard verifyResult.status == .ok else {
             return verifyResult
         }
@@ -301,22 +361,77 @@ struct ChromeNativeHostRegistrar {
         return ChromeNativeHostRegistrationResult(
             status: .ok,
             statusMessage: "配置完成",
-            detailMessage: "Native Host 已自动配置，并写入 \(allowedOrigins.count) 个 Chrome 插件来源",
+            detailMessage: "\(target.browserConfiguration.name) Native Host 已自动配置，并写入 \(allowedOrigins.count) 个插件来源",
             isRepairable: false
         )
     }
 
-    private func writeManifest(_ manifest: ManifestContent) throws {
+    private func writeManifest(_ manifest: ManifestContent, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(manifest)
-        try data.write(to: manifestURL, options: .atomic)
+        try data.write(to: url, options: .atomic)
     }
 
     private func locateNativeHostBinary() -> String? {
         nativeHostSearchPaths
             .map(\.path)
             .first(where: fileManager.isExecutableFile)
+    }
+
+    private func registrationManifestTargets(for pairedExtensionIDs: [String]) -> [NativeHostManifestTarget] {
+        guard usesDefaultManifestDirectory else {
+            return [
+                NativeHostManifestTarget(
+                    browserConfiguration: ChromiumBrowserConfiguration(
+                        name: "Chrome",
+                        userDataDirectory: manifestDirectory.deletingLastPathComponent(),
+                        nativeMessagingHostDirectory: manifestDirectory
+                    ),
+                    extensionIDs: pairedExtensionIDs
+                )
+            ]
+        }
+
+        let discoveredByID = Dictionary(
+            grouping: extensionDiscovery.discoverExtensionInstallations(),
+            by: \.extensionID
+        )
+        var targetsByPath: [String: NativeHostManifestTarget] = [:]
+
+        for extensionID in pairedExtensionIDs {
+            guard let installations = discoveredByID[extensionID] else { continue }
+            for installation in installations {
+                let configuration = installation.browserConfiguration
+                let key = configuration.nativeMessagingHostDirectory.path
+                var target = targetsByPath[key] ?? NativeHostManifestTarget(
+                    browserConfiguration: configuration,
+                    extensionIDs: []
+                )
+                if !target.extensionIDs.contains(extensionID) {
+                    target.extensionIDs.append(extensionID)
+                }
+                targetsByPath[key] = target
+            }
+        }
+
+        return targetsByPath.values.sorted { lhs, rhs in
+            lhs.browserConfiguration.nativeMessagingHostDirectory.path
+                < rhs.browserConfiguration.nativeMessagingHostDirectory.path
+        }
+    }
+
+    private struct NativeHostManifestTarget {
+        var browserConfiguration: ChromiumBrowserConfiguration
+        var extensionIDs: [String]
+
+        var manifestDirectory: URL {
+            browserConfiguration.nativeMessagingHostDirectory
+        }
+
+        func manifestURL(hostName: String) -> URL {
+            manifestDirectory.appendingPathComponent("\(hostName).json")
+        }
     }
 
     struct ManifestContent: Codable, Equatable {

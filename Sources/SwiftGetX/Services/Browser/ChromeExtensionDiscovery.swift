@@ -1,22 +1,59 @@
 import Foundation
 
+struct ChromiumBrowserConfiguration: Equatable {
+    var name: String
+    var userDataDirectory: URL
+    var nativeMessagingHostDirectory: URL
+
+    init(
+        name: String,
+        userDataDirectory: URL,
+        nativeMessagingHostDirectory: URL? = nil
+    ) {
+        self.name = name
+        self.userDataDirectory = userDataDirectory.standardizedFileURL
+        self.nativeMessagingHostDirectory = (
+            nativeMessagingHostDirectory
+                ?? userDataDirectory.appendingPathComponent("NativeMessagingHosts")
+        )
+        .standardizedFileURL
+    }
+}
+
+struct ChromeExtensionInstallation: Equatable {
+    var extensionID: String
+    var browserConfiguration: ChromiumBrowserConfiguration
+}
+
 struct ChromeExtensionDiscovery {
     static let defaultExtensionName = "SwiftGetX"
     static let defaultExtensionDescriptionPrefix = "Send links, pages, media, and detected downloads to SwiftGetX."
     static let defaultExtensionPopupPath = "popup.html"
 
-    let userDataDirectory: URL
+    let browserConfigurations: [ChromiumBrowserConfiguration]
     let extensionName: String
     let fileManager: FileManager
     let developmentExtensionDirectory: URL?
 
     init(
-        userDataDirectory: URL = ChromeExtensionDiscovery.defaultChromeUserDataDirectory(),
+        userDataDirectory: URL? = nil,
+        browserConfigurations: [ChromiumBrowserConfiguration]? = nil,
         extensionName: String = ChromeExtensionDiscovery.defaultExtensionName,
         developmentExtensionDirectory: URL? = ChromeExtensionDiscovery.defaultDevelopmentExtensionDirectory(),
         fileManager: FileManager = .default
     ) {
-        self.userDataDirectory = userDataDirectory
+        if let browserConfigurations {
+            self.browserConfigurations = browserConfigurations
+        } else if let userDataDirectory {
+            self.browserConfigurations = [
+                ChromiumBrowserConfiguration(
+                    name: "Chrome",
+                    userDataDirectory: userDataDirectory
+                )
+            ]
+        } else {
+            self.browserConfigurations = ChromeExtensionDiscovery.defaultBrowserConfigurations()
+        }
         self.extensionName = extensionName
         self.developmentExtensionDirectory = developmentExtensionDirectory?.standardizedFileURL
         self.fileManager = fileManager
@@ -28,21 +65,82 @@ struct ChromeExtensionDiscovery {
         homeDirectory.appendingPathComponent("Library/Application Support/Google/Chrome")
     }
 
+    static func defaultAtlasUserDataDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/com.openai.atlas/browser-data/host")
+    }
+
+    static func defaultAtlasNativeMessagingHostDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/OpenAI/ChatGPT Atlas/NativeMessagingHosts")
+    }
+
+    static func defaultBrowserConfigurations(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> [ChromiumBrowserConfiguration] {
+        [
+            ChromiumBrowserConfiguration(
+                name: "Chrome",
+                userDataDirectory: defaultChromeUserDataDirectory(homeDirectory: homeDirectory)
+            ),
+            ChromiumBrowserConfiguration(
+                name: "Atlas",
+                userDataDirectory: defaultAtlasUserDataDirectory(homeDirectory: homeDirectory),
+                nativeMessagingHostDirectory: defaultAtlasNativeMessagingHostDirectory(homeDirectory: homeDirectory)
+            )
+        ]
+    }
+
     static func defaultDevelopmentExtensionDirectory(bundle: Bundle = .main) -> URL? {
         bundle.url(forResource: "ChromeExtension", withExtension: nil)
     }
 
     func discoverExtensionIDs() -> [String] {
-        var discoveredIDs = Set<String>()
+        Array(Set(discoverExtensionInstallations().map(\.extensionID))).sorted()
+    }
 
-        for preferenceFile in preferenceFiles() {
-            discoverExtensionIDs(in: preferenceFile).forEach { discoveredIDs.insert($0) }
+    func discoverExtensionInstallations() -> [ChromeExtensionInstallation] {
+        var discoveredInstallations: [ChromeExtensionInstallation] = []
+        var seen = Set<String>()
+
+        for browserConfiguration in browserConfigurations {
+            for preferenceFile in preferenceFiles(in: browserConfiguration) {
+                for installation in discoverExtensionInstallations(
+                    in: preferenceFile,
+                    browserConfiguration: browserConfiguration
+                ) {
+                    let key = "\(installation.browserConfiguration.userDataDirectory.path)\u{0}\(installation.extensionID)"
+                    guard !seen.contains(key) else { continue }
+                    seen.insert(key)
+                    discoveredInstallations.append(installation)
+                }
+            }
         }
 
-        return discoveredIDs.sorted()
+        return discoveredInstallations.sorted { lhs, rhs in
+            if lhs.extensionID == rhs.extensionID {
+                return lhs.browserConfiguration.userDataDirectory.path
+                    < rhs.browserConfiguration.userDataDirectory.path
+            }
+            return lhs.extensionID < rhs.extensionID
+        }
     }
 
     func discoverExtensionIDs(in preferenceFile: URL) -> [String] {
+        discoverExtensionInstallations(
+            in: preferenceFile,
+            browserConfiguration: browserConfiguration(for: preferenceFile)
+        )
+        .map(\.extensionID)
+        .sorted()
+    }
+
+    private func discoverExtensionInstallations(
+        in preferenceFile: URL,
+        browserConfiguration: ChromiumBrowserConfiguration
+    ) -> [ChromeExtensionInstallation] {
         guard let data = try? Data(contentsOf: preferenceFile),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let extensions = root["extensions"] as? [String: Any],
@@ -50,19 +148,38 @@ struct ChromeExtensionDiscovery {
             return []
         }
 
+        let profileDirectory = preferenceFile.deletingLastPathComponent()
         return settings.compactMap { extensionID, rawSettings in
             guard ChromeNativeMessagingOrigin.isValidExtensionID(extensionID),
                   let settings = rawSettings as? [String: Any],
-                  isTargetSettings(settings) else {
+                  isTargetSettings(
+                    settings,
+                    browserConfiguration: browserConfiguration,
+                    profileDirectory: profileDirectory
+                  ) else {
                 return nil
             }
-            return extensionID
+            return ChromeExtensionInstallation(
+                extensionID: extensionID,
+                browserConfiguration: browserConfiguration
+            )
         }
-        .sorted()
+        .sorted { $0.extensionID < $1.extensionID }
     }
 
-    private func preferenceFiles() -> [URL] {
+    private func browserConfiguration(for preferenceFile: URL) -> ChromiumBrowserConfiguration {
+        let standardizedFile = preferenceFile.standardizedFileURL.path
+        return browserConfigurations.first { configuration in
+            standardizedFile.hasPrefix(configuration.userDataDirectory.path + "/")
+        } ?? ChromiumBrowserConfiguration(
+            name: "Chrome",
+            userDataDirectory: preferenceFile.deletingLastPathComponent()
+        )
+    }
+
+    private func preferenceFiles(in browserConfiguration: ChromiumBrowserConfiguration) -> [URL] {
         let filenames = ["Secure Preferences", "Preferences"]
+        let userDataDirectory = browserConfiguration.userDataDirectory
         var files = filenames.map { userDataDirectory.appendingPathComponent($0) }
 
         guard let profileDirectories = try? fileManager.contentsOfDirectory(
@@ -86,8 +203,16 @@ struct ChromeExtensionDiscovery {
         urls.filter { fileManager.fileExists(atPath: $0.path) }
     }
 
-    private func isTargetSettings(_ settings: [String: Any]) -> Bool {
-        guard let manifest = settings["manifest"] as? [String: Any],
+    private func isTargetSettings(
+        _ settings: [String: Any],
+        browserConfiguration: ChromiumBrowserConfiguration,
+        profileDirectory: URL
+    ) -> Bool {
+        guard let manifest = manifest(
+                in: settings,
+                browserConfiguration: browserConfiguration,
+                profileDirectory: profileDirectory
+              ),
               hasNativeMessagingPermission(manifest) else {
             return false
         }
@@ -97,12 +222,42 @@ struct ChromeExtensionDiscovery {
         }
 
         if let path = settings["path"] as? String,
-           isDevelopmentExtensionPath(path),
+           isDevelopmentExtensionPath(
+            path,
+            browserConfiguration: browserConfiguration,
+            profileDirectory: profileDirectory
+           ),
            isSwiftGetXChromeExtensionShape(manifest) {
             return true
         }
 
         return false
+    }
+
+    private func manifest(
+        in settings: [String: Any],
+        browserConfiguration: ChromiumBrowserConfiguration,
+        profileDirectory: URL
+    ) -> [String: Any]? {
+        if let manifest = settings["manifest"] as? [String: Any] {
+            return manifest
+        }
+
+        guard let path = settings["path"] as? String,
+              let extensionPath = extensionPath(
+                for: path,
+                browserConfiguration: browserConfiguration,
+                profileDirectory: profileDirectory
+              ) else {
+            return nil
+        }
+
+        let manifestURL = extensionPath.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return manifest
     }
 
     private func isTargetManifest(_ manifest: [String: Any]) -> Bool {
@@ -125,16 +280,46 @@ struct ChromeExtensionDiscovery {
             && description == Self.defaultExtensionDescriptionPrefix
     }
 
-    private func isDevelopmentExtensionPath(_ path: String) -> Bool {
+    private func isDevelopmentExtensionPath(
+        _ path: String,
+        browserConfiguration: ChromiumBrowserConfiguration,
+        profileDirectory: URL
+    ) -> Bool {
         guard path.hasPrefix("/") else { return false }
 
-        let extensionPath = URL(fileURLWithPath: path).standardizedFileURL
+        guard let extensionPath = extensionPath(
+            for: path,
+            browserConfiguration: browserConfiguration,
+            profileDirectory: profileDirectory
+        ) else {
+            return false
+        }
+
         if let developmentExtensionDirectory,
            extensionPath == developmentExtensionDirectory {
             return true
         }
 
         return fileManager.fileExists(atPath: extensionPath.appendingPathComponent("manifest.json").path)
+    }
+
+    private func extensionPath(
+        for path: String,
+        browserConfiguration: ChromiumBrowserConfiguration,
+        profileDirectory: URL
+    ) -> URL? {
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path).standardizedFileURL
+        }
+
+        let candidates = [
+            profileDirectory.appendingPathComponent("Extensions").appendingPathComponent(path),
+            browserConfiguration.userDataDirectory.appendingPathComponent("Extensions").appendingPathComponent(path),
+            browserConfiguration.userDataDirectory.appendingPathComponent(path)
+        ]
+        return candidates.first { fileManager.fileExists(atPath: $0.path) }?
+            .standardizedFileURL
+            ?? candidates.first?.standardizedFileURL
     }
 
     private func permissions(in manifest: [String: Any]) -> [String] {
