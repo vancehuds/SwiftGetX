@@ -1,11 +1,19 @@
 const NATIVE_HOST_NAME = "com.swiftgetx.native";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+const NATIVE_HEALTH_CHECK_ALARM = "swiftgetx-native-health-check";
+const NATIVE_HEALTH_CHECK_PERIOD_MINUTES = 30;
+const NATIVE_SETUP_RETRY_TIMEOUT_MS = 8000;
+const NATIVE_SETUP_RETRY_INTERVAL_MS = 1000;
+const NATIVE_SETUP_THROTTLE_MS = 60 * 1000;
+const NATIVE_SETUP_LAST_OPENED_KEY = "nativeSetupLastOpenedAt";
+const NATIVE_SETUP_PAIRED_KEY = "nativeHostPairingConfirmed";
 const DEFAULT_OPTIONS = {
   takeoverDownloads: true,
   takeoverDownloadsUserSet: false
 };
 const DOWNLOAD_SOURCE_PATTERN = /(magnet:\?|https?:\/\/|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)/i;
 let currentOptions = { ...DEFAULT_OPTIONS };
+let activeNativeRepair;
 
 const MENU_ITEMS = [
   {
@@ -50,11 +58,24 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.local.set(nextOptions);
   });
 
-  pingSwiftGetX();
+  scheduleNativeHealthChecks();
+  runNativeHealthCheck("installed");
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  scheduleNativeHealthChecks();
+  runNativeHealthCheck("startup");
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === NATIVE_HEALTH_CHECK_ALARM) {
+    runNativeHealthCheck("alarm");
+  }
 });
 
 refreshOptions();
-pingSwiftGetX();
+scheduleNativeHealthChecks();
+runNativeHealthCheck("service-worker");
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") {
@@ -92,7 +113,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === "swiftgetx-ping") {
-    pingSwiftGetX()
+    ensureNativeHostHealthy({ allowSetup: true, reason: "manual-check" })
       .then(sendResponse)
       .catch((error) => {
         sendResponse({
@@ -251,79 +272,220 @@ async function sendToSwiftGetX(payload, options = {}) {
     };
   }
 
+  const message = {
+    action: "download",
+    url,
+    browser: "Chrome",
+    suggestedFilename: payload.suggestedFilename || filenameFromURL(url),
+    sourcePageTitle: payload.sourcePageTitle,
+    sourcePageUrl: payload.sourcePageUrl,
+    source: payload.source
+  };
+
+  let result = await sendNativeMessage(message);
+  if (result.runtimeError && allowSetup) {
+    markFailure(result.message);
+    const repairResult = await repairNativeHost(payload.source || "download");
+    if (repairResult.ok) {
+      result = await sendNativeMessage(message);
+    }
+  } else if (result.runtimeError) {
+    repairNativeHost(payload.source || "download-runtime-error");
+  }
+
+  if (result.runtimeError) {
+    markFailure(result.message);
+    return {
+      ok: false,
+      message: result.message
+    };
+  }
+
+  if (result.ok) {
+    markSuccess();
+  } else {
+    markFailure(result.message || "SwiftGetX 未接受该任务");
+    if (allowSetup) {
+      repairNativeHost(payload.source || "download-rejected");
+    }
+  }
+
+  return {
+    ok: result.ok,
+    message: result.message || (result.ok ? "已发送到 SwiftGetX" : "发送失败")
+  };
+}
+
+function scheduleNativeHealthChecks() {
+  chrome.alarms.create(NATIVE_HEALTH_CHECK_ALARM, {
+    periodInMinutes: NATIVE_HEALTH_CHECK_PERIOD_MINUTES
+  });
+}
+
+function runNativeHealthCheck(reason) {
+  getLocalStorage({ [NATIVE_SETUP_PAIRED_KEY]: false })
+    .then((stored) => ensureNativeHostHealthy({
+      allowSetup: Boolean(stored[NATIVE_SETUP_PAIRED_KEY]),
+      reason
+    }))
+    .catch((error) => {
+      console.warn(`SwiftGetX health check: ${error.message || String(error)}`);
+    });
+}
+
+async function ensureNativeHostHealthy(options = {}) {
+  const allowSetup = options.allowSetup !== false;
+  const ping = await pingSwiftGetX();
+  if (ping.ok) {
+    await setNativePairingConfirmed();
+    return ping;
+  }
+
+  if (!allowSetup) {
+    return ping;
+  }
+
+  const repairResult = await repairNativeHost(options.reason || "health-check");
+  return repairResult.ok ? repairResult : ping;
+}
+
+async function repairNativeHost(reason) {
+  if (!activeNativeRepair) {
+    activeNativeRepair = (async () => {
+      await openBrowserSetup(reason);
+      const result = await waitForNativeHost(NATIVE_SETUP_RETRY_TIMEOUT_MS);
+      if (result.ok) {
+        await setNativePairingConfirmed();
+      }
+      return result;
+    })().finally(() => {
+      activeNativeRepair = undefined;
+    });
+  }
+
+  return activeNativeRepair;
+}
+
+async function openBrowserSetup(reason = "repair") {
+  const now = Date.now();
+  const stored = await getLocalStorage({
+    [NATIVE_SETUP_LAST_OPENED_KEY]: 0
+  });
+  const lastOpenedAt = Number(stored[NATIVE_SETUP_LAST_OPENED_KEY] || 0);
+  if (now - lastOpenedAt < NATIVE_SETUP_THROTTLE_MS) {
+    return {
+      ok: true,
+      throttled: true
+    };
+  }
+
+  await setLocalStorage({
+    [NATIVE_SETUP_LAST_OPENED_KEY]: now
+  });
+
+  const setupURL = new URL("swiftgetx://browser-setup");
+  setupURL.searchParams.set("browser", "Chrome");
+  setupURL.searchParams.set("extensionID", chrome.runtime.id);
+  setupURL.searchParams.set("version", EXTENSION_VERSION);
+  setupURL.searchParams.set("reason", reason);
+
   return new Promise((resolve) => {
-    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
-      action: "download",
-      url,
-      browser: "Chrome",
-      suggestedFilename: payload.suggestedFilename || filenameFromURL(url),
-      sourcePageTitle: payload.sourcePageTitle,
-      sourcePageUrl: payload.sourcePageUrl,
-      source: payload.source
-    }, (response) => {
+    chrome.tabs.create({ url: setupURL.toString(), active: false }, () => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
-        markFailure(runtimeError.message);
-        if (allowSetup) {
-          openBrowserSetup();
-        }
+        console.warn(`SwiftGetX setup: ${runtimeError.message}`);
         resolve({
           ok: false,
+          message: runtimeError.message
+        });
+        return;
+      }
+
+      resolve({
+        ok: true
+      });
+    });
+  });
+}
+
+function sendNativeMessage(message) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, (response) => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        resolve({
+          ok: false,
+          runtimeError: true,
           message: runtimeError.message
         });
         return;
       }
 
       const ok = response?.ok !== false;
-      if (ok) {
-        markSuccess();
-      } else {
-        markFailure(response?.message || "SwiftGetX 未接受该任务");
-        if (allowSetup) {
-          openBrowserSetup();
-        }
-      }
       resolve({
         ok,
-        message: response?.message || (ok ? "已发送到 SwiftGetX" : "发送失败")
+        runtimeError: false,
+        message: response?.message || (ok ? "connected" : "Native Host returned an error"),
+        version: response?.version,
+        response
       });
     });
   });
 }
 
-function openBrowserSetup() {
-  const setupURL = new URL("swiftgetx://browser-setup");
-  setupURL.searchParams.set("browser", "Chrome");
-  setupURL.searchParams.set("extensionID", chrome.runtime.id);
-  setupURL.searchParams.set("version", EXTENSION_VERSION);
-  chrome.tabs.create({ url: setupURL.toString(), active: false }, () => {
-    const runtimeError = chrome.runtime.lastError;
-    if (runtimeError) {
-      console.warn(`SwiftGetX setup: ${runtimeError.message}`);
+async function waitForNativeHost(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastResult = {
+    ok: false,
+    message: "Native Host 未响应"
+  };
+
+  while (Date.now() <= deadline) {
+    const result = await pingSwiftGetX();
+    if (result.ok) {
+      return result;
     }
+
+    lastResult = result;
+    await delay(NATIVE_SETUP_RETRY_INTERVAL_MS);
+  }
+
+  return lastResult;
+}
+
+async function pingSwiftGetX() {
+  const result = await sendNativeMessage({
+    action: "ping"
+  });
+
+  return {
+    ok: result.ok,
+    message: result.message,
+    version: result.version
+  };
+}
+
+function getLocalStorage(defaults) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(defaults, resolve);
   });
 }
 
-function pingSwiftGetX() {
+function setLocalStorage(values) {
   return new Promise((resolve) => {
-    chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, {
-      action: "ping"
-    }, (response) => {
-      const runtimeError = chrome.runtime.lastError;
-      if (runtimeError) {
-        resolve({
-          ok: false,
-          message: runtimeError.message
-        });
-        return;
-      }
+    chrome.storage.local.set(values, resolve);
+  });
+}
 
-      resolve({
-        ok: response?.ok !== false,
-        message: response?.message || "connected",
-        version: response?.version
-      });
-    });
+function setNativePairingConfirmed() {
+  return setLocalStorage({
+    [NATIVE_SETUP_PAIRED_KEY]: true
+  });
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
 }
 

@@ -6,6 +6,7 @@ struct ChromeNativeHostRegistrar {
     let hostName: String
     let manifestDirectory: URL
     let extensionDiscovery: ChromeExtensionDiscovery
+    let pairingStore: ChromeNativeHostPairingStore
     let nativeHostSearchPaths: [URL]
     let fileManager: FileManager
 
@@ -17,12 +18,14 @@ struct ChromeNativeHostRegistrar {
         hostName: String = ChromeNativeHostRegistrar.defaultHostName,
         manifestDirectory: URL = ChromeNativeHostRegistrar.defaultManifestDirectory(),
         extensionDiscovery: ChromeExtensionDiscovery = ChromeExtensionDiscovery(),
+        pairingStore: ChromeNativeHostPairingStore = ChromeNativeHostPairingStore(),
         nativeHostSearchPaths: [URL]? = nil,
         fileManager: FileManager = .default
     ) {
         self.hostName = hostName
         self.manifestDirectory = manifestDirectory
         self.extensionDiscovery = extensionDiscovery
+        self.pairingStore = pairingStore
         self.nativeHostSearchPaths = nativeHostSearchPaths
             ?? ChromeNativeHostRegistrar.defaultNativeHostSearchPaths(fileManager: fileManager)
         self.fileManager = fileManager
@@ -53,6 +56,16 @@ struct ChromeNativeHostRegistrar {
     }
 
     func diagnose() -> ChromeNativeHostRegistrationResult {
+        let pairedExtensionIDs = pairingStore.pairedExtensionIDs()
+        guard !pairedExtensionIDs.isEmpty else {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "Chrome 插件未配对",
+                detailMessage: "请从 SwiftGetX Chrome 插件发起连接检查，并在 SwiftGetX 中手动允许配对。",
+                isRepairable: false
+            )
+        }
+
         guard fileManager.fileExists(atPath: manifestDirectory.path) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
@@ -80,6 +93,24 @@ struct ChromeNativeHostRegistrar {
             )
         }
 
+        guard manifest.name == hostName else {
+            return ChromeNativeHostRegistrationResult(
+                status: .error,
+                statusMessage: "Host 名称错误",
+                detailMessage: "配置文件 name 应为 \(hostName)，当前为 \(manifest.name)。",
+                isRepairable: true
+            )
+        }
+
+        guard manifest.type == "stdio" else {
+            return ChromeNativeHostRegistrationResult(
+                status: .error,
+                statusMessage: "Host 类型错误",
+                detailMessage: "配置文件 type 应为 stdio，当前为 \(manifest.type)。",
+                isRepairable: true
+            )
+        }
+
         guard fileManager.fileExists(atPath: manifest.path) else {
             return ChromeNativeHostRegistrationResult(
                 status: .error,
@@ -100,29 +131,55 @@ struct ChromeNativeHostRegistrar {
 
         let origins = manifest.allowed_origins ?? []
         let validOrigins = ChromeNativeMessagingOrigin.sanitizedOrigins(from: origins)
+        let pairedOrigins = pairedExtensionIDs.compactMap(ChromeNativeMessagingOrigin.origin)
         let hasPlaceholder = origins.contains(where: ChromeNativeMessagingOrigin.isPlaceholder)
+        let hasInvalidOrigins = origins.contains { origin in
+            !ChromeNativeMessagingOrigin.isPlaceholder(origin)
+                && ChromeNativeMessagingOrigin.extensionID(from: origin) == nil
+        }
         if hasPlaceholder {
-            let discoveredIDs = extensionDiscovery.discoverExtensionIDs()
-            let detail = discoveredIDs.isEmpty
-                ? "allowed_origins 中包含占位符。安装 SwiftGetX Chrome 插件后会自动修复。"
-                : "allowed_origins 中包含占位符，可自动写入已发现的 SwiftGetX Chrome 插件 ID。"
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "扩展 ID 待配置",
-                detailMessage: detail,
+                statusMessage: "扩展来源待清理",
+                detailMessage: "allowed_origins 中包含占位符，可自动改写为已配对的 Chrome 插件 ID。",
+                isRepairable: true
+            )
+        }
+
+        if hasInvalidOrigins {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "扩展来源待清理",
+                detailMessage: "allowed_origins 中包含无效来源，可自动改写为已配对的 Chrome 插件 ID。",
                 isRepairable: true
             )
         }
 
         if validOrigins.isEmpty {
-            let discoveredIDs = extensionDiscovery.discoverExtensionIDs()
-            let detail = discoveredIDs.isEmpty
-                ? "未找到有效的 SwiftGetX Chrome 插件 ID。安装或启用插件后会自动修复。"
-                : "未写入有效的 Chrome 扩展来源，可自动写入已发现的 SwiftGetX Chrome 插件 ID。"
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "扩展 ID 待配置",
-                detailMessage: detail,
+                statusMessage: "扩展来源缺失",
+                detailMessage: "未写入已配对的 Chrome 插件来源，可自动补写 allowed_origins。",
+                isRepairable: true
+            )
+        }
+
+        let missingOrigins = pairedOrigins.filter { !validOrigins.contains($0) }
+        if !missingOrigins.isEmpty {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "扩展来源缺失",
+                detailMessage: "配置文件未允许已配对的 SwiftGetX Chrome 插件，可自动补写 allowed_origins。",
+                isRepairable: true
+            )
+        }
+
+        let unpairedOrigins = validOrigins.filter { !pairedOrigins.contains($0) }
+        if !unpairedOrigins.isEmpty {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "发现未配对来源",
+                detailMessage: "配置文件允许了未手动配对的 Chrome 插件来源，可自动移除。",
                 isRepairable: true
             )
         }
@@ -135,13 +192,13 @@ struct ChromeNativeHostRegistrar {
         )
     }
 
-    func register(setupHintExtensionID: String? = nil) -> ChromeNativeHostRegistrationResult {
-        if let setupHintExtensionID,
-           !ChromeNativeMessagingOrigin.isValidExtensionID(setupHintExtensionID) {
+    func register() -> ChromeNativeHostRegistrationResult {
+        let pairedExtensionIDs = pairingStore.pairedExtensionIDs()
+        guard !pairedExtensionIDs.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "插件 ID 无效",
-                detailMessage: "浏览器传入的 Chrome 插件 ID 不合法，已忽略本次自动配置请求。",
+                statusMessage: "需要手动配对",
+                detailMessage: "请先从 SwiftGetX Chrome 插件发起连接检查，并在 SwiftGetX 中允许该插件配对。",
                 isRepairable: false
             )
         }
@@ -155,30 +212,67 @@ struct ChromeNativeHostRegistrar {
             )
         }
 
-        let discoveredIDs = extensionDiscovery.discoverExtensionIDs()
-        if let setupHintExtensionID, !discoveredIDs.contains(setupHintExtensionID) {
-            return ChromeNativeHostRegistrationResult(
-                status: .warning,
-                statusMessage: "未验证插件 ID",
-                detailMessage: "Chrome profile 中未找到匹配的 SwiftGetX 插件，已忽略本次自动配置请求。",
-                isRepairable: true
-            )
-        }
-
         let allowedOrigins = ChromeNativeMessagingOrigin.merge(
-            existingOrigins: readManifest()?.allowed_origins ?? [],
-            discoveredExtensionIDs: discoveredIDs
+            existingOrigins: [],
+            discoveredExtensionIDs: pairedExtensionIDs
         )
 
         guard !allowedOrigins.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: "未发现插件 ID",
-                detailMessage: "找不到已安装的 SwiftGetX Chrome 插件。安装或启用插件后会自动修复。",
-                isRepairable: true
+                statusMessage: "需要手动配对",
+                detailMessage: "没有可写入的已配对 Chrome 插件 ID。",
+                isRepairable: false
             )
         }
 
+        return writeAndVerifyManifest(binaryPath: binaryPath, allowedOrigins: allowedOrigins)
+    }
+
+    func pairAndRegister(extensionID: String) -> ChromeNativeHostRegistrationResult {
+        guard ChromeNativeMessagingOrigin.isValidExtensionID(extensionID) else {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: "插件 ID 无效",
+                detailMessage: "浏览器传入的 Chrome 插件 ID 不合法，已忽略本次配对请求。",
+                isRepairable: false
+            )
+        }
+
+        if !pairingStore.isPaired(extensionID) {
+            let discoveredIDs = extensionDiscovery.discoverExtensionIDs()
+            guard discoveredIDs.contains(extensionID) else {
+                return ChromeNativeHostRegistrationResult(
+                    status: .warning,
+                    statusMessage: "未验证插件 ID",
+                    detailMessage: "Chrome profile 中未找到匹配的 SwiftGetX 插件，已忽略本次配对请求。",
+                    isRepairable: false
+                )
+            }
+            pairingStore.pair(extensionID)
+        }
+
+        return register()
+    }
+
+    func isPairedExtensionID(_ extensionID: String) -> Bool {
+        pairingStore.isPaired(extensionID)
+    }
+
+    func canPairExtensionID(_ extensionID: String) -> Bool {
+        ChromeNativeMessagingOrigin.isValidExtensionID(extensionID)
+            && extensionDiscovery.discoverExtensionIDs().contains(extensionID)
+    }
+
+    func readManifest() -> ManifestContent? {
+        guard let data = fileManager.contents(atPath: manifestURL.path) else { return nil }
+        return try? JSONDecoder().decode(ManifestContent.self, from: data)
+    }
+
+    private func writeAndVerifyManifest(
+        binaryPath: String,
+        allowedOrigins: [String]
+    ) -> ChromeNativeHostRegistrationResult {
         do {
             try fileManager.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
             try writeManifest(
@@ -212,11 +306,6 @@ struct ChromeNativeHostRegistrar {
         )
     }
 
-    func readManifest() -> ManifestContent? {
-        guard let data = fileManager.contents(atPath: manifestURL.path) else { return nil }
-        return try? JSONDecoder().decode(ManifestContent.self, from: data)
-    }
-
     private func writeManifest(_ manifest: ManifestContent) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -236,6 +325,73 @@ struct ChromeNativeHostRegistrar {
         var path: String
         var type: String
         var allowed_origins: [String]?
+    }
+}
+
+final class ChromeNativeHostPairingStore {
+    static let defaultKey = "ChromeNativeHostPairedExtensionIDs"
+
+    private let defaults: UserDefaults?
+    private let key: String
+    private var inMemoryExtensionIDs: [String]?
+
+    init(
+        defaults: UserDefaults = .standard,
+        key: String = ChromeNativeHostPairingStore.defaultKey
+    ) {
+        self.defaults = defaults
+        self.key = key
+    }
+
+    init(pairedExtensionIDs: [String]) {
+        defaults = nil
+        key = ChromeNativeHostPairingStore.defaultKey
+        inMemoryExtensionIDs = ChromeNativeHostPairingStore.sanitizedExtensionIDs(pairedExtensionIDs)
+    }
+
+    func pairedExtensionIDs() -> [String] {
+        ChromeNativeHostPairingStore.sanitizedExtensionIDs(
+            defaults?.stringArray(forKey: key) ?? inMemoryExtensionIDs ?? []
+        )
+    }
+
+    func isPaired(_ extensionID: String) -> Bool {
+        pairedExtensionIDs().contains(extensionID)
+    }
+
+    func pair(_ extensionID: String) {
+        guard ChromeNativeMessagingOrigin.isValidExtensionID(extensionID) else { return }
+
+        var extensionIDs = pairedExtensionIDs()
+        guard !extensionIDs.contains(extensionID) else { return }
+
+        extensionIDs.append(extensionID)
+        save(extensionIDs)
+    }
+
+    private func save(_ extensionIDs: [String]) {
+        let sanitizedExtensionIDs = ChromeNativeHostPairingStore.sanitizedExtensionIDs(extensionIDs)
+        if let defaults {
+            defaults.set(sanitizedExtensionIDs, forKey: key)
+        } else {
+            inMemoryExtensionIDs = sanitizedExtensionIDs
+        }
+    }
+
+    private static func sanitizedExtensionIDs(_ extensionIDs: [String]) -> [String] {
+        var result: [String] = []
+        var seen = Set<String>()
+
+        for extensionID in extensionIDs {
+            guard ChromeNativeMessagingOrigin.isValidExtensionID(extensionID),
+                  !seen.contains(extensionID) else {
+                continue
+            }
+            seen.insert(extensionID)
+            result.append(extensionID)
+        }
+
+        return result
     }
 }
 

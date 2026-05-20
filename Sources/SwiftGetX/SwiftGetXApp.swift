@@ -97,7 +97,19 @@ struct SwiftGetXApp: App {
     @MainActor
     private func handleBrowserSetupRequest(_ request: BrowserSetupRequest) {
         guard request.browser.caseInsensitiveCompare("Chrome") == .orderedSame else { return }
-        _ = chromeNativeHostRegistrar.register(setupHintExtensionID: request.extensionID)
+
+        if chromeNativeHostRegistrar.isPairedExtensionID(request.extensionID) {
+            _ = chromeNativeHostRegistrar.register()
+            return
+        }
+
+        guard chromeNativeHostRegistrar.canPairExtensionID(request.extensionID) else {
+            showChromePairingRejectedAlert(extensionID: request.extensionID)
+            return
+        }
+
+        guard confirmChromePairing(request) else { return }
+        _ = chromeNativeHostRegistrar.pairAndRegister(extensionID: request.extensionID)
     }
 
     @MainActor
@@ -118,6 +130,35 @@ struct SwiftGetXApp: App {
             context.insert(record)
             try? context.save()
         }
+    }
+
+    @MainActor
+    private func confirmChromePairing(_ request: BrowserSetupRequest) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "允许 Chrome 插件连接 SwiftGetX？"
+        alert.informativeText = """
+        插件 ID：\(request.extensionID)
+
+        允许后，SwiftGetX 会把这个插件加入 Native Messaging 白名单，并自动修复 com.swiftgetx.native.json。
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "允许配对")
+        alert.addButton(withTitle: "拒绝")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    @MainActor
+    private func showChromePairingRejectedAlert(extensionID: String) {
+        let alert = NSAlert()
+        alert.messageText = "无法验证 Chrome 插件"
+        alert.informativeText = """
+        SwiftGetX 没有在 Chrome 配置中找到匹配的 SwiftGetX 插件，已拒绝配对。
+
+        插件 ID：\(extensionID)
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "好")
+        alert.runModal()
     }
 }
 
