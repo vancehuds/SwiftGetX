@@ -39,9 +39,15 @@
     <section id="candidate-panel" class="candidate-panel" hidden>
       <div class="candidate-header">
         <strong id="candidate-count">0 links</strong>
-        <button id="send-candidates" class="text-button" type="button" data-i18n="sendAll">Send all</button>
+        <button id="select-all-candidates" class="text-button" type="button" data-i18n="selectAll">Select all</button>
+        <button id="send-candidates" class="text-button" type="button" data-i18n="sendSelected">Send selected</button>
       </div>
       <ul id="candidate-list"></ul>
+    </section>
+
+    <section id="error-panel" class="error-panel" hidden>
+      <strong data-i18n="lastError">Last error</strong>
+      <p id="error-detail" class="error-detail"></p>
     </section>
   </main>
 

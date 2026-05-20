@@ -98,7 +98,8 @@ struct TorrentFileTests {
             suggestedFilename: "file.zip",
             sourcePageTitle: "Downloads",
             sourcePageURL: "https://example.com/downloads?token=secret",
-            handoffSource: "download-takeover"
+            handoffSource: "download-takeover",
+            handoffSourceText: "https://example.com/file.zip?token=secret\nhttps://example.com/other.zip"
         )
 
         let task = DownloadTask(
@@ -115,8 +116,10 @@ struct TorrentFileTests {
         #expect(task.browserContext?.referrer == "https://example.com/downloads?token=%3Credacted%3E&ok=1")
         #expect(task.browserContext?.finalURL == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
         #expect(task.browserContext?.originalURL == "https://example.com/file.zip?auth=%3Credacted%3E")
+        #expect(task.browserContext?.handoffSourceText == nil)
         #expect(task.displaySource == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
         #expect(task.browserContextJSON?.contains("Bearer secret") == false)
         #expect(task.browserContextJSON?.contains("session=secret") == false)
+        #expect(task.browserContextJSON?.contains("other.zip") == false)
     }
 }

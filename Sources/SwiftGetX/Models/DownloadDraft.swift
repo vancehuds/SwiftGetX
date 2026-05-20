@@ -17,6 +17,7 @@ struct DownloadDraft: Equatable, Sendable {
     var browserContext: BrowserDownloadContext?
     var linkTrust: DownloadLinkTrust = .publicLink
     var sourceCount: Int = 1
+    var requiresNativePayloadSource = false
 
     var isBrowserTakeover: Bool {
         handoffSource == "download-takeover"
@@ -42,6 +43,7 @@ struct DownloadDraft: Equatable, Sendable {
         draft.handoffAck = nil
         draft.browserContext = nil
         draft.linkTrust = .publicLink
+        draft.requiresNativePayloadSource = false
         return draft
     }
 }

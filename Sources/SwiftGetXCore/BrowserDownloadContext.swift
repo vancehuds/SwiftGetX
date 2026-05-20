@@ -86,6 +86,7 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
     public var sourcePageTitle: String?
     public var sourcePageURL: String?
     public var handoffSource: String?
+    public var handoffSourceText: String?
 
     public init(
         referrer: String? = nil,
@@ -98,7 +99,8 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         suggestedFilename: String? = nil,
         sourcePageTitle: String? = nil,
         sourcePageURL: String? = nil,
-        handoffSource: String? = nil
+        handoffSource: String? = nil,
+        handoffSourceText: String? = nil
     ) {
         self.referrer = Self.nonEmpty(referrer)
         self.userAgent = Self.nonEmpty(userAgent)
@@ -111,6 +113,7 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         self.sourcePageTitle = Self.nonEmpty(sourcePageTitle)
         self.sourcePageURL = Self.nonEmpty(sourcePageURL)
         self.handoffSource = Self.nonEmpty(handoffSource)
+        self.handoffSourceText = Self.nonEmpty(handoffSourceText)
     }
 
     public var redacted: BrowserDownloadContext {
@@ -125,7 +128,8 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             suggestedFilename: suggestedFilename,
             sourcePageTitle: sourcePageTitle,
             sourcePageURL: Self.redactedURLString(sourcePageURL),
-            handoffSource: handoffSource
+            handoffSource: handoffSource,
+            handoffSourceText: Self.redactedSourceText(handoffSourceText)
         )
     }
 
@@ -153,7 +157,8 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             suggestedFilename: suggestedFilename,
             sourcePageTitle: sourcePageTitle,
             sourcePageURL: Self.redactedURLString(sourcePageURL),
-            handoffSource: handoffSource
+            handoffSource: handoffSource,
+            handoffSourceText: nil
         )
     }
 
@@ -189,6 +194,7 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         }
 
         let base = message.context ?? BrowserDownloadContext()
+        let messageSourceText = nonEmpty(message.url)
         return BrowserDownloadContext(
             referrer: base.referrer ?? message.sourcePageUrl,
             userAgent: base.userAgent,
@@ -196,11 +202,12 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             headers: base.headers,
             bodyMetadata: base.bodyMetadata,
             finalURL: base.finalURL,
-            originalURL: base.originalURL ?? message.url,
+            originalURL: base.originalURL ?? singleLineSource(messageSourceText),
             suggestedFilename: base.suggestedFilename ?? message.suggestedFilename,
             sourcePageTitle: base.sourcePageTitle ?? message.sourcePageTitle,
             sourcePageURL: base.sourcePageURL ?? message.sourcePageUrl,
-            handoffSource: base.handoffSource ?? message.source
+            handoffSource: base.handoffSource ?? message.source,
+            handoffSourceText: base.handoffSourceText ?? messageSourceText
         )
     }
 
@@ -217,6 +224,16 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         return components.string ?? value
     }
 
+    private static func redactedSourceText(_ value: String?) -> String? {
+        guard let value = nonEmpty(value) else { return nil }
+        let redactedSources = value
+            .split(whereSeparator: \.isNewline)
+            .map { source in
+                redactedURLString(String(source)) ?? String(source)
+            }
+        return redactedSources.isEmpty ? nil : redactedSources.joined(separator: "\n")
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty
@@ -224,6 +241,15 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             return nil
         }
         return trimmed
+    }
+
+    private static func singleLineSource(_ value: String?) -> String? {
+        guard let value,
+              !value.contains(where: \.isNewline)
+        else {
+            return nil
+        }
+        return value
     }
 
     private static func isSensitiveQueryName(_ name: String) -> Bool {

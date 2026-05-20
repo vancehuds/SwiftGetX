@@ -166,17 +166,40 @@ Next step:
 
 ## Task 5: Extension Scanning and Takeover Rules
 
-Status: [ ]
+Status: [x]
 
 Improve extension scanning and takeover control: partial candidate selection, site/file-type/size rules, visible popup errors, and fallback when payloads exceed deep-link length. Prefer native messaging for large payloads or temporary JSON handoff where appropriate.
 
 Work performed:
 
+- Added extension takeover policy controls for allowed/blocked extensions, blocked host fragments, minimum takeover size, static/page-like MIME rejection, short-lived "download in browser" bypasses, and context-menu browser fallback.
+- Expanded page scanning to collect normal links, download-attribute links, media/source URLs, HLS/DASH manifests, magnet links, and download-hint links, then enrich candidates through background HEAD/range probes for content type, length, disposition, and final URL.
+- Reworked the popup scan result list to support per-candidate selection, select-all/select-none, selected-count display, metadata labels, localized strings, and a visible last-error panel populated from background storage.
+- Persisted extension/native-host errors in local storage for popup visibility and cleared them on successful sends.
+- Carried full multi-link handoff source text in the token-protected native payload while keeping it out of persisted browser context.
+- Added `payloadSource=1` deep-link metadata and native-host preview-source fallback so multi-line, oversized, or large candidate-set handoffs use the native payload source instead of embedding unsafe or overlong source text in the public deep link.
+- Updated App handling to replace preview deep-link source text with fetched payload source text for trusted native handoffs, and reject payload-required handoffs when payload recovery fails.
+- Added tests for payload-required native deep links, multi-line handoff source preservation, payload context fetches with handoff source text, and non-persistence of sensitive handoff source text.
+
 Verification evidence:
+
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/popup.js` passed.
+- Node JSON parsing passed for `Sources/SwiftGetX/Resources/ChromeExtension/_locales/en/messages.json` and `Sources/SwiftGetX/Resources/ChromeExtension/_locales/zh_CN/messages.json`.
+- `swift test --filter NativeMessageHost` passed with 30 tests in 1 suite.
+- `swift test --filter persistsOnlySafeBrowserContext` passed with 1 test in 1 suite.
+- `swift test` passed with 106 tests across 12 suites.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Extension candidate enrichment uses best-effort browser `fetch` probes; CORS, authentication, servers that reject HEAD/range, or slow responses can still limit metadata, but candidates fall back to URL/title-based classification.
+- Takeover allow/block lists and minimum size are stored as extension local options but do not yet have a full settings UI in the macOS app; later settings work should surface these policies coherently with app-side rules.
+- Native payload source recovery is available only for trusted native handoffs with a live localhost payload server; public deep links remain bounded and confirmation-only by design.
+
 Next step:
+
+- Task 6: HTTP Metadata and Content-Disposition.
 
 ## Task 6: HTTP Metadata and Content-Disposition
 

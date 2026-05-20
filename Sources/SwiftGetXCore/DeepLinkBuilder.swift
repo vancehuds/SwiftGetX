@@ -8,7 +8,8 @@ public enum DeepLinkBuilder {
         handoffSource: String? = nil,
         sourcePageTitle: String? = nil,
         sourcePageUrl: String? = nil,
-        handoffAck: NativeHandoffAck? = nil
+        handoffAck: NativeHandoffAck? = nil,
+        requiresPayloadSource: Bool = false
     ) -> URL? {
         var components = URLComponents()
         components.scheme = "swiftgetx"
@@ -21,6 +22,9 @@ public enum DeepLinkBuilder {
         appendQueryItem("source", value: handoffSource, to: &components)
         appendQueryItem("sourcePageTitle", value: sourcePageTitle, to: &components)
         appendQueryItem("sourcePageUrl", value: sourcePageUrl, to: &components)
+        if requiresPayloadSource {
+            appendQueryItem("payloadSource", value: "1", to: &components)
+        }
         if let handoffAck {
             appendQueryItem("ackRequestID", value: handoffAck.requestID, to: &components)
             appendQueryItem("ackToken", value: handoffAck.token, to: &components)

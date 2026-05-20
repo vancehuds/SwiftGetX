@@ -212,7 +212,27 @@ li:first-child {
   border-top: 0;
 }
 
+.candidate-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.candidate-row input {
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  accent-color: #2774c7;
+}
+
+.candidate-content {
+  min-width: 0;
+}
+
 .candidate-title {
+  display: block;
   overflow: hidden;
   color: #26323f;
   font-size: 12px;
@@ -221,13 +241,41 @@ li:first-child {
   white-space: nowrap;
 }
 
+.candidate-meta {
+  display: block;
+  overflow: hidden;
+  color: #4d647a;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .candidate-url {
+  display: block;
   overflow: hidden;
   color: #667280;
   font-size: 11px;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.error-panel {
+  margin-top: 12px;
+  padding: 9px 10px;
+  border: 1px solid #e4a19b;
+  border-radius: 7px;
+  color: #8f241b;
+  background: #fff1ef;
+  font-size: 12px;
+}
+
+.error-detail {
+  max-width: none;
+  margin: 4px 0 0;
+  color: inherit;
+  white-space: normal;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -242,6 +290,7 @@ li:first-child {
   }
 
   p,
+  .candidate-meta,
   .candidate-url {
     color: #a9b4c0;
   }
@@ -265,6 +314,12 @@ li:first-child {
   .connection-section,
   li {
     border-color: #303842;
+  }
+
+  .error-panel {
+    border-color: #7c3a35;
+    color: #ffc4bf;
+    background: #351d1b;
   }
 
   .connection-detail {

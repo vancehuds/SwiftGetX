@@ -7,13 +7,43 @@ const NATIVE_SETUP_RETRY_INTERVAL_MS = 1000;
 const NATIVE_SETUP_THROTTLE_MS = 60 * 1000;
 const NATIVE_SETUP_LAST_OPENED_KEY = "nativeSetupLastOpenedAt";
 const NATIVE_SETUP_PAIRED_KEY = "nativeHostPairingConfirmed";
+const LAST_ERROR_KEY = "lastSwiftGetXError";
 const RECENT_REQUEST_CONTEXT_TTL_MS = 5 * 60 * 1000;
 const RECENT_REQUEST_CONTEXT_LIMIT = 200;
+const TAKEOVER_BYPASS_TTL_MS = 30 * 1000;
+const HEAD_PROBE_TIMEOUT_MS = 2500;
+const MIN_TAKEOVER_BYTES = 1024 * 1024;
+const DOWNLOAD_EXTENSIONS = [
+  "7z", "aac", "apk", "bz2", "crx", "dmg", "exe", "flac", "gz", "iso", "m3u8",
+  "m4a", "m4v", "mkv", "mov", "mp3", "mp4", "mpd", "msi", "ogg", "pdf", "pkg",
+  "rar", "tar", "torrent", "wav", "webm", "xz", "zip"
+];
+const TAKEOVER_BLOCKED_EXTENSIONS = [
+  "css", "gif", "htm", "html", "ico", "jpeg", "jpg", "js", "json", "png", "svg",
+  "webp", "xml"
+];
+const TAKEOVER_BLOCKED_HOST_PARTS = [
+  "adservice.",
+  "doubleclick.net",
+  "googlesyndication.com",
+  "googleadservices.com",
+  "clients2.google.com",
+  "update.googleapis.com",
+  "redirector.gvt1.com",
+  "edgedl.me.gvt1.com",
+  "dl.google.com"
+];
 const DEFAULT_OPTIONS = {
   takeoverDownloads: true,
-  takeoverDownloadsUserSet: false
+  takeoverDownloadsUserSet: false,
+  takeoverMinBytes: MIN_TAKEOVER_BYTES,
+  takeoverAllowedExtensions: DOWNLOAD_EXTENSIONS,
+  takeoverBlockedExtensions: TAKEOVER_BLOCKED_EXTENSIONS,
+  takeoverBlockedHosts: TAKEOVER_BLOCKED_HOST_PARTS
 };
 const DOWNLOAD_SOURCE_PATTERN = /(magnet:\?|https?:\/\/|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)/i;
+const DOWNLOAD_EXTENSION_PATTERN = new RegExp(`\\.(${DOWNLOAD_EXTENSIONS.join("|")})([?#].*)?$`, "i");
+const STATIC_EXTENSION_PATTERN = new RegExp(`\\.(${TAKEOVER_BLOCKED_EXTENSIONS.join("|")})([?#].*)?$`, "i");
 const CONTEXT_HEADER_NAMES = new Set([
   "accept",
   "accept-language",
@@ -39,12 +69,18 @@ const SENSITIVE_HEADER_NAMES = new Set([
 let currentOptions = { ...DEFAULT_OPTIONS };
 let activeNativeRepair;
 let recentRequestContexts = new Map();
+let takeoverBypassURLs = new Map();
 const i18n = (key, substitutions) => chrome.i18n.getMessage(key, substitutions) || key;
 
 const MENU_ITEMS = [
   {
     id: "send-link",
     titleKey: "contextSendLink",
+    contexts: ["link"]
+  },
+  {
+    id: "browser-download-link",
+    titleKey: "contextDownloadInBrowser",
     contexts: ["link"]
   },
   {
@@ -112,12 +148,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     return;
   }
 
-  if (changes.takeoverDownloads) {
-    currentOptions.takeoverDownloads = Boolean(changes.takeoverDownloads.newValue);
-  }
-
-  if (changes.takeoverDownloadsUserSet) {
-    currentOptions.takeoverDownloadsUserSet = Boolean(changes.takeoverDownloadsUserSet.newValue);
+  if (Object.keys(changes).some((key) => key.startsWith("takeover"))) {
+    refreshOptions();
   }
 });
 
@@ -149,11 +181,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
       .then(sendResponse)
       .catch((error) => {
+        markFailure(error.message || String(error));
         sendResponse({
           ok: false,
           message: error.message || String(error)
         });
       });
+    return true;
+  }
+
+  if (message.type === "swiftgetx-enrich-candidates") {
+    enrichCandidates(message.candidates || [])
+      .then((candidates) => sendResponse({ ok: true, candidates }))
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          message: error.message || String(error),
+          candidates: message.candidates || []
+        });
+      });
+    return true;
+  }
+
+  if (message.type === "swiftgetx-last-error") {
+    getLocalStorage({ [LAST_ERROR_KEY]: null })
+      .then((stored) => sendResponse({
+        ok: true,
+        error: stored[LAST_ERROR_KEY] || null
+      }))
+      .catch((error) => sendResponse({
+        ok: false,
+        message: error.message || String(error)
+      }));
     return true;
   }
 
@@ -228,15 +287,181 @@ async function handleDownloadDeterminingFilename(downloadItem, suggest) {
 }
 
 function shouldTakeOverDownload(downloadItem) {
-  return Boolean(currentOptions.takeoverDownloads && isSupportedSource(downloadSourceURL(downloadItem)));
+  return takeoverDecision(downloadItem).takeOver;
+}
+
+function takeoverDecision(downloadItem) {
+  if (!currentOptions.takeoverDownloads) {
+    return { takeOver: false, reason: "disabled" };
+  }
+
+  const url = downloadSourceURL(downloadItem).trim();
+  if (!url || !isHTTPURL(url)) {
+    return { takeOver: false, reason: "unsupported-protocol" };
+  }
+
+  if (isTakeoverBypassed(url) || isTakeoverBypassed(downloadItem.url)) {
+    return { takeOver: false, reason: "temporary-browser-rule" };
+  }
+
+  const parsed = parsedURL(url);
+  if (!parsed || hostMatchesBlockedRule(parsed.hostname)) {
+    return { takeOver: false, reason: "blocked-site" };
+  }
+
+  const extension = extensionFromURL(url) || extensionFromFilename(downloadItem.filename);
+  const mime = String(downloadItem.mime || "").toLowerCase();
+  if (extension && blockedExtensionSet().has(extension)) {
+    return { takeOver: false, reason: "blocked-extension" };
+  }
+
+  if (isStaticContentType(mime) || isPageLikeDownload(mime, extension)) {
+    return { takeOver: false, reason: "browser-file" };
+  }
+
+  const hasAllowedExtension = extension ? allowedExtensionSet().has(extension) : false;
+  const hasDownloadMime = isDownloadContentType(mime);
+  if (!hasAllowedExtension && !hasDownloadMime) {
+    return { takeOver: false, reason: "not-download-like" };
+  }
+
+  const totalBytes = downloadSize(downloadItem);
+  const minBytes = Math.max(0, Number(currentOptions.takeoverMinBytes || MIN_TAKEOVER_BYTES));
+  const isManifestOrTorrent = extension === "torrent" || extension === "m3u8" || extension === "mpd";
+  if (totalBytes > 0 && totalBytes < minBytes && !isManifestOrTorrent) {
+    return { takeOver: false, reason: "small-file" };
+  }
+
+  return { takeOver: true, reason: hasAllowedExtension ? "extension" : "content-type" };
 }
 
 function downloadSourceURL(downloadItem) {
   return downloadItem.finalUrl || downloadItem.url || "";
 }
 
+function parsedURL(value) {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function extensionFromURL(value) {
+  const url = parsedURL(value);
+  if (!url) {
+    return undefined;
+  }
+
+  const match = /\.([a-z0-9]{1,12})$/i.exec(url.pathname);
+  return match?.[1]?.toLowerCase();
+}
+
+function extensionFromFilename(value) {
+  const name = filenameFromPath(value);
+  const match = name ? /\.([a-z0-9]{1,12})$/i.exec(name) : undefined;
+  return match?.[1]?.toLowerCase();
+}
+
+function normalizedArrayOption(value, fallback) {
+  return Array.isArray(value) ? value : fallback;
+}
+
+function allowedExtensionSet() {
+  return new Set(normalizedArrayOption(
+    currentOptions.takeoverAllowedExtensions,
+    DOWNLOAD_EXTENSIONS
+  ).map((item) => String(item).toLowerCase()));
+}
+
+function blockedExtensionSet() {
+  return new Set(normalizedArrayOption(
+    currentOptions.takeoverBlockedExtensions,
+    TAKEOVER_BLOCKED_EXTENSIONS
+  ).map((item) => String(item).toLowerCase()));
+}
+
+function hostMatchesBlockedRule(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  return normalizedArrayOption(
+    currentOptions.takeoverBlockedHosts,
+    TAKEOVER_BLOCKED_HOST_PARTS
+  ).some((part) => host.includes(String(part).toLowerCase()));
+}
+
+function rememberTakeoverBypass(url) {
+  pruneTakeoverBypasses();
+  const key = contextKey(url) || url;
+  takeoverBypassURLs.set(key, Date.now() + TAKEOVER_BYPASS_TTL_MS);
+}
+
+function isTakeoverBypassed(url) {
+  pruneTakeoverBypasses();
+  const key = contextKey(url) || url;
+  return takeoverBypassURLs.has(key);
+}
+
+function pruneTakeoverBypasses() {
+  const now = Date.now();
+  for (const [key, expiresAt] of takeoverBypassURLs.entries()) {
+    if (Number(expiresAt) <= now) {
+      takeoverBypassURLs.delete(key);
+    }
+  }
+}
+
+function downloadSize(downloadItem) {
+  return Number(downloadItem.fileSize || downloadItem.totalBytes || downloadItem.bytesReceived || 0);
+}
+
+function isStaticContentType(mime) {
+  return /^(image|text\/css|application\/javascript|text\/javascript)\b/i.test(mime || "");
+}
+
+function isPageLikeDownload(mime, extension) {
+  if (extension === "html" || extension === "htm") {
+    return true;
+  }
+  return /^(text\/html|application\/xhtml\+xml)\b/i.test(mime || "");
+}
+
+function isDownloadContentType(mime) {
+  const value = String(mime || "").toLowerCase();
+  if (!value) {
+    return false;
+  }
+
+  return value.includes("application/octet-stream")
+    || value.includes("application/x-bittorrent")
+    || value.includes("application/pdf")
+    || value.includes("application/zip")
+    || value.includes("application/x-7z")
+    || value.includes("application/x-rar")
+    || value.includes("application/gzip")
+    || value.includes("application/x-tar")
+    || value.includes("application/vnd.apple.installer+xml")
+    || value.includes("application/vnd.microsoft.portable-executable")
+    || value.includes("application/dash+xml")
+    || value.includes("application/vnd.apple.mpegurl")
+    || value.includes("mpegurl")
+    || value.startsWith("audio/")
+    || value.startsWith("video/");
+}
+
 async function handleContextMenuClick(info, tab) {
   switch (info.menuItemId) {
+  case "browser-download-link":
+    if (!info.linkUrl) {
+      markFailure(i18n("errorNoDownloadAddress"));
+      break;
+    }
+    rememberTakeoverBypass(info.linkUrl);
+    if (await callDownloads("download", { url: info.linkUrl })) {
+      markSuccess();
+    } else {
+      markFailure(i18n("sendFailed"));
+    }
+    break;
   case "send-link":
     await sendToSwiftGetX({
       url: info.linkUrl,
@@ -292,7 +517,9 @@ async function scanTabAndSend(tab) {
       target: { tabId: tab.id },
       func: collectDownloadCandidates
     });
-    const candidates = injection?.[0]?.result?.candidates || [];
+    const result = injection?.[0]?.result || {};
+    const candidates = (await enrichCandidates(result.candidates || []))
+      .filter((candidate) => candidate.downloadable !== false);
     const sourceText = candidates.map((candidate) => candidate.url).join("\n");
 
     if (!sourceText) {
@@ -302,9 +529,9 @@ async function scanTabAndSend(tab) {
 
     await sendToSwiftGetX({
       url: sourceText,
-      suggestedFilename: tab.title,
-      sourcePageTitle: tab.title,
-      sourcePageUrl: tab.url,
+      suggestedFilename: result.pageTitle || tab.title,
+      sourcePageTitle: result.pageTitle || tab.title,
+      sourcePageUrl: result.pageUrl || tab.url,
       source: "context-menu-scan"
     }, { allowSetup: true });
   } catch (error) {
@@ -369,8 +596,214 @@ async function sendToSwiftGetX(payload, options = {}) {
 
   return {
     ok: result.ok,
-    message: result.message || (result.ok ? i18n("sentToSwiftGetX") : i18n("sendFailed"))
+    message: result.message || (result.ok ? i18n("sentToSwiftGetX") : i18n("sendFailed")),
+    response: result.response
   };
+}
+
+async function enrichCandidates(candidates) {
+  const uniqueCandidates = [];
+  const seen = new Set();
+
+  for (const candidate of candidates.slice(0, 150)) {
+    const url = String(candidate?.url || "").trim();
+    if (!isSupportedCandidateSource(url)) {
+      continue;
+    }
+
+    const key = contextKey(url) || url;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    uniqueCandidates.push({
+      title: String(candidate.title || "").trim().slice(0, 160),
+      url,
+      kind: candidate.kind || "link",
+      reason: candidate.reason,
+      hasDownloadAttribute: Boolean(candidate.hasDownloadAttribute)
+    });
+  }
+
+  const enriched = await Promise.all(uniqueCandidates.map(enrichCandidate));
+  return enriched
+    .filter((candidate) => candidate.downloadable !== false)
+    .slice(0, 100);
+}
+
+async function enrichCandidate(candidate) {
+  const url = candidate.url;
+  const isMagnet = url.toLowerCase().startsWith("magnet:?");
+  const metadata = isHTTPURL(url) ? await probeHTTPMetadata(url) : {};
+  const finalURL = metadata.finalURL || url;
+  const contentType = metadata.contentType || "";
+  const contentDispositionFilename = filenameFromContentDisposition(metadata.contentDisposition);
+  const suggestedFilename = contentDispositionFilename
+    || filenameFromURL(finalURL)
+    || filenameFromURL(url);
+  const extension = extensionFromURL(finalURL)
+    || extensionFromURL(url)
+    || extensionFromFilename(suggestedFilename);
+  const blockedExtension = extension ? blockedExtensionSet().has(extension) : false;
+  const allowedExtension = extension ? allowedExtensionSet().has(extension) : false;
+  const manifestExtension = extension === "m3u8" || extension === "mpd";
+  const dispositionDownload = isDownloadDisposition(metadata.contentDisposition);
+  const contentDownload = isDownloadContentType(contentType);
+  const staticContent = isStaticContentType(contentType) || STATIC_EXTENSION_PATTERN.test(finalURL);
+  const pageLikeContent = isPageLikeDownload(contentType, extension);
+  let reason = candidate.reason;
+
+  if (isMagnet) {
+    reason = "magnet";
+  } else if (dispositionDownload) {
+    reason = "content-disposition";
+  } else if (manifestExtension) {
+    reason = "media-manifest";
+  } else if (candidate.hasDownloadAttribute) {
+    reason = "download-attribute";
+  } else if (allowedExtension) {
+    reason = "extension";
+  } else if (contentDownload) {
+    reason = "content-type";
+  } else if (candidate.kind === "media") {
+    reason = "media-source";
+  }
+
+  const downloadable = Boolean(
+    isMagnet
+      || dispositionDownload
+      || manifestExtension
+      || candidate.hasDownloadAttribute
+      || contentDownload
+      || allowedExtension
+      || candidate.reason === "download-hint"
+      || candidate.kind === "media"
+  ) && !(blockedExtension && !dispositionDownload) && !(staticContent && !dispositionDownload);
+  const safeDownloadable = downloadable && !(pageLikeContent && !dispositionDownload);
+
+  return {
+    ...candidate,
+    title: candidate.title || suggestedFilename || i18n("downloadLink"),
+    finalUrl: finalURL,
+    suggestedFilename,
+    contentType,
+    contentLength: metadata.contentLength,
+    contentDisposition: metadata.contentDisposition,
+    reason: reason || "link",
+    downloadable: safeDownloadable,
+    probeError: metadata.probeError
+  };
+}
+
+function isSupportedCandidateSource(value) {
+  if (!value) {
+    return false;
+  }
+
+  const lower = value.toLowerCase();
+  return lower.startsWith("magnet:?") || isHTTPURL(value);
+}
+
+async function probeHTTPMetadata(url) {
+  let headMetadata;
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: "HEAD",
+      credentials: "include",
+      redirect: "follow"
+    });
+    headMetadata = metadataFromResponse(response);
+    if (hasUsefulMetadata(headMetadata) || ![405, 501].includes(response.status)) {
+      return headMetadata;
+    }
+  } catch (error) {
+    headMetadata = { probeError: error.message || String(error) };
+  }
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: "GET",
+      credentials: "include",
+      redirect: "follow",
+      headers: {
+        Range: "bytes=0-0"
+      }
+    });
+    const metadata = metadataFromResponse(response);
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Best effort only; the Range request is used as a light metadata probe.
+    }
+    return metadata;
+  } catch (error) {
+    return {
+      ...(headMetadata || {}),
+      probeError: error.message || String(error)
+    };
+  }
+}
+
+function fetchWithTimeout(url, options) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), HEAD_PROBE_TIMEOUT_MS);
+  return fetch(url, {
+    ...options,
+    signal: controller.signal
+  }).finally(() => {
+    clearTimeout(timeout);
+  });
+}
+
+function metadataFromResponse(response) {
+  return {
+    finalURL: response.url,
+    contentDisposition: response.headers.get("content-disposition") || "",
+    contentType: response.headers.get("content-type") || "",
+    contentLength: numericHeader(response.headers.get("content-length"))
+  };
+}
+
+function hasUsefulMetadata(metadata) {
+  return Boolean(
+    metadata.contentDisposition
+      || metadata.contentType
+      || Number(metadata.contentLength || 0) > 0
+  );
+}
+
+function numericHeader(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+function isDownloadDisposition(value) {
+  const lower = String(value || "").toLowerCase();
+  return lower.includes("attachment") || lower.includes("filename=");
+}
+
+function filenameFromContentDisposition(value) {
+  if (!value) {
+    return undefined;
+  }
+
+  const filenameStar = /filename\*\s*=\s*(?:UTF-8'')?([^;]+)/i.exec(value);
+  if (filenameStar?.[1]) {
+    return decodeHeaderFilename(filenameStar[1]);
+  }
+
+  const filename = /filename\s*=\s*("?)([^";]+)\1/i.exec(value);
+  return filename?.[2] ? decodeHeaderFilename(filename[2]) : undefined;
+}
+
+function decodeHeaderFilename(value) {
+  const trimmed = String(value || "").trim().replace(/^"|"$/g, "");
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
 }
 
 function captureRequestBasics(details) {
@@ -473,7 +906,8 @@ function buildBrowserContext(payload) {
     suggestedFilename,
     sourcePageTitle: payload.sourcePageTitle,
     sourcePageURL: payload.sourcePageUrl,
-    handoffSource: payload.source
+    handoffSource: payload.source,
+    handoffSourceText: url
   };
 }
 
@@ -798,11 +1232,18 @@ function filenameFromPath(value) {
 }
 
 function markSuccess() {
+  setLocalStorage({ [LAST_ERROR_KEY]: null });
   setBadge("OK", "#1f8f4d");
 }
 
 function markFailure(message) {
   console.warn(`SwiftGetX: ${message}`);
+  setLocalStorage({
+    [LAST_ERROR_KEY]: {
+      message: String(message || i18n("sendFailed")),
+      at: Date.now()
+    }
+  });
   setBadge("!", "#c43d30");
 }
 
@@ -814,29 +1255,113 @@ function setBadge(text, color) {
 
 function collectDownloadCandidates() {
   const extensions = [
-    "7z", "apk", "bz2", "crx", "dmg", "exe", "flac", "gz", "iso", "m4a",
-    "mkv", "mov", "mp3", "mp4", "msi", "pdf", "pkg", "rar", "tar",
-    "torrent", "wav", "webm", "xz", "zip"
+    "7z", "aac", "apk", "bz2", "crx", "dmg", "exe", "flac", "gz", "iso", "m3u8",
+    "m4a", "m4v", "mkv", "mov", "mp3", "mp4", "mpd", "msi", "ogg", "pdf", "pkg",
+    "rar", "tar", "torrent", "wav", "webm", "xz", "zip"
   ];
   const extensionPattern = new RegExp(`\\.(${extensions.join("|")})([?#].*)?$`, "i");
+  const manifestPattern = /\.(m3u8|mpd)([?#].*)?$/i;
+  const downloadHintPattern = /\b(download|direct|file|mirror|release|asset|archive|torrent|installer|package)\b/i;
+  const mediaMimePattern = /\b(audio|video|mpegurl|dash\+xml|octet-stream|x-bittorrent)\b/i;
   const candidates = [];
   const seen = new Set();
 
-  for (const link of document.querySelectorAll("a[href]")) {
-    const href = link.href;
-    const hasDownloadAttribute = link.hasAttribute("download");
-    const looksDownloadable = href.startsWith("magnet:")
-      || extensionPattern.test(new URL(href, document.baseURI).pathname)
-      || hasDownloadAttribute;
+  const addCandidate = (rawURL, title, details = {}) => {
+    if (!rawURL) {
+      return;
+    }
 
-    if (!looksDownloadable || seen.has(href)) {
-      continue;
+    let href = rawURL;
+    try {
+      href = rawURL.startsWith("magnet:") ? rawURL : new URL(rawURL, document.baseURI).href;
+    } catch {
+      return;
+    }
+
+    if (seen.has(href)) {
+      return;
     }
 
     seen.add(href);
     candidates.push({
-      title: (link.textContent || link.getAttribute("download") || href).trim().slice(0, 120),
-      url: href
+      title: String(title || details.downloadName || href).trim().slice(0, 120),
+      url: href,
+      kind: details.kind || "link",
+      reason: details.reason,
+      hasDownloadAttribute: Boolean(details.hasDownloadAttribute)
+    });
+  };
+
+  for (const link of document.querySelectorAll("a[href]")) {
+    const href = link.href;
+    const url = new URL(href, document.baseURI);
+    const hasDownloadAttribute = link.hasAttribute("download");
+    const title = (link.textContent || link.getAttribute("download") || href).trim();
+    const rel = link.getAttribute("rel") || "";
+    const type = link.getAttribute("type") || "";
+    const looksDownloadable = href.startsWith("magnet:")
+      || extensionPattern.test(url.pathname)
+      || hasDownloadAttribute
+      || mediaMimePattern.test(type)
+      || downloadHintPattern.test(`${title} ${rel} ${link.className || ""} ${link.id || ""}`);
+
+    if (!looksDownloadable) {
+      continue;
+    }
+
+    let reason = "download-hint";
+    if (href.startsWith("magnet:")) {
+      reason = "magnet";
+    } else if (manifestPattern.test(url.pathname)) {
+      reason = "media-manifest";
+    } else if (hasDownloadAttribute) {
+      reason = "download-attribute";
+    } else if (extensionPattern.test(url.pathname)) {
+      reason = "extension";
+    } else if (mediaMimePattern.test(type)) {
+      reason = "content-type";
+    }
+
+    addCandidate(href, title, {
+      kind: "link",
+      reason,
+      hasDownloadAttribute,
+      downloadName: link.getAttribute("download") || ""
+    });
+  }
+
+  for (const link of document.querySelectorAll("a[href]")) {
+    if (candidates.length >= 80) {
+      break;
+    }
+
+    const href = link.href;
+    if (!/^https?:/i.test(href)) {
+      continue;
+    }
+
+    addCandidate(href, (link.textContent || href).trim(), {
+      kind: "link",
+      reason: "link"
+    });
+  }
+
+  for (const media of document.querySelectorAll("video[src], audio[src], source[src]")) {
+    const src = media.currentSrc || media.src || media.getAttribute("src");
+    const type = media.getAttribute("type") || "";
+    let pathname = "";
+    try {
+      pathname = new URL(src, document.baseURI).pathname;
+    } catch {
+      pathname = src || "";
+    }
+    if (!manifestPattern.test(pathname) && !mediaMimePattern.test(type)) {
+      continue;
+    }
+
+    addCandidate(src, media.getAttribute("title") || document.title || src, {
+      kind: "media",
+      reason: manifestPattern.test(pathname) ? "media-manifest" : "media-source"
     });
   }
 

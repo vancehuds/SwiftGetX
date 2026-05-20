@@ -29,6 +29,9 @@
   "connectionWaitingPairing": {
     "message": "等待配对"
   },
+  "contextDownloadInBrowser": {
+    "message": "在浏览器中下载链接"
+  },
   "contextScanPage": {
     "message": "扫描页面下载链接到 SwiftGetX"
   },
@@ -68,6 +71,9 @@
   "errorTaskRejected": {
     "message": "SwiftGetX 未接受该任务"
   },
+  "lastError": {
+    "message": "最近错误"
+  },
   "linkCount": {
     "message": "$COUNT$ 个链接",
     "placeholders": {
@@ -94,8 +100,61 @@
   "scanDownloadLinks": {
     "message": "扫描下载链接"
   },
+  "candidateReason_content_disposition": {
+    "message": "附件"
+  },
+  "candidateReason_content_type": {
+    "message": "媒体类型"
+  },
+  "candidateReason_download_attribute": {
+    "message": "下载属性"
+  },
+  "candidateReason_download_hint": {
+    "message": "下载线索"
+  },
+  "candidateReason_extension": {
+    "message": "扩展名"
+  },
+  "candidateReason_link": {
+    "message": "链接"
+  },
+  "candidateReason_magnet": {
+    "message": "磁力链接"
+  },
+  "candidateReason_media_manifest": {
+    "message": "媒体清单"
+  },
+  "candidateReason_media_source": {
+    "message": "媒体源"
+  },
+  "metadataLimited": {
+    "message": "元数据有限"
+  },
+  "metadataPending": {
+    "message": "等待元数据"
+  },
+  "selectAll": {
+    "message": "全选"
+  },
+  "selectedCount": {
+    "message": "已选择 $SELECTED$/$TOTAL$",
+    "placeholders": {
+      "selected": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "selectNone": {
+    "message": "取消全选"
+  },
   "sendAll": {
     "message": "全部发送"
+  },
+  "sendSelected": {
+    "message": "发送选中项"
   },
   "sendFailed": {
     "message": "发送失败"
@@ -134,6 +193,9 @@
   },
   "statusNoSelection": {
     "message": "无选区"
+  },
+  "statusNoSelectedLinks": {
+    "message": "未选择链接"
   },
   "statusNotFound": {
     "message": "未发现"

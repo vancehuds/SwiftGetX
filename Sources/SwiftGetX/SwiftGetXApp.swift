@@ -104,8 +104,31 @@ struct SwiftGetXApp: App {
                     var enrichedDraft = draft
                     let context = try await NativeHandoffPayloadClient.fetchContext(handoff: handoffAck)
                     enrichedDraft.browserContext = context
+                    let didApplyPayloadSource = applyPayloadSource(from: context, to: &enrichedDraft)
+                    if enrichedDraft.requiresNativePayloadSource && !didApplyPayloadSource {
+                        acknowledgeNativeHandoff(
+                            draft,
+                            decision: .rejected(
+                                reason: "payloadUnavailable",
+                                requiresUserConfirmation: draft.requiresUserConfirmation || draft.isBrowserTakeover,
+                                message: "SwiftGetX could not fetch the native handoff payload"
+                            )
+                        )
+                        return
+                    }
                     handleDownloadDraftWithContext(enrichedDraft)
                 } catch {
+                    if draft.requiresNativePayloadSource {
+                        acknowledgeNativeHandoff(
+                            draft,
+                            decision: .rejected(
+                                reason: "payloadUnavailable",
+                                requiresUserConfirmation: draft.requiresUserConfirmation || draft.isBrowserTakeover,
+                                message: "SwiftGetX could not fetch the native handoff payload"
+                            )
+                        )
+                        return
+                    }
                     handleDownloadDraftWithContext(draft.publicLinkFallback)
                 }
             }
@@ -147,6 +170,24 @@ struct SwiftGetXApp: App {
         Task.detached {
             try? await NativeHandoffAckClient.acknowledge(decision, handoff: handoffAck)
         }
+    }
+
+    private func applyPayloadSource(from context: BrowserDownloadContext, to draft: inout DownloadDraft) -> Bool {
+        let source: String?
+        if draft.requiresNativePayloadSource {
+            source = context.handoffSourceText
+        } else {
+            source = context.handoffSourceText ?? context.originalURL ?? context.finalURL
+        }
+        guard let source else { return false }
+
+        let sources = SourceParser.extractSources(from: source)
+        guard !sources.isEmpty else { return false }
+
+        draft.source = source
+        draft.sourceCount = sources.count
+        draft.requiresNativePayloadSource = false
+        return true
     }
 
     @MainActor
@@ -288,7 +329,9 @@ enum DeepLinkParser {
             handoffAck: shouldKeepNativeHandoff ? handoffAck : nil,
             browserContext: browserContext,
             linkTrust: validation.linkTrust,
-            sourceCount: validation.sourceCount
+            sourceCount: validation.sourceCount,
+            requiresNativePayloadSource: isTrustedNativeHandoff
+                && queryValue("payloadSource", in: components) == "1"
         )
     }
 

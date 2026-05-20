@@ -126,6 +126,31 @@ struct NativeMessageHostTests {
         #expect(draft.handoffAck?.isExpired(now: expiresAt) == true)
     }
 
+    @Test("download deep links can require native payload source")
+    func downloadDeepLinksCanRequireNativePayloadSource() throws {
+        let handoffAck = NativeHandoffAck(
+            requestID: "request-1",
+            token: "secret-token",
+            port: 49152,
+            expiresAt: Date(timeIntervalSince1970: 1_850_000_100)
+        )
+        let previewSource = "https://example.com/preview.zip"
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: previewSource,
+            browser: "Chrome",
+            handoffSource: "popup-scan",
+            handoffAck: handoffAck,
+            requiresPayloadSource: true
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.source == previewSource)
+        #expect(draft.isTrustedNativeHandoff)
+        #expect(draft.requiresNativePayloadSource)
+        #expect(draft.requiresUserConfirmation == false)
+    }
+
     @Test("public download deep links require confirmation and carry no browser context")
     func publicDownloadDeepLinksRequireConfirmation() throws {
         let url = try #require(DeepLinkBuilder.downloadURL(
@@ -404,7 +429,8 @@ struct NativeMessageHostTests {
             suggestedFilename: "file.zip",
             sourcePageTitle: "Downloads",
             sourcePageURL: "https://example.com/downloads",
-            handoffSource: "download-takeover"
+            handoffSource: "download-takeover",
+            handoffSourceText: "https://example.com/file.zip\nhttps://example.com/other.zip"
         )
         let payload = try JSONEncoder().encode(context)
         let server = try NativeHandoffAckServer.start(payload: payload)
@@ -413,6 +439,27 @@ struct NativeMessageHostTests {
         let fetched = try await NativeHandoffPayloadClient.fetchContext(handoff: server.handoff)
 
         #expect(fetched == context)
+    }
+
+    @Test("browser context preserves multiline handoff source text")
+    func browserContextPreservesMultilineHandoffSourceText() throws {
+        let sourceText = "https://example.com/one.zip\nhttps://example.com/two.zip"
+        let message = BrowserDownloadMessage(
+            action: "download",
+            url: sourceText,
+            browser: "Chrome",
+            suggestedFilename: "Downloads",
+            sourcePageTitle: "Downloads",
+            sourcePageUrl: "https://example.com/downloads",
+            source: "popup-scan"
+        )
+
+        let context = try #require(BrowserDownloadContext.context(from: message))
+
+        #expect(context.handoffSourceText == sourceText)
+        #expect(context.originalURL == nil)
+        #expect(context.sourcePageURL == "https://example.com/downloads")
+        #expect(context.handoffSource == "popup-scan")
     }
 
     @Test("ack server times out when app never responds")

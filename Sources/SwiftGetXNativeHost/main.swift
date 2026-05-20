@@ -4,6 +4,8 @@ import SwiftGetXCore
 
 let nativeHostVersion = "0.2.0"
 let nativeHandoffAckTimeout: TimeInterval = 60
+let nativeDeepLinkSourceLengthLimit = 6 * 1_024
+let nativeMaximumPublicTaskCount = 20
 
 do {
     guard let message = try NativeMessageHost.readMessage() else {
@@ -30,21 +32,24 @@ do {
             suggestedFilename: message.suggestedFilename,
             sourcePageTitle: message.sourcePageTitle,
             sourcePageURL: message.sourcePageUrl,
-            handoffSource: handoffSource
+            handoffSource: handoffSource,
+            handoffSourceText: source
         )
         let payload = try JSONEncoder().encode(context)
         let ackServer = try NativeHandoffAckServer.start(
             payload: payload,
             expiresAt: Date().addingTimeInterval(nativeHandoffAckTimeout)
         )
+        let deepLinkSource = deepLinkSource(for: source)
         guard let url = DeepLinkBuilder.downloadURL(
-            for: source,
+            for: deepLinkSource.source,
             browser: message.browser,
             suggestedFilename: message.suggestedFilename,
             handoffSource: handoffSource,
             sourcePageTitle: message.sourcePageTitle,
             sourcePageUrl: message.sourcePageUrl,
-            handoffAck: ackServer.handoff
+            handoffAck: ackServer.handoff,
+            requiresPayloadSource: deepLinkSource.requiresPayload
         ) else {
             ackServer.cancel()
             throw NativeHostError.invalidDownloadSource
@@ -79,6 +84,42 @@ do {
     if let data = try? NativeMessageHost.encodeResponse(response) {
         FileHandle.standardOutput.write(data)
     }
+}
+
+private func deepLinkSource(for source: String) -> (source: String, requiresPayload: Bool) {
+    let candidates = sourceCandidates(in: source)
+    let requiresPayload = source.utf8.count > nativeDeepLinkSourceLengthLimit
+        || source.contains(where: \.isNewline)
+        || candidates.count > nativeMaximumPublicTaskCount
+
+    guard requiresPayload else {
+        return (source, false)
+    }
+
+    let placeholder = "https://swiftgetx.local/native-payload"
+    let safePreview = candidates.first { $0.utf8.count <= nativeDeepLinkSourceLengthLimit }
+    return (safePreview ?? placeholder, true)
+}
+
+private func sourceCandidates(in source: String) -> [String] {
+    guard let regex = try? NSRegularExpression(
+        pattern: #"(?i)(magnet:\?[^\s<>\]]+|https?://[^\s<>\]]+|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)"#
+    ) else {
+        return []
+    }
+
+    let nsSource = source as NSString
+    let range = NSRange(location: 0, length: nsSource.length)
+    var candidates = [String]()
+    var seen = Set<String>()
+    for match in regex.matches(in: source, range: range) {
+        let candidate = nsSource.substring(with: match.range(at: 1))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty, !seen.contains(candidate) else { continue }
+        seen.insert(candidate)
+        candidates.append(candidate)
+    }
+    return candidates
 }
 
 private func responseMessage(for decision: NativeHandoffAckDecision) -> String {

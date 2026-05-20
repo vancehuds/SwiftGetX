@@ -29,6 +29,9 @@
   "connectionWaitingPairing": {
     "message": "Waiting for pairing"
   },
+  "contextDownloadInBrowser": {
+    "message": "Download link in browser"
+  },
   "contextScanPage": {
     "message": "Scan page download links to SwiftGetX"
   },
@@ -68,6 +71,9 @@
   "errorTaskRejected": {
     "message": "SwiftGetX did not accept the task"
   },
+  "lastError": {
+    "message": "Last error"
+  },
   "linkCount": {
     "message": "$COUNT$ links",
     "placeholders": {
@@ -94,8 +100,61 @@
   "scanDownloadLinks": {
     "message": "Scan download links"
   },
+  "candidateReason_content_disposition": {
+    "message": "attachment"
+  },
+  "candidateReason_content_type": {
+    "message": "media type"
+  },
+  "candidateReason_download_attribute": {
+    "message": "download"
+  },
+  "candidateReason_download_hint": {
+    "message": "hint"
+  },
+  "candidateReason_extension": {
+    "message": "extension"
+  },
+  "candidateReason_link": {
+    "message": "link"
+  },
+  "candidateReason_magnet": {
+    "message": "magnet"
+  },
+  "candidateReason_media_manifest": {
+    "message": "manifest"
+  },
+  "candidateReason_media_source": {
+    "message": "media"
+  },
+  "metadataLimited": {
+    "message": "metadata limited"
+  },
+  "metadataPending": {
+    "message": "metadata pending"
+  },
+  "selectAll": {
+    "message": "Select all"
+  },
+  "selectedCount": {
+    "message": "$SELECTED$/$TOTAL$ selected",
+    "placeholders": {
+      "selected": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "selectNone": {
+    "message": "Select none"
+  },
   "sendAll": {
     "message": "Send all"
+  },
+  "sendSelected": {
+    "message": "Send selected"
   },
   "sendFailed": {
     "message": "Send failed"
@@ -134,6 +193,9 @@
   },
   "statusNoSelection": {
     "message": "No selection"
+  },
+  "statusNoSelectedLinks": {
+    "message": "No selected links"
   },
   "statusNotFound": {
     "message": "Not found"
