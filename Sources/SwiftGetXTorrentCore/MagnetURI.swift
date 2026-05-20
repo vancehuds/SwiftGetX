@@ -47,6 +47,17 @@ public struct MagnetURI: Equatable, Sendable {
         )
     }
 
+    public static func parseTrackers(from rawValue: String) -> [String] {
+        guard let components = URLComponents(string: rawValue),
+              components.scheme?.localizedCaseInsensitiveCompare("magnet") == .orderedSame
+        else {
+            return []
+        }
+        return (components.queryItems ?? [])
+            .filter { $0.name == "tr" }
+            .compactMap { $0.value?.trimmedNonEmpty }
+    }
+
     private static func exactLength(from rawValue: String?) throws -> Int64? {
         guard let rawValue else { return nil }
         guard let exactLength = Int64(rawValue) else {

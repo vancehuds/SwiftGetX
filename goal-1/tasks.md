@@ -509,17 +509,42 @@ Next step:
 
 ## Large Check 4: Torrent Metadata Foundation
 
-Status: [ ]
+Status: [x]
 
 Review Tasks 10-12 for data-model migrations, path safety, parser limits, tests, and docs. Confirm no release dependency on libtorrent was added.
 
 Work performed:
 
+- Audited Tasks 10-12 against the failure-recovery and torrent-metadata sections of `Docs/FunctionalImprovementOpportunities.md`, including cancelled-state/file-retention behavior, pure Swift torrent metadata parsing, content layout, resume schema, path safety, parser limits, and optional libtorrent boundaries.
+- Confirmed `SwiftGetXTorrentCore` remains a pure Swift support target with only `Foundation`/`CryptoKit` imports and no SwiftUI, SwiftData, AppKit, Network, or `CSwiftGetXLibtorrent` coupling.
+- Confirmed default release builds still do not require libtorrent; `Package.swift` keeps `CSwiftGetXLibtorrent` behind `SWIFTGETX_ENABLE_LIBTORRENT=1`, and the Swift torrent core has no libtorrent references.
+- Hardened bencode parsing with explicit input-size, nesting-depth, collection-count, and byte-string-length limits.
+- Applied the same resource limits to canonical `info` dictionary byte extraction so info-hash calculation cannot bypass parser limits.
+- Added torrent metainfo total-length overflow protection and piece-count validation against total length and piece length, rejecting impossible piece coverage.
+- Tightened multi-file path parsing so non-string path components fail metadata validation instead of being silently dropped.
+- Added full output-file path byte-length validation after combining save directory/content root and relative torrent paths.
+- Surfaced parsed `.torrent` and magnet tracker URLs in `TorrentMetadataPreview` and the new-task preview without adding any libtorrent release dependency.
+- Added regression tests for bencode resource limits, metainfo limit propagation, mismatched piece coverage, full output-path length rejection, and tracker-list preview data.
+
 Verification evidence:
+
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentMetadataService` passed with 23 tests across 2 suites.
+- `swift build` passed.
+- `swift test` passed with 165 tests across 14 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static import audit of `Sources/SwiftGetXTorrentCore` found only `Foundation` and `CryptoKit`.
+- Static libtorrent audit found no libtorrent references in `Sources/SwiftGetXTorrentCore`; remaining `CSwiftGetXLibtorrent` references are in the existing optional adapter/Package.swift gate.
 
 Remaining risk:
 
+- Task 13 still needs app-level BT save path semantics and local deletion-boundary work so single-file and multi-file torrent UI/model paths cannot remove the wrong content.
+- The pure Swift torrent core is still metadata/layout/resume-state only; runtime Swift torrent adapter, tracker, peer, storage, and piece verification work begins in Task 14+.
+- Optional libtorrent docs/release cleanup remains later release/distribution scope; this check only confirmed no new release dependency was added.
+
 Next step:
+
+- Task 13: BT Save Path Semantics and Deletion Boundaries.
 
 ## Task 13: BT Save Path Semantics and Deletion Boundaries
 

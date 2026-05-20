@@ -800,9 +800,33 @@ private struct TorrentPreviewRow: View {
                         .font(layout.font(10.5))
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            if !preview.trackers.isEmpty {
+                VStack(alignment: .leading, spacing: layout.value(3)) {
+                    Text(L10n.string("torrent_trackers"))
+                        .font(layout.font(10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(Array(preview.trackers.prefix(3).enumerated()), id: \.offset) { _, tracker in
+                        Text(tracker)
+                            .font(layout.font(10.5))
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    if preview.trackers.count > 3 {
+                        Text(L10n.string("torrent_preview_more_trackers", preview.trackers.count - 3))
+                            .font(layout.font(10.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } else if preview.kind == .http {
                 HTTPPreviewDetails(preview: preview)
-            } else if let errorMessage = preview.errorMessage {
+            }
+
+            if preview.kind != .http, let errorMessage = preview.errorMessage {
                 Text(errorMessage)
                     .font(layout.font(10.5))
                     .foregroundStyle(.secondary)

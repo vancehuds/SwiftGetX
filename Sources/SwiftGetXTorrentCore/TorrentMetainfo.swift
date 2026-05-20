@@ -47,7 +47,13 @@ public struct TorrentMetainfo: Equatable, Sendable {
     public var infoHashV1: Data
 
     public var totalLength: Int64 {
-        files.reduce(0) { $0 + $1.length }
+        var totalLength: Int64 = 0
+        for file in files {
+            let result = totalLength.addingReportingOverflow(file.length)
+            guard !result.overflow else { return Int64.max }
+            totalLength = result.partialValue
+        }
+        return totalLength
     }
 
     public var isSingleFile: Bool {
@@ -58,10 +64,24 @@ public struct TorrentMetainfo: Equatable, Sendable {
         infoHashV1.map { String(format: "%02x", $0) }.joined()
     }
 
-    public static func parse(data: Data) throws -> TorrentMetainfo {
+    public var trackerURLs: [String] {
+        var seen = Set<String>()
+        var trackers = [String]()
+
+        func append(_ tracker: String) {
+            guard !tracker.isEmpty, seen.insert(tracker).inserted else { return }
+            trackers.append(tracker)
+        }
+
+        announce.map(append)
+        announceList.flatMap { $0 }.forEach(append)
+        return trackers
+    }
+
+    public static func parse(data: Data, limits: BencodeLimits = .default) throws -> TorrentMetainfo {
         let rootValue: BencodeValue
         do {
-            rootValue = try BencodeParser(data: data).parse()
+            rootValue = try BencodeParser(data: data, limits: limits).parse()
         } catch let error as BencodeError {
             throw TorrentCoreError.invalidBencode(error)
         }
@@ -73,7 +93,7 @@ public struct TorrentMetainfo: Equatable, Sendable {
             throw TorrentCoreError.invalidMetainfo("Missing torrent info dictionary.")
         }
 
-        let infoDictionaryBytes = try canonicalInfoBytes(from: data)
+        let infoDictionaryBytes = try canonicalInfoBytes(from: data, limits: limits)
         let hash = Insecure.SHA1.hash(data: infoDictionaryBytes)
         let name = string(in: info, preferredKey: "name.utf-8", fallbackKey: "name") ?? "torrent"
         let pieceLength = integer(in: info, key: "piece length")
@@ -83,6 +103,12 @@ public struct TorrentMetainfo: Equatable, Sendable {
         let pieces = try pieces(from: info[stringKey("pieces")])
 
         let parsedFiles = try files(from: info, rootName: name)
+        let totalLength = try totalLength(from: parsedFiles.files)
+        try validatePieceCoverage(
+            totalLength: totalLength,
+            pieceLength: pieceLength,
+            pieceCount: pieces.count
+        )
 
         return TorrentMetainfo(
             name: name,
@@ -98,8 +124,16 @@ public struct TorrentMetainfo: Equatable, Sendable {
         )
     }
 
-    public static func parse(url: URL) throws -> TorrentMetainfo {
-        try parse(data: Data(contentsOf: url))
+    public static func parse(url: URL, limits: BencodeLimits = .default) throws -> TorrentMetainfo {
+        if url.isFileURL,
+           let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           fileSize > limits.maximumInputBytes
+        {
+            throw TorrentCoreError.invalidBencode(
+                .inputLimitExceeded(offset: limits.maximumInputBytes)
+            )
+        }
+        return try parse(data: Data(contentsOf: url), limits: limits)
     }
 
     private static func files(from info: [Data: BencodeValue], rootName: String) throws -> (
@@ -152,6 +186,32 @@ public struct TorrentMetainfo: Equatable, Sendable {
         }
     }
 
+    private static func totalLength(from files: [TorrentFileInfo]) throws -> Int64 {
+        var totalLength: Int64 = 0
+        for file in files {
+            let result = totalLength.addingReportingOverflow(file.length)
+            guard !result.overflow else {
+                throw TorrentCoreError.invalidMetainfo("Torrent total length exceeds supported bounds.")
+            }
+            totalLength = result.partialValue
+        }
+        return totalLength
+    }
+
+    private static func validatePieceCoverage(
+        totalLength: Int64,
+        pieceLength: Int64,
+        pieceCount: Int
+    ) throws {
+        guard totalLength > 0 else {
+            throw TorrentCoreError.invalidMetainfo("Torrent total length must be positive.")
+        }
+        let expectedPieceCount = Int((totalLength - 1) / pieceLength) + 1
+        guard pieceCount == expectedPieceCount else {
+            throw TorrentCoreError.invalidMetainfo("Piece hash count does not match torrent length.")
+        }
+    }
+
     private static func announceList(from value: BencodeValue?) -> [[String]] {
         guard case .list(let tiers)? = value else { return [] }
         return tiers.compactMap { tierValue in
@@ -161,8 +221,8 @@ public struct TorrentMetainfo: Equatable, Sendable {
         }
     }
 
-    private static func canonicalInfoBytes(from data: Data) throws -> Data {
-        var extractor = InfoDictionaryByteExtractor(data: data)
+    private static func canonicalInfoBytes(from data: Data, limits: BencodeLimits) throws -> Data {
+        var extractor = InfoDictionaryByteExtractor(data: data, limits: limits)
         do {
             return try extractor.extract()
         } catch let error as BencodeError {
@@ -181,7 +241,12 @@ public struct TorrentMetainfo: Equatable, Sendable {
     ) -> [String]? {
         let value = dictionary[stringKey(preferredKey)] ?? dictionary[stringKey(fallbackKey)]
         guard case .list(let components)? = value else { return nil }
-        let strings = components.compactMap(\.stringValue)
+        var strings = [String]()
+        strings.reserveCapacity(components.count)
+        for component in components {
+            guard let string = component.stringValue else { return nil }
+            strings.append(string)
+        }
         return strings.isEmpty ? nil : strings
     }
 
@@ -192,10 +257,12 @@ public struct TorrentMetainfo: Equatable, Sendable {
 
 private struct InfoDictionaryByteExtractor {
     private let bytes: [UInt8]
+    private let limits: BencodeLimits
     private var offset = 0
 
-    init(data: Data) {
+    init(data: Data, limits: BencodeLimits) {
         bytes = Array(data)
+        self.limits = limits
     }
 
     mutating func extract() throws -> Data {
@@ -205,8 +272,13 @@ private struct InfoDictionaryByteExtractor {
         offset += 1
         var previousKey: Data?
         var foundInfoBytes: Data?
+        var entryCount = 0
 
         while offset < bytes.count, bytes[offset] != UInt8(ascii: "e") {
+            guard entryCount < limits.maximumCollectionElements else {
+                throw BencodeError.collectionLimitExceeded(offset: offset)
+            }
+            entryCount += 1
             let keyOffset = offset
             let key = try parseData()
             if let previousKey, !previousKey.lexicographicallyPrecedes(key) {
@@ -215,7 +287,7 @@ private struct InfoDictionaryByteExtractor {
             previousKey = key
 
             let valueStart = offset
-            try skipValue()
+            try skipValue(depth: 1)
             if key == stringKey("info") {
                 foundInfoBytes = Data(bytes[valueStart..<offset])
             }
@@ -253,9 +325,12 @@ private struct InfoDictionaryByteExtractor {
         else {
             throw BencodeError.invalidByteStringLength(offset: start)
         }
+        guard length <= limits.maximumByteStringLength else {
+            throw BencodeError.byteStringLimitExceeded(offset: start)
+        }
 
         offset += 1
-        guard length >= 0, offset + length <= bytes.count else {
+        guard length >= 0, length <= bytes.count - offset else {
             throw BencodeError.unexpectedEnd(offset: offset)
         }
         let data = Data(bytes[offset..<offset + length])
@@ -263,31 +338,44 @@ private struct InfoDictionaryByteExtractor {
         return data
     }
 
-    private mutating func skipValue() throws {
+    private mutating func skipValue(depth: Int) throws {
         guard offset < bytes.count else {
             throw BencodeError.unexpectedEnd(offset: offset)
+        }
+        guard depth <= limits.maximumDepth else {
+            throw BencodeError.nestingLimitExceeded(offset: offset)
         }
         switch bytes[offset] {
         case UInt8(ascii: "i"):
             try skipInteger()
         case UInt8(ascii: "l"):
             offset += 1
+            var entryCount = 0
             while offset < bytes.count, bytes[offset] != UInt8(ascii: "e") {
-                try skipValue()
+                guard entryCount < limits.maximumCollectionElements else {
+                    throw BencodeError.collectionLimitExceeded(offset: offset)
+                }
+                entryCount += 1
+                try skipValue(depth: depth + 1)
             }
             guard offset < bytes.count else { throw BencodeError.unexpectedEnd(offset: offset) }
             offset += 1
         case UInt8(ascii: "d"):
             offset += 1
             var previousKey: Data?
+            var entryCount = 0
             while offset < bytes.count, bytes[offset] != UInt8(ascii: "e") {
+                guard entryCount < limits.maximumCollectionElements else {
+                    throw BencodeError.collectionLimitExceeded(offset: offset)
+                }
+                entryCount += 1
                 let keyOffset = offset
                 let key = try parseData()
                 if let previousKey, !previousKey.lexicographicallyPrecedes(key) {
                     throw BencodeError.invalidDictionaryKey(offset: keyOffset)
                 }
                 previousKey = key
-                try skipValue()
+                try skipValue(depth: depth + 1)
             }
             guard offset < bytes.count else { throw BencodeError.unexpectedEnd(offset: offset) }
             offset += 1

@@ -27,6 +27,34 @@ struct SwiftGetXTorrentCoreTests {
         }
     }
 
+    @Test("enforces bencode parser resource limits")
+    func enforcesBencodeParserResourceLimits() {
+        #expect(throws: BencodeError.inputLimitExceeded(offset: 2)) {
+            try BencodeParser(
+                data: Data("i1e".utf8),
+                limits: BencodeLimits(maximumInputBytes: 2)
+            ).parse()
+        }
+        #expect(throws: BencodeError.nestingLimitExceeded(offset: 2)) {
+            try BencodeParser(
+                data: Data("lli1eee".utf8),
+                limits: BencodeLimits(maximumDepth: 1)
+            ).parse()
+        }
+        #expect(throws: BencodeError.collectionLimitExceeded(offset: 4)) {
+            try BencodeParser(
+                data: Data("li1ei2ee".utf8),
+                limits: BencodeLimits(maximumCollectionElements: 1)
+            ).parse()
+        }
+        #expect(throws: BencodeError.byteStringLimitExceeded(offset: 0)) {
+            try BencodeParser(
+                data: Data("4:spam".utf8),
+                limits: BencodeLimits(maximumByteStringLength: 3)
+            ).parse()
+        }
+    }
+
     @Test("parses single-file metainfo with canonical info hash")
     func parsesSingleFileMetainfoWithCanonicalInfoHash() throws {
         let info = bencodeDictionary([
@@ -108,6 +136,53 @@ struct SwiftGetXTorrentCoreTests {
                     ("pieces", bencodeData(Data("abc".utf8)))
                 ])
             ))
+        }
+    }
+
+    @Test("rejects torrent metainfo with mismatched piece count")
+    func rejectsTorrentMetainfoWithMismatchedPieceCount() {
+        #expect(throws: TorrentCoreError.invalidMetainfo("Piece hash count does not match torrent length.")) {
+            try TorrentMetainfo.parse(data: torrentData(
+                announce: nil,
+                info: bencodeDictionary([
+                    ("length", bencodeInteger(16_385)),
+                    ("name", bencodeString("two-pieces.bin")),
+                    ("piece length", bencodeInteger(16_384)),
+                    ("pieces", bencodeData(Data("aaaaaaaaaaaaaaaaaaaa".utf8)))
+                ])
+            ))
+        }
+    }
+
+    @Test("torrent metainfo parse enforces bencode limits")
+    func torrentMetainfoParseEnforcesBencodeLimits() {
+        #expect(throws: TorrentCoreError.invalidBencode(.inputLimitExceeded(offset: 8))) {
+            try TorrentMetainfo.parse(
+                data: torrentData(
+                    announce: nil,
+                    info: bencodeDictionary([
+                        ("length", bencodeInteger(42)),
+                        ("name", bencodeString("demo.bin")),
+                        ("piece length", bencodeInteger(16_384)),
+                        ("pieces", bencodeData(Data("aaaaaaaaaaaaaaaaaaaa".utf8)))
+                    ])
+                ),
+                limits: BencodeLimits(maximumInputBytes: 8)
+            )
+        }
+        #expect(throws: TorrentCoreError.invalidBencode(.byteStringLimitExceeded(offset: 1))) {
+            try TorrentMetainfo.parse(
+                data: torrentData(
+                    announce: nil,
+                    info: bencodeDictionary([
+                        ("length", bencodeInteger(42)),
+                        ("name", bencodeString("demo.bin")),
+                        ("piece length", bencodeInteger(16_384)),
+                        ("pieces", bencodeData(Data("aaaaaaaaaaaaaaaaaaaa".utf8)))
+                    ])
+                ),
+                limits: BencodeLimits(maximumByteStringLength: 3)
+            )
         }
     }
 
@@ -225,6 +300,16 @@ struct SwiftGetXTorrentCoreTests {
                     TorrentFileInfo(index: 1, path: "album/A.txt", length: 1)
                 ],
                 saveDirectory: saveDirectory
+            )
+        }
+        #expect(throws: TorrentContentLayoutError.pathTooLong(
+            fileIndex: 0,
+            path: "/tmp/SwiftGetXDownloads/very-long-parent/album/a.txt"
+        )) {
+            try TorrentContentLayout(
+                files: [TorrentFileInfo(index: 0, path: "album/a.txt", length: 1)],
+                saveDirectory: saveDirectory.appendingPathComponent("very-long-parent", isDirectory: true),
+                maximumPathBytes: 32
             )
         }
     }

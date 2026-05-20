@@ -161,6 +161,9 @@ public struct TorrentContentLayout: Codable, Equatable, Sendable {
             }
 
             let fileURL = Self.fileURL(contentRoot: contentRoot, components: components)
+            guard fileURL.standardizedFileURL.path.utf8.count <= maximumPathBytes else {
+                throw TorrentContentLayoutError.pathTooLong(fileIndex: file.index, path: fileURL.path)
+            }
             layoutFiles.append(
                 TorrentContentFile(
                     index: file.index,

@@ -7,6 +7,10 @@ public enum BencodeError: Error, Equatable, Sendable, LocalizedError {
     case invalidByteStringLength(offset: Int)
     case invalidDictionaryKey(offset: Int)
     case trailingData(offset: Int)
+    case inputLimitExceeded(offset: Int)
+    case nestingLimitExceeded(offset: Int)
+    case collectionLimitExceeded(offset: Int)
+    case byteStringLimitExceeded(offset: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -22,7 +26,36 @@ public enum BencodeError: Error, Equatable, Sendable, LocalizedError {
             "Invalid bencode dictionary key at byte \(offset)."
         case .trailingData(let offset):
             "Trailing data after bencode value at byte \(offset)."
+        case .inputLimitExceeded(let offset):
+            "Bencode input size limit exceeded at byte \(offset)."
+        case .nestingLimitExceeded(let offset):
+            "Bencode nesting limit exceeded at byte \(offset)."
+        case .collectionLimitExceeded(let offset):
+            "Bencode collection item limit exceeded at byte \(offset)."
+        case .byteStringLimitExceeded(let offset):
+            "Bencode byte string length limit exceeded at byte \(offset)."
         }
+    }
+}
+
+public struct BencodeLimits: Equatable, Sendable {
+    public static let `default` = BencodeLimits()
+
+    public var maximumInputBytes: Int
+    public var maximumDepth: Int
+    public var maximumCollectionElements: Int
+    public var maximumByteStringLength: Int
+
+    public init(
+        maximumInputBytes: Int = 64 * 1024 * 1024,
+        maximumDepth: Int = 128,
+        maximumCollectionElements: Int = 100_000,
+        maximumByteStringLength: Int = 64 * 1024 * 1024
+    ) {
+        self.maximumInputBytes = max(0, maximumInputBytes)
+        self.maximumDepth = max(0, maximumDepth)
+        self.maximumCollectionElements = max(0, maximumCollectionElements)
+        self.maximumByteStringLength = max(0, maximumByteStringLength)
     }
 }
 
@@ -88,15 +121,21 @@ public enum BencodeValue: Equatable, Sendable {
 }
 
 public struct BencodeParser: Sendable {
-    private let bytes: [UInt8]
+    private let data: Data
+    private let limits: BencodeLimits
 
-    public init(data: Data) {
-        self.bytes = Array(data)
+    public init(data: Data, limits: BencodeLimits = .default) {
+        self.data = data
+        self.limits = limits
     }
 
     public func parse() throws -> BencodeValue {
-        var parser = BencodeCursor(bytes: bytes)
-        let value = try parser.parseValue()
+        guard data.count <= limits.maximumInputBytes else {
+            throw BencodeError.inputLimitExceeded(offset: limits.maximumInputBytes)
+        }
+        let bytes = Array(data)
+        var parser = BencodeCursor(bytes: bytes, limits: limits)
+        let value = try parser.parseValue(depth: 0)
         guard parser.offset == bytes.count else {
             throw BencodeError.trailingData(offset: parser.offset)
         }
@@ -106,20 +145,24 @@ public struct BencodeParser: Sendable {
 
 struct BencodeCursor {
     let bytes: [UInt8]
+    let limits: BencodeLimits
     private(set) var offset = 0
 
-    mutating func parseValue() throws -> BencodeValue {
+    mutating func parseValue(depth: Int) throws -> BencodeValue {
         guard offset < bytes.count else {
             throw BencodeError.unexpectedEnd(offset: offset)
+        }
+        guard depth <= limits.maximumDepth else {
+            throw BencodeError.nestingLimitExceeded(offset: offset)
         }
 
         switch bytes[offset] {
         case UInt8(ascii: "i"):
             return try parseInteger()
         case UInt8(ascii: "l"):
-            return try parseList()
+            return try parseList(depth: depth)
         case UInt8(ascii: "d"):
-            return try parseDictionary()
+            return try parseDictionary(depth: depth)
         case UInt8(ascii: "0")...UInt8(ascii: "9"):
             return try parseData()
         default:
@@ -132,7 +175,7 @@ struct BencodeCursor {
             throw BencodeError.unexpectedEnd(offset: offset)
         }
         let start = offset
-        _ = try parseValue()
+        _ = try parseValue(depth: 0)
         return Data(bytes[start..<offset])
     }
 
@@ -178,9 +221,12 @@ struct BencodeCursor {
         else {
             throw BencodeError.invalidByteStringLength(offset: start)
         }
+        guard length <= limits.maximumByteStringLength else {
+            throw BencodeError.byteStringLimitExceeded(offset: start)
+        }
 
         offset += 1
-        guard length >= 0, offset + length <= bytes.count else {
+        guard length >= 0, length <= bytes.count - offset else {
             throw BencodeError.unexpectedEnd(offset: offset)
         }
         let data = Data(bytes[offset..<offset + length])
@@ -188,11 +234,14 @@ struct BencodeCursor {
         return .data(data)
     }
 
-    private mutating func parseList() throws -> BencodeValue {
+    private mutating func parseList(depth: Int) throws -> BencodeValue {
         offset += 1
         var values = [BencodeValue]()
         while offset < bytes.count, bytes[offset] != UInt8(ascii: "e") {
-            values.append(try parseValue())
+            guard values.count < limits.maximumCollectionElements else {
+                throw BencodeError.collectionLimitExceeded(offset: offset)
+            }
+            values.append(try parseValue(depth: depth + 1))
         }
         guard offset < bytes.count else {
             throw BencodeError.unexpectedEnd(offset: offset)
@@ -201,12 +250,15 @@ struct BencodeCursor {
         return .list(values)
     }
 
-    private mutating func parseDictionary() throws -> BencodeValue {
+    private mutating func parseDictionary(depth: Int) throws -> BencodeValue {
         offset += 1
         var values = [Data: BencodeValue]()
         var previousKey: Data?
 
         while offset < bytes.count, bytes[offset] != UInt8(ascii: "e") {
+            guard values.count < limits.maximumCollectionElements else {
+                throw BencodeError.collectionLimitExceeded(offset: offset)
+            }
             let keyOffset = offset
             guard case .data(let key) = try parseData() else {
                 throw BencodeError.invalidDictionaryKey(offset: keyOffset)
@@ -215,7 +267,7 @@ struct BencodeCursor {
                 throw BencodeError.invalidDictionaryKey(offset: keyOffset)
             }
             previousKey = key
-            values[key] = try parseValue()
+            values[key] = try parseValue(depth: depth + 1)
         }
         guard offset < bytes.count else {
             throw BencodeError.unexpectedEnd(offset: offset)

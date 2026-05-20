@@ -14,6 +14,7 @@ struct TorrentMetadataPreview: Equatable, Sendable {
     var totalBytes: Int64
     var metadataStatus: TorrentMetadataStatus
     var errorMessage: String?
+    var trackers: [String]
     var httpResponseMetadata: HTTPResponseMetadata?
     var supportsResume: Bool
     var savePath: String?
@@ -33,6 +34,7 @@ struct TorrentMetadataPreview: Equatable, Sendable {
         totalBytes: Int64,
         metadataStatus: TorrentMetadataStatus,
         errorMessage: String?,
+        trackers: [String] = [],
         httpResponseMetadata: HTTPResponseMetadata? = nil,
         supportsResume: Bool = false,
         savePath: String? = nil,
@@ -47,6 +49,7 @@ struct TorrentMetadataPreview: Equatable, Sendable {
         self.totalBytes = totalBytes
         self.metadataStatus = metadataStatus
         self.errorMessage = errorMessage
+        self.trackers = trackers
         self.httpResponseMetadata = httpResponseMetadata
         self.supportsResume = supportsResume
         self.savePath = savePath
@@ -134,7 +137,8 @@ actor TorrentMetadataService {
                 },
                 totalBytes: metadata.totalLength,
                 metadataStatus: .available,
-                errorMessage: nil
+                errorMessage: nil,
+                trackers: metadata.trackerURLs
             )
         } catch {
             return TorrentMetadataPreview(
@@ -179,7 +183,8 @@ actor TorrentMetadataService {
                 files: [],
                 totalBytes: 0,
                 metadataStatus: metadataStatus,
-                errorMessage: error.localizedDescription
+                errorMessage: error.localizedDescription,
+                trackers: MagnetURI.parseTrackers(from: source)
             )
         }
     }
@@ -198,7 +203,8 @@ actor TorrentMetadataService {
             files: preview.files,
             totalBytes: preview.files.reduce(0) { $0 + $1.size },
             metadataStatus: .available,
-            errorMessage: nil
+            errorMessage: nil,
+            trackers: MagnetURI.parseTrackers(from: source)
         )
         #else
         throw TorrentMetadataError.nativeEngineUnavailable
