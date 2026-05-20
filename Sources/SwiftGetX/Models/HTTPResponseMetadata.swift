@@ -117,7 +117,12 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
 
     private static func sanitizedFilename(_ value: String?) -> String? {
         guard let value = nonEmpty(value) else { return nil }
-        let withoutUnsafeScalars = String(value.unicodeScalars.map { scalar in
+        let basename = value
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init) ?? value
+        let withoutUnsafeScalars = String(basename.unicodeScalars.map { scalar in
             if isBidirectionalOverride(scalar) {
                 return "-"
             }

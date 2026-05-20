@@ -2,6 +2,7 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+import SwiftGetXCore
 
 struct TorrentMetadataPreview: Equatable, Sendable {
     var source: String
@@ -12,9 +13,44 @@ struct TorrentMetadataPreview: Equatable, Sendable {
     var totalBytes: Int64
     var metadataStatus: TorrentMetadataStatus
     var errorMessage: String?
+    var httpResponseMetadata: HTTPResponseMetadata?
+    var supportsResume: Bool
+    var savePath: String?
+    var duplicateStrategy: DownloadPreviewDuplicateStrategy
+    var browserContext: BrowserDownloadContext?
 
     var selectedFileIndexes: [Int] {
         files.map(\.index)
+    }
+
+    init(
+        source: String,
+        kind: DownloadKind,
+        displayName: String,
+        resolvedTorrentFilePath: String?,
+        files: [TorrentFile],
+        totalBytes: Int64,
+        metadataStatus: TorrentMetadataStatus,
+        errorMessage: String?,
+        httpResponseMetadata: HTTPResponseMetadata? = nil,
+        supportsResume: Bool = false,
+        savePath: String? = nil,
+        duplicateStrategy: DownloadPreviewDuplicateStrategy = .none,
+        browserContext: BrowserDownloadContext? = nil
+    ) {
+        self.source = source
+        self.kind = kind
+        self.displayName = displayName
+        self.resolvedTorrentFilePath = resolvedTorrentFilePath
+        self.files = files
+        self.totalBytes = totalBytes
+        self.metadataStatus = metadataStatus
+        self.errorMessage = errorMessage
+        self.httpResponseMetadata = httpResponseMetadata
+        self.supportsResume = supportsResume
+        self.savePath = savePath
+        self.duplicateStrategy = duplicateStrategy
+        self.browserContext = browserContext
     }
 }
 

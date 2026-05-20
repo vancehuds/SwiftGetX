@@ -162,16 +162,24 @@ final class DownloadCoordinator {
     ) -> [DownloadTask] {
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
         let tasks = previews.map { preview in
+            let savePath = preview.savePath
+                ?? saveDirectory.appendingPathComponent(preview.displayName).path
             let task = DownloadTask(
                 name: preview.displayName,
                 source: preview.source,
                 kind: preview.kind,
-                savePath: saveDirectory.appendingPathComponent(preview.displayName).path,
+                savePath: savePath,
                 totalBytes: preview.totalBytes,
-                supportsResume: preview.kind == .torrentMagnet || preview.kind == .torrentFile,
+                supportsResume: preview.kind == .http
+                    ? preview.supportsResume
+                    : preview.kind == .torrentMagnet || preview.kind == .torrentFile,
                 resolvedTorrentFilePath: preview.resolvedTorrentFilePath,
                 torrentMetadataStatus: preview.metadataStatus,
-                selectedFileIndexes: selectedFileIndexes[preview.source] ?? preview.selectedFileIndexes
+                selectedFileIndexes: selectedFileIndexes[preview.source] ?? preview.selectedFileIndexes,
+                browserContext: preview.browserContext?.persistable,
+                httpResponseMetadata: preview.kind == .http
+                    ? preview.httpResponseMetadata
+                    : nil
             )
             var files = preview.files
             if let priorities = filePriorities[preview.source] {
@@ -191,6 +199,11 @@ final class DownloadCoordinator {
         guard let modelContext else { return tasks }
         for task in tasks {
             modelContext.insert(task)
+            if let preview = previews.first(where: { $0.source == task.source }),
+               let browserContext = preview.browserContext
+            {
+                runtimeBrowserContexts[task.id] = browserContext
+            }
         }
         selectedTaskID = tasks.first?.id ?? selectedTaskID
         save()

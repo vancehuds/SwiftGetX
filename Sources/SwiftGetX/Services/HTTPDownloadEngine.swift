@@ -184,6 +184,162 @@ private final class HTTPRedirectRecorder: NSObject, URLSessionTaskDelegate, @unc
     }
 }
 
+struct HTTPMetadataProbe: Sendable {
+    var segmentCount: Int
+    var probesRangeForIncompleteMetadata = false
+    var timeoutInterval: TimeInterval = 20
+
+    func probe(url: URL, request: DownloadRequest) async -> HTTPMetadata {
+        let headRequest = HTTPRequestFactory.makeRequest(
+            url: url,
+            method: "HEAD",
+            timeoutInterval: timeoutInterval,
+            request: request
+        )
+        var metadata = HTTPMetadata.unknown
+
+        do {
+            let redirectRecorder = HTTPRedirectRecorder()
+            let session = HTTPRequestFactory.redirectRecordingSession(redirectRecorder)
+            defer { session.finishTasksAndInvalidate() }
+            let (_, response) = try await session.data(for: headRequest)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode)
+            else {
+                return await probeRange(url: url, request: request).filled(from: request)
+            }
+
+            let length = Int64(httpResponse.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
+            let acceptRanges = httpResponse
+                .value(forHTTPHeaderField: "Accept-Ranges")?
+                .localizedCaseInsensitiveContains("bytes") ?? false
+
+            metadata = HTTPMetadata(
+                contentLength: max(0, length),
+                supportsResume: acceptRanges,
+                eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
+                lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+            ).merging(
+                response: httpResponse,
+                resumedFrom: 0,
+                redirects: redirectRecorder.redirects
+            )
+        } catch {
+            metadata = .unknown
+        }
+
+        metadata = metadata.filled(from: request)
+        let needsRangeProbe = (!metadata.supportsResume && (segmentCount > 1 || request.supportsResume))
+            || (metadata.contentLength <= 0 && (segmentCount > 1 || request.supportsResume))
+            || (probesRangeForIncompleteMetadata && (!metadata.supportsResume || metadata.contentLength <= 0))
+        guard needsRangeProbe else {
+            return metadata
+        }
+
+        return await probeRange(url: url, request: request).merged(over: metadata)
+    }
+
+    private func probeRange(url: URL, request: DownloadRequest) async -> HTTPMetadata {
+        var urlRequest = HTTPRequestFactory.makeRequest(
+            url: url,
+            method: "GET",
+            timeoutInterval: timeoutInterval,
+            request: request
+        )
+        urlRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+
+        do {
+            let redirectRecorder = HTTPRedirectRecorder()
+            let session = HTTPRequestFactory.redirectRecordingSession(redirectRecorder)
+            defer { session.finishTasksAndInvalidate() }
+            let (_, response) = try await session.bytes(for: urlRequest)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .unknown
+            }
+
+            switch httpResponse.statusCode {
+            case 206:
+                guard let rawRange = httpResponse.value(forHTTPHeaderField: "Content-Range"),
+                      let contentRange = HTTPContentRange(rawRange),
+                      contentRange.start == 0,
+                      contentRange.end == 0
+                else {
+                    return .unknown
+                }
+
+                return HTTPMetadata(
+                    contentLength: contentRange.total ?? 0,
+                    supportsResume: true,
+                    eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
+                    lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+                ).merging(
+                    response: httpResponse,
+                    resumedFrom: 0,
+                    redirects: redirectRecorder.redirects
+                )
+            case 200...299:
+                let responseLength = httpResponse.expectedContentLength > 0
+                    ? httpResponse.expectedContentLength
+                    : 0
+                return HTTPMetadata(
+                    contentLength: responseLength,
+                    supportsResume: false,
+                    eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
+                    lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
+                ).merging(
+                    response: httpResponse,
+                    resumedFrom: 0,
+                    redirects: redirectRecorder.redirects
+                )
+            default:
+                return .unknown
+            }
+        } catch {
+            return .unknown
+        }
+    }
+}
+
+private enum HTTPRequestFactory {
+    static func redirectRecordingSession(_ recorder: HTTPRedirectRecorder) -> URLSession {
+        URLSession(configuration: sessionConfiguration(), delegate: recorder, delegateQueue: nil)
+    }
+
+    static func makeRequest(
+        url: URL,
+        method: String,
+        timeoutInterval: TimeInterval,
+        request downloadRequest: DownloadRequest
+    ) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = timeoutInterval
+        request.setValue("SwiftGetX", forHTTPHeaderField: "User-Agent")
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        if url.host?.localizedCaseInsensitiveCompare("api.github.com") == .orderedSame {
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            request.setValue("2026-03-10", forHTTPHeaderField: "X-GitHub-Api-Version")
+        }
+        applyBrowserContext(downloadRequest.browserContext, to: &request)
+        return request
+    }
+
+    static func sessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
+        return configuration
+    }
+
+    private static func applyBrowserContext(_ context: BrowserDownloadContext?, to request: inout URLRequest) {
+        guard let context else { return }
+        for (name, value) in context.httpHeaders() {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+    }
+}
+
 private struct HTTPDownloadWorker: Sendable {
     private static let bufferSize = 64 * 1024
     private static let minimumSplitSize: Int64 = 1024 * 1024
@@ -198,15 +354,7 @@ private struct HTTPDownloadWorker: Sendable {
     let onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
 
     private static func sessionConfiguration() -> URLSessionConfiguration {
-        let configuration = URLSessionConfiguration.default
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
-        return configuration
-    }
-
-    private static func redirectRecordingSession(_ recorder: HTTPRedirectRecorder) -> URLSession {
-        URLSession(configuration: sessionConfiguration(), delegate: recorder, delegateQueue: nil)
+        HTTPRequestFactory.sessionConfiguration()
     }
 
     func start(_ request: DownloadRequest, url: URL) async {
@@ -259,7 +407,8 @@ private struct HTTPDownloadWorker: Sendable {
             withIntermediateDirectories: true
         )
 
-        var metadata = await probe(url: url, request: request)
+        var metadata = await HTTPMetadataProbe(segmentCount: segmentCount)
+            .probe(url: url, request: request)
         let prepared = prepareInitialDestination(
             request: request,
             metadata: metadata,
@@ -485,7 +634,7 @@ private struct HTTPDownloadWorker: Sendable {
             )
         )
 
-        var urlRequest = makeRequest(
+        var urlRequest = HTTPRequestFactory.makeRequest(
             url: url,
             method: "GET",
             timeoutInterval: 30,
@@ -497,7 +646,7 @@ private struct HTTPDownloadWorker: Sendable {
         }
 
         let redirectRecorder = HTTPRedirectRecorder()
-        let session = Self.redirectRecordingSession(redirectRecorder)
+        let session = HTTPRequestFactory.redirectRecordingSession(redirectRecorder)
         defer { session.finishTasksAndInvalidate() }
         let (stream, response) = try await session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -913,7 +1062,7 @@ private struct HTTPDownloadWorker: Sendable {
         guard localBytes < segment.length else { return }
 
         let start = segment.start + localBytes
-        var urlRequest = makeRequest(
+        var urlRequest = HTTPRequestFactory.makeRequest(
             url: url,
             method: "GET",
             timeoutInterval: 30,
@@ -1010,141 +1159,6 @@ private struct HTTPDownloadWorker: Sendable {
                 guard !data.isEmpty else { break }
                 try output.write(contentsOf: data)
             }
-        }
-    }
-
-    private func probe(url: URL, request: DownloadRequest) async -> HTTPMetadata {
-        let headRequest = makeRequest(
-            url: url,
-            method: "HEAD",
-            timeoutInterval: 20,
-            request: request
-        )
-        var metadata = HTTPMetadata.unknown
-
-        do {
-            let redirectRecorder = HTTPRedirectRecorder()
-            let session = Self.redirectRecordingSession(redirectRecorder)
-            defer { session.finishTasksAndInvalidate() }
-            let (_, response) = try await session.data(for: headRequest)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode)
-            else {
-                return await probeRange(url: url, request: request).filled(from: request)
-            }
-
-            let length = Int64(httpResponse.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
-            let acceptRanges = httpResponse
-                .value(forHTTPHeaderField: "Accept-Ranges")?
-                .localizedCaseInsensitiveContains("bytes") ?? false
-
-            metadata = HTTPMetadata(
-                contentLength: max(0, length),
-                supportsResume: acceptRanges,
-                eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
-                lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
-            ).merging(
-                response: httpResponse,
-                resumedFrom: 0,
-                redirects: redirectRecorder.redirects
-            )
-        } catch {
-            metadata = .unknown
-        }
-
-        metadata = metadata.filled(from: request)
-        let needsRangeProbe = (!metadata.supportsResume && (segmentCount > 1 || request.supportsResume))
-            || (metadata.contentLength <= 0 && (segmentCount > 1 || request.supportsResume))
-        guard needsRangeProbe else {
-            return metadata
-        }
-
-        return await probeRange(url: url, request: request).merged(over: metadata)
-    }
-
-    private func probeRange(url: URL, request: DownloadRequest) async -> HTTPMetadata {
-        var urlRequest = makeRequest(
-            url: url,
-            method: "GET",
-            timeoutInterval: 20,
-            request: request
-        )
-        urlRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
-
-        do {
-            let redirectRecorder = HTTPRedirectRecorder()
-            let session = Self.redirectRecordingSession(redirectRecorder)
-            defer { session.finishTasksAndInvalidate() }
-            let (_, response) = try await session.bytes(for: urlRequest)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return .unknown
-            }
-
-            switch httpResponse.statusCode {
-            case 206:
-                guard let rawRange = httpResponse.value(forHTTPHeaderField: "Content-Range"),
-                      let contentRange = HTTPContentRange(rawRange),
-                      contentRange.start == 0,
-                      contentRange.end == 0
-                else {
-                    return .unknown
-                }
-
-                return HTTPMetadata(
-                    contentLength: contentRange.total ?? 0,
-                    supportsResume: true,
-                    eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
-                    lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
-                ).merging(
-                    response: httpResponse,
-                    resumedFrom: 0,
-                    redirects: redirectRecorder.redirects
-                )
-            case 200...299:
-                let responseLength = httpResponse.expectedContentLength > 0
-                    ? httpResponse.expectedContentLength
-                    : 0
-                return HTTPMetadata(
-                    contentLength: responseLength,
-                    supportsResume: false,
-                    eTag: httpResponse.value(forHTTPHeaderField: "ETag"),
-                    lastModified: httpResponse.value(forHTTPHeaderField: "Last-Modified")
-                ).merging(
-                    response: httpResponse,
-                    resumedFrom: 0,
-                    redirects: redirectRecorder.redirects
-                )
-            default:
-                return .unknown
-            }
-        } catch {
-            return .unknown
-        }
-    }
-
-    private func makeRequest(
-        url: URL,
-        method: String,
-        timeoutInterval: TimeInterval,
-        request downloadRequest: DownloadRequest
-    ) -> URLRequest {
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.timeoutInterval = timeoutInterval
-        request.setValue("SwiftGetX", forHTTPHeaderField: "User-Agent")
-        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-        if url.host?.localizedCaseInsensitiveCompare("api.github.com") == .orderedSame {
-            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            request.setValue("2026-03-10", forHTTPHeaderField: "X-GitHub-Api-Version")
-        }
-        applyBrowserContext(downloadRequest.browserContext, to: &request)
-        return request
-    }
-
-    private func applyBrowserContext(_ context: BrowserDownloadContext?, to request: inout URLRequest) {
-        guard let context else { return }
-        for (name, value) in context.httpHeaders() {
-            request.setValue(value, forHTTPHeaderField: name)
         }
     }
 

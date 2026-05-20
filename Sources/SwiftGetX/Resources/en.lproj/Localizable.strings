@@ -141,6 +141,13 @@
 "http_connection_segments" = "%d segments";
 "http_connection_single_stream" = "Single stream";
 "http_connection_summary" = "HTTP · %@ · %@";
+"http_preview_duplicate_available" = "Available";
+"http_preview_duplicate_renamed" = "Auto-rename to %@";
+"http_preview_duplicate_strategy" = "Duplicate";
+"http_preview_final_url" = "Final URL";
+"http_preview_metadata_limited" = "Preview metadata is limited: %@";
+"http_preview_resume" = "Resume";
+"http_preview_type" = "Type";
 "inspector_details_picker" = "Details";
 "inspector_select_task" = "Select a task to view details";
 "inspector_tab_connections" = "Connections";
@@ -236,6 +243,7 @@
 "sidebar_tasks" = "Tasks";
 "source_preview_count" = "%d tasks identified";
 "source_preview_empty" = "After pasting valid links, the detected types and resource names will appear here in real time.";
+"source_preview_loading" = "Fetching metadata...";
 "source_preview_more_tasks" = "... and %d more tasks";
 "source_preview_title" = "Recognition Preview";
 "speed_limit" = "Speed Limit";

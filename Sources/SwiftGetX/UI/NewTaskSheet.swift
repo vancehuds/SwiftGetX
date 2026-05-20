@@ -50,7 +50,7 @@ struct NewTaskSheet: View {
         .onDisappear {
             rejectNativeHandoffIfNeeded(reason: "userCancelled")
         }
-        .task(id: sourceText) {
+        .task(id: previewRefreshKey) {
             await refreshPreviews()
         }
         .frame(
@@ -153,7 +153,7 @@ struct NewTaskSheet: View {
                 if isLoadingPreviews {
                     ProgressView()
                         .controlSize(.small)
-                    Text(L10n.string("torrent_preview_loading"))
+                    Text(L10n.string("source_preview_loading"))
                         .font(layout.font(11))
                         .foregroundStyle(.secondary)
                 }
@@ -184,8 +184,9 @@ struct NewTaskSheet: View {
                         return
                     }
 
+                    let sources = SourceParser.extractSources(from: sourceText)
                     let tasks: [DownloadTask]
-                    if previews.contains(where: { $0.kind == .torrentMagnet || $0.kind == .torrentFile }) {
+                    if hasCompletePreviews(for: sources) {
                         tasks = coordinator.add(
                             previews: previews,
                             saveDirectory: saveDirectory,
@@ -224,6 +225,16 @@ struct NewTaskSheet: View {
             return L10n.string("new_task_browser_takeover_subtitle")
         }
         return L10n.string("new_task_subtitle")
+    }
+
+    private var previewRefreshKey: String {
+        [
+            sourceText,
+            saveDirectory.path,
+            suggestedFilename ?? "",
+            draft?.browserContext?.finalURL ?? "",
+            draft?.browserContext?.originalURL ?? ""
+        ].joined(separator: "\u{1F}")
     }
 
     private func apply(_ draft: DownloadDraft?) {
@@ -294,6 +305,7 @@ struct NewTaskSheet: View {
         let previewService = TorrentMetadataService(
             magnetTimeout: .seconds(settings.torrentMagnetMetadataTimeoutSeconds)
         )
+        let httpPreviewService = HTTPMetadataPreviewService()
         let nextPreviews = await withTaskGroup(
             of: (Int, TorrentMetadataPreview)?.self,
             returning: [TorrentMetadataPreview].self
@@ -302,7 +314,17 @@ struct NewTaskSheet: View {
                 let suggested = sources.count == 1 ? suggestedFilename : nil
                 group.addTask {
                     guard !Task.isCancelled else { return nil }
-                    let preview = await previewService.preview(source: source, suggestedFilename: suggested)
+                    let preview: TorrentMetadataPreview
+                    if SourceParser.kind(for: source) == .http {
+                        preview = await httpPreviewService.preview(
+                            source: source,
+                            suggestedFilename: suggested,
+                            saveDirectory: saveDirectory,
+                            browserContext: sources.count == 1 ? draft?.browserContext : nil
+                        )
+                    } else {
+                        preview = await previewService.preview(source: source, suggestedFilename: suggested)
+                    }
                     return (index, preview)
                 }
             }
@@ -331,6 +353,13 @@ struct NewTaskSheet: View {
             selectedFileIndexesBySource = selectedFileIndexesBySource.filter { validSources.contains($0.key) }
             filePrioritiesBySource = filePrioritiesBySource.filter { validSources.contains($0.key) }
             isLoadingPreviews = false
+        }
+    }
+
+    private func hasCompletePreviews(for sources: [String]) -> Bool {
+        guard !sources.isEmpty, previews.count == sources.count else { return false }
+        return zip(sources, previews).allSatisfy { source, preview in
+            source == preview.source
         }
     }
 
@@ -478,7 +507,7 @@ private struct SourcePreviewView: View {
                         }
                     }
                 }
-                .frame(maxHeight: layout.value(100))
+                .frame(maxHeight: layout.value(180))
             }
         }
         .padding(layout.value(12))
@@ -617,6 +646,8 @@ private struct TorrentPreviewRow: View {
                         .font(layout.font(10.5))
                         .foregroundStyle(.secondary)
                 }
+            } else if preview.kind == .http {
+                HTTPPreviewDetails(preview: preview)
             } else if let errorMessage = preview.errorMessage {
                 Text(errorMessage)
                     .font(layout.font(10.5))
@@ -669,5 +700,65 @@ private struct TorrentPreviewRow: View {
                 }
             }
         )
+    }
+}
+
+private struct HTTPPreviewDetails: View {
+    @Environment(\.responsiveLayout) private var layout
+    let preview: TorrentMetadataPreview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(4)) {
+            detailRow(
+                title: L10n.string("http_preview_resume"),
+                value: preview.supportsResume
+                    ? L10n.string("http_connection_resumable")
+                    : L10n.string("http_connection_not_resumable")
+            )
+
+            if let mimeType = preview.httpResponseMetadata?.mimeType {
+                detailRow(title: L10n.string("http_preview_type"), value: mimeType)
+            }
+
+            if let finalURL = preview.httpResponseMetadata?.finalURL {
+                detailRow(title: L10n.string("http_preview_final_url"), value: finalURL)
+            }
+
+            detailRow(title: L10n.string("http_preview_duplicate_strategy"), value: duplicateStrategyText)
+
+            if let savePath = preview.savePath {
+                detailRow(title: L10n.string("detail_save_path"), value: savePath)
+            }
+
+            if let errorMessage = preview.errorMessage {
+                Text(L10n.string("http_preview_metadata_limited", errorMessage))
+                    .font(layout.font(10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var duplicateStrategyText: String {
+        switch preview.duplicateStrategy {
+        case .none:
+            L10n.string("http_preview_duplicate_available")
+        case .autoRename(_, let resolvedFilename):
+            L10n.string("http_preview_duplicate_renamed", resolvedFilename)
+        }
+    }
+
+    private func detailRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: layout.value(6)) {
+            Text(title)
+                .font(layout.font(10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: layout.value(92), alignment: .leading)
+            Text(value)
+                .font(layout.font(10.5))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
     }
 }

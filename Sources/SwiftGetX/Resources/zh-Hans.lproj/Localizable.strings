@@ -141,6 +141,13 @@
 "http_connection_segments" = "%d 分片";
 "http_connection_single_stream" = "单流";
 "http_connection_summary" = "HTTP · %@ · %@";
+"http_preview_duplicate_available" = "可直接保存";
+"http_preview_duplicate_renamed" = "自动重命名为 %@";
+"http_preview_duplicate_strategy" = "重复文件";
+"http_preview_final_url" = "最终 URL";
+"http_preview_metadata_limited" = "预览 metadata 有限：%@";
+"http_preview_resume" = "断点续传";
+"http_preview_type" = "类型";
 "inspector_details_picker" = "详情";
 "inspector_select_task" = "选择任务查看详情";
 "inspector_tab_connections" = "连接";
@@ -236,6 +243,7 @@
 "sidebar_tasks" = "任务";
 "source_preview_count" = "已识别 %d 个任务";
 "source_preview_empty" = "粘贴合法链接后会在此处实时显示识别到的类型与资源名预览。";
+"source_preview_loading" = "正在获取 metadata...";
 "source_preview_more_tasks" = "... 以及其它 %d 个任务";
 "source_preview_title" = "识别预览";
 "speed_limit" = "限速";

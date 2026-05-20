@@ -171,7 +171,7 @@ struct TorrentFileTests {
         )
         let emptyMetadata = HTTPResponseMetadata(suggestedFilename: ".")
 
-        #expect(metadata.suggestedFilename == "..-unsafe-bad-name.zip")
+        #expect(metadata.suggestedFilename == "unsafe-bad-name.zip")
         #expect(bidiMetadata.suggestedFilename == "photo-gpj.zip")
         #expect(emptyMetadata.suggestedFilename == nil)
     }

@@ -688,6 +688,182 @@ struct HTTPDownloadEngineTests {
         })
     }
 
+    @Test("previews HTTP metadata before creating a task")
+    func previewsHTTPMetadataBeforeCreatingTask() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .contentDispositionMetadata)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        FileManager.default.createFile(
+            atPath: directory.appendingPathComponent("report final.zip").path,
+            contents: Data()
+        )
+
+        let service = HTTPMetadataPreviewService()
+        let preview = await service.preview(
+            source: server.url.absoluteString,
+            saveDirectory: directory
+        )
+
+        #expect(preview.kind == .http)
+        #expect(preview.metadataStatus == .available)
+        #expect(preview.displayName == "report final.zip")
+        #expect(preview.totalBytes == Int64(payload.count))
+        #expect(preview.supportsResume)
+        #expect(preview.savePath == directory.appendingPathComponent("report final 2.zip").path)
+        #expect(preview.duplicateStrategy == .autoRename(
+            originalFilename: "report final.zip",
+            resolvedFilename: "report final 2.zip"
+        ))
+
+        let metadata = try #require(preview.httpResponseMetadata)
+        #expect(metadata.suggestedFilename == "report final.zip")
+        #expect(metadata.mimeType == "application/zip")
+        #expect(metadata.contentDisposition == RangeTestServer.contentDisposition)
+        #expect(metadata.server == "SwiftGetXTest")
+        #expect(metadata.finalURL == server.url.absoluteString)
+        #expect(metadata.contentLength == Int64(payload.count))
+        #expect(metadata.supportsResume == true)
+        #expect(metadata.eTag == "\"test\"")
+        #expect(metadata.lastModified == RangeTestServer.lastModified)
+    }
+
+    @Test("HTTP preview falls back to range probe for incomplete HEAD metadata")
+    func httpPreviewFallsBackToRangeProbeForIncompleteHEADMetadata() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .headWithoutContentLength)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let service = HTTPMetadataPreviewService()
+        let preview = await service.preview(
+            source: server.url.absoluteString,
+            saveDirectory: directory
+        )
+
+        #expect(preview.metadataStatus == .available)
+        #expect(preview.displayName == "payload.bin")
+        #expect(preview.totalBytes == Int64(payload.count))
+        #expect(preview.supportsResume)
+        #expect(preview.httpResponseMetadata?.contentLength == Int64(payload.count))
+        #expect(server.requests.contains { $0.hasPrefix("HEAD") })
+        #expect(server.requests.contains { request in
+            request.hasPrefix("GET") && request.contains("Range: bytes=0-0")
+        })
+    }
+
+    @Test("HTTP preview falls back when server metadata probe is unavailable")
+    func httpPreviewFallsBackWhenMetadataProbeUnavailable() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .rejectMetadataProbe)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let service = HTTPMetadataPreviewService()
+        let preview = await service.preview(
+            source: server.url.absoluteString,
+            suggestedFilename: "fallback.bin",
+            saveDirectory: directory
+        )
+
+        #expect(preview.kind == .http)
+        #expect(preview.metadataStatus == .unavailable)
+        #expect(preview.displayName == "fallback.bin")
+        #expect(preview.totalBytes == 0)
+        #expect(!preview.supportsResume)
+        #expect(preview.savePath == directory.appendingPathComponent("fallback.bin").path)
+        #expect(preview.httpResponseMetadata?.suggestedFilename == "fallback.bin")
+        #expect(preview.errorMessage == nil)
+        #expect(server.requests.contains { $0.hasPrefix("HEAD") })
+        #expect(server.requests.contains { request in
+            request.hasPrefix("GET") && request.contains("Range: bytes=0-0")
+        })
+    }
+
+    @Test("HTTP preview rejects invalid sources safely")
+    func httpPreviewRejectsInvalidSourcesSafely() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let service = HTTPMetadataPreviewService()
+        let preview = await service.preview(
+            source: "not-a-url",
+            suggestedFilename: "../bad:name.zip",
+            saveDirectory: directory
+        )
+
+        #expect(preview.kind == .http)
+        #expect(preview.metadataStatus == .failed)
+        #expect(preview.displayName == "bad-name.zip")
+        #expect(preview.savePath == directory.appendingPathComponent("bad-name.zip").path)
+        #expect(preview.httpResponseMetadata?.suggestedFilename == "bad-name.zip")
+        #expect(preview.errorMessage == L10n.string("error_invalid_url"))
+    }
+
+    @Test("coordinator adds HTTP tasks from preview metadata")
+    func coordinatorAddsHTTPTasksFromPreviewMetadata() {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        let context = BrowserDownloadContext(
+            referrer: "https://example.com/releases?token=secret",
+            headers: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
+                BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
+            ],
+            finalURL: "https://cdn.example.com/file.zip?signature=secret",
+            originalURL: "https://example.com/file.zip?token=secret",
+            suggestedFilename: "file.zip",
+            sourcePageURL: "https://example.com/releases?token=secret"
+        )
+        let metadata = HTTPResponseMetadata(
+            originalURL: "https://example.com/file.zip?token=secret",
+            finalURL: "https://cdn.example.com/file.zip?signature=secret",
+            mimeType: "application/zip",
+            suggestedFilename: "file.zip",
+            supportsResume: true,
+            contentLength: 42
+        )
+        let preview = TorrentMetadataPreview(
+            source: "https://example.com/file.zip?token=secret",
+            kind: .http,
+            displayName: "file.zip",
+            resolvedTorrentFilePath: nil,
+            files: [],
+            totalBytes: 42,
+            metadataStatus: .available,
+            errorMessage: nil,
+            httpResponseMetadata: metadata,
+            supportsResume: true,
+            savePath: directory.appendingPathComponent("file 2.zip").path,
+            duplicateStrategy: .autoRename(originalFilename: "file.zip", resolvedFilename: "file 2.zip"),
+            browserContext: context
+        )
+        let coordinator = DownloadCoordinator()
+
+        let tasks = coordinator.add(previews: [preview], saveDirectory: directory)
+        let task = tasks.first
+
+        #expect(tasks.count == 1)
+        #expect(task?.name == "file.zip")
+        #expect(task?.savePath == directory.appendingPathComponent("file 2.zip").path)
+        #expect(task?.totalBytes == 42)
+        #expect(task?.supportsResume == true)
+        #expect(task?.httpResponseMetadata?.finalURL == "https://cdn.example.com/file.zip?signature=%3Credacted%3E")
+        #expect(task?.browserContext?.headers == [
+            BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
+        ])
+        #expect(task?.browserContextJSON?.contains("Bearer secret") == false)
+    }
+
     @Test("parses Content-Disposition filenames safely")
     func parsesContentDispositionFilenamesSafely() {
         #expect(HTTPContentDisposition.suggestedFilename(
@@ -775,6 +951,7 @@ private final class RangeTestServer: @unchecked Sendable {
         case headWithoutRangeMetadata
         case headWithoutContentLength
         case rejectRangeRequests
+        case rejectMetadataProbe
     }
 
     private let payload: Data
@@ -862,6 +1039,14 @@ private final class RangeTestServer: @unchecked Sendable {
         }
 
         if request.hasPrefix("HEAD") {
+            if behavior == .rejectMetadataProbe {
+                return Self.httpResponse(
+                    status: "405 Method Not Allowed",
+                    headers: ["Content-Length": "0"],
+                    body: Data()
+                )
+            }
+
             if behavior == .headWithoutRangeMetadata {
                 return Self.httpResponse(
                     status: "200 OK",
@@ -930,7 +1115,7 @@ private final class RangeTestServer: @unchecked Sendable {
             )
         }
 
-        if behavior == .rejectRangeRequests, hasRange {
+        if (behavior == .rejectRangeRequests || behavior == .rejectMetadataProbe), hasRange {
             return Self.httpResponse(
                 status: "416 Range Not Satisfiable",
                 headers: [

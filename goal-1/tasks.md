@@ -271,17 +271,38 @@ Next step:
 
 ## Task 7: HTTP New-Task Preview
 
-Status: [ ]
+Status: [x]
 
 Add HTTP HEAD/Range metadata preview before creating tasks, including filename, size, resumability, final URL, content type, duplicate-file strategy, and failure fallback.
 
 Work performed:
 
+- Added `HTTPMetadataPreviewService` for HTTP/HTTPS new-task previews. It validates source URLs, probes server metadata with HEAD plus Range fallback, builds preview display names from `Content-Disposition`, browser suggestions, final URLs, or source URLs, and falls back safely when metadata is unavailable.
+- Extracted shared HTTP probing/request creation into `HTTPMetadataProbe` and `HTTPRequestFactory` so previews and real downloads use consistent browser-context headers, redirect capture, resumability, response metadata, and timeout behavior.
+- Extended `TorrentMetadataPreview` as the shared source-preview model for HTTP metadata, resumability, planned save path, duplicate-file strategy, and browser context.
+- Updated `NewTaskSheet` to fetch HTTP metadata previews before Add, refresh when save path/browser context changes, display HTTP resume/type/final URL/duplicate/save-path details, and create tasks from complete previews instead of losing preview metadata.
+- Updated `DownloadCoordinator.add(previews:)` to preserve HTTP preview save paths, resumability, response metadata, safe persisted browser context, and runtime browser context where a model context is available.
+- Hardened preview and persisted HTTP suggested filenames to use basename-only inputs before sanitization, preventing directory-like browser suggestions from affecting display or save paths.
+- Added English and Simplified Chinese localization for HTTP preview details and the generic source-preview loading state.
+- Added focused tests for HTTP preview metadata success, HEAD-to-Range fallback, metadata-unavailable fallback, invalid-source fallback sanitization, coordinator task creation from HTTP previews, and basename filename sanitization.
+
 Verification evidence:
+
+- `swift test --filter HTTPDownloadEngine` passed with 28 tests in 1 suite.
+- `swift test` passed with 118 tests across 12 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- HTTP preview metadata remains best-effort: servers can reject HEAD/Range probes, hide metadata behind authentication, or return misleading headers. In those cases the UI falls back to a safe name/path preview and creates a normal HTTP task.
+- Duplicate handling is currently shown as "Available" or automatic rename to match the existing `FileManager.uniqueFileURL` finalization behavior. User-selectable overwrite/skip/ask policies remain for later settings/per-task option work.
+- Browser-context sensitive headers are still runtime-only; previews can use live context, but persisted created tasks keep only safe context.
+- SwiftUI preview details were build-verified and covered through model/coordinator tests, but not screenshot-tested in this session.
+
 Next step:
+
+- Task 8: Per-Task Download Options and Persistent Speed Settings.
 
 ## Task 8: Per-Task Download Options and Persistent Speed Settings
 
