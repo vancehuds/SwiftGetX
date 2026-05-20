@@ -2,41 +2,39 @@ import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
+    @State private var diagnostics = NativeHostDiagnostics()
+
+    var body: some View {
+        SettingsHost(diagnostics: diagnostics)
+    }
+}
+
+private struct SettingsHost: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AppSettings.self) private var settings
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var parentLayout
-    @State private var diagnostics = NativeHostDiagnostics()
+    let diagnostics: NativeHostDiagnostics
 
     var body: some View {
-        GeometryReader { proxy in
-            let layout = settingsLayout(for: proxy.size)
+        content.modifier(lifecycleModifier)
+    }
 
-            SettingsPanel(
-                settings: settings,
-                diagnostics: diagnostics,
-                layout: layout,
-                chooseDirectory: chooseDirectory
-            )
-            .environment(\.responsiveLayout, layout)
-        }
-        .padding(1)
-        .onChange(of: settings.defaultDownloadDirectory) { _, _ in persistSettings() }
-        .onChange(of: settings.concurrentTaskLimit) { _, _ in persistSettings() }
-        .onChange(of: settings.httpMultithreadingEnabled) { _, _ in persistSettings() }
-        .onChange(of: settings.httpSegmentCount) { _, _ in persistSettings() }
-        .onChange(of: settings.hideHTTPTemporaryFiles) { _, _ in persistSettings() }
-        .onChange(of: settings.retryLimit) { _, _ in persistSettings() }
-        .onChange(of: settings.globalDownloadLimitBytes) { _, _ in persistSettings() }
-        .onChange(of: settings.globalUploadLimitBytes) { _, _ in persistSettings() }
-        .onChange(of: settings.completionNotificationsEnabled) { _, _ in persistSettings() }
-        .onChange(of: settings.clipboardDetectionEnabled) { _, _ in persistSettings() }
-        .onChange(of: settings.stopSeedingAtRatio) { _, _ in persistSettings() }
-        .onAppear {
-            if diagnostics.status == .unchecked {
-                diagnostics.check()
-            }
-        }
+    private var content: SettingsContent {
+        SettingsContent(
+            settings: settings,
+            diagnostics: diagnostics,
+            parentLayout: parentLayout,
+            chooseDirectory: chooseDirectory
+        )
+    }
+
+    private var lifecycleModifier: SettingsLifecycleModifier {
+        SettingsLifecycleModifier(
+            snapshot: SettingsSnapshot(settings),
+            diagnostics: diagnostics,
+            persistSettings: persistSettings
+        )
     }
 
     private func chooseDirectory() {
@@ -68,33 +66,151 @@ struct SettingsView: View {
         }
     }
 
-    private func settingsLayout(for size: CGSize) -> ResponsiveLayout {
-        let settingsScale = min(max(size.width, 1) / 520, max(size.height, 1) / 480)
+}
+
+private struct SettingsSnapshot: Equatable {
+    let defaultDownloadDirectory: URL
+    let concurrentTaskLimit: Int
+    let httpMultithreadingEnabled: Bool
+    let httpSegmentCount: Int
+    let hideHTTPTemporaryFiles: Bool
+    let retryLimit: Int
+    let globalDownloadLimitBytes: Int64
+    let globalUploadLimitBytes: Int64
+    let completionNotificationsEnabled: Bool
+    let clipboardDetectionEnabled: Bool
+    let stopSeedingAtRatio: Double
+
+    @MainActor
+    init(_ settings: AppSettings) {
+        defaultDownloadDirectory = settings.defaultDownloadDirectory
+        concurrentTaskLimit = settings.concurrentTaskLimit
+        httpMultithreadingEnabled = settings.httpMultithreadingEnabled
+        httpSegmentCount = settings.httpSegmentCount
+        hideHTTPTemporaryFiles = settings.hideHTTPTemporaryFiles
+        retryLimit = settings.retryLimit
+        globalDownloadLimitBytes = settings.globalDownloadLimitBytes
+        globalUploadLimitBytes = settings.globalUploadLimitBytes
+        completionNotificationsEnabled = settings.completionNotificationsEnabled
+        clipboardDetectionEnabled = settings.clipboardDetectionEnabled
+        stopSeedingAtRatio = settings.stopSeedingAtRatio
+    }
+}
+
+private struct SettingsLifecycleModifier: ViewModifier {
+    let snapshot: SettingsSnapshot
+    let diagnostics: NativeHostDiagnostics
+    let persistSettings: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .padding(1)
+            .onChange(of: snapshot) { _, _ in
+                persistSettings()
+            }
+            .onAppear(perform: checkDiagnostics)
+    }
+
+    private func checkDiagnostics() {
+        if diagnostics.status == .unchecked {
+            diagnostics.check()
+        }
+    }
+}
+
+private struct SettingsContent: View {
+    let settings: AppSettings
+    let diagnostics: NativeHostDiagnostics
+    let parentLayout: ResponsiveLayout
+    let chooseDirectory: () -> Void
+
+    var body: some View {
+        GeometryReader(content: panelFrame)
+    }
+
+    private func panelFrame(for proxy: GeometryProxy) -> SettingsPanelFrame {
+        SettingsPanelFrame(
+            settings: settings,
+            diagnostics: diagnostics,
+            parentLayout: parentLayout,
+            size: proxy.size,
+            chooseDirectory: chooseDirectory
+        )
+    }
+}
+
+private struct SettingsPanelFrame: View {
+    let settings: AppSettings
+    let diagnostics: NativeHostDiagnostics
+    let parentLayout: ResponsiveLayout
+    let size: CGSize
+    let chooseDirectory: () -> Void
+
+    var body: some View {
+        SettingsPanel(
+            settings: settings,
+            diagnostics: diagnostics,
+            layout: layout,
+            chooseDirectory: chooseDirectory
+        )
+        .environment(\.responsiveLayout, layout)
+    }
+
+    private var layout: ResponsiveLayout {
+        let widthScale = max(size.width, 1) / 520
+        let heightScale = max(size.height, 1) / 480
+        let settingsScale = min(widthScale, heightScale)
         return ResponsiveLayout(scale: max(parentLayout.scale, settingsScale))
     }
 }
 
 private struct SettingsPanel: View {
-    @Bindable var settings: AppSettings
-    @Bindable var diagnostics: NativeHostDiagnostics
+    let settings: AppSettings
+    let diagnostics: NativeHostDiagnostics
     let layout: ResponsiveLayout
     let chooseDirectory: () -> Void
 
     var body: some View {
         GlassSurface(level: .panel, cornerRadius: 18) {
-            Form {
-                downloadSection
-                torrentSection
-                systemSection
-                browserIntegrationSection
-            }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .padding(layout.value(10))
+            SettingsForm(
+                settings: settings,
+                diagnostics: diagnostics,
+                layout: layout,
+                chooseDirectory: chooseDirectory
+            )
         }
     }
+}
 
-    private var downloadSection: some View {
+private struct SettingsForm: View {
+    let settings: AppSettings
+    let diagnostics: NativeHostDiagnostics
+    let layout: ResponsiveLayout
+    let chooseDirectory: () -> Void
+
+    var body: some View {
+        Form {
+            DownloadSettingsSection(
+                settings: settings,
+                layout: layout,
+                chooseDirectory: chooseDirectory
+            )
+            TorrentSettingsSection(settings: settings)
+            SystemSettingsSection(settings: settings)
+            BrowserIntegrationSection(diagnostics: diagnostics, layout: layout)
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .padding(layout.value(10))
+    }
+}
+
+private struct DownloadSettingsSection: View {
+    @Bindable var settings: AppSettings
+    let layout: ResponsiveLayout
+    let chooseDirectory: () -> Void
+
+    var body: some View {
         Section("下载") {
             downloadDirectoryRow
             Stepper("同时下载任务：\(settings.concurrentTaskLimit)", value: $settings.concurrentTaskLimit, in: 1...12)
@@ -126,8 +242,12 @@ private struct SettingsPanel: View {
             }
         }
     }
+}
 
-    private var torrentSection: some View {
+private struct TorrentSettingsSection: View {
+    @Bindable var settings: AppSettings
+
+    var body: some View {
         Section("BT") {
             SpeedLimitSettingsRow(
                 title: "上传限速",
@@ -141,15 +261,24 @@ private struct SettingsPanel: View {
                 .foregroundStyle(.secondary)
         }
     }
+}
 
-    private var systemSection: some View {
+private struct SystemSettingsSection: View {
+    @Bindable var settings: AppSettings
+
+    var body: some View {
         Section("系统") {
             Toggle("完成后通知", isOn: $settings.completionNotificationsEnabled)
             Toggle("剪贴板链接检测", isOn: $settings.clipboardDetectionEnabled)
         }
     }
+}
 
-    private var browserIntegrationSection: some View {
+private struct BrowserIntegrationSection: View {
+    let diagnostics: NativeHostDiagnostics
+    let layout: ResponsiveLayout
+
+    var body: some View {
         Section("浏览器集成") {
             BrowserIntegrationRow(diagnostics: diagnostics, layout: layout)
         }
