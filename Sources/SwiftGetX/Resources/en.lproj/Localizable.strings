@@ -81,6 +81,7 @@
 "download_status_paused" = "Paused";
 "download_status_queued" = "Queued";
 "download_status_running" = "Downloading";
+"download_status_seeding" = "Seeding";
 "download_status_verifying" = "Verifying";
 "empty_tasks_message" = "Click the plus button in the upper-left, then paste direct links, magnet links, or torrent file URLs.";
 "empty_tasks_title" = "No download tasks yet";
@@ -129,6 +130,7 @@
 "inspector_tab_logs" = "Logs";
 "inspector_tab_overview" = "Overview";
 "log_download_completed" = "Download completed";
+"log_download_ready_seeding" = "Download complete; seeding is active";
 "log_paused" = "Paused";
 "log_restored_paused_after_restart" = "Task restored to paused after app restart";
 "log_start_download" = "Started download";

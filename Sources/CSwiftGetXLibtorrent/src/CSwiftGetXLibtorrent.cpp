@@ -162,7 +162,10 @@ static bool load_resume_data(const char *path, lt::add_torrent_params &params, s
     std::ifstream input(path, std::ios::binary);
     if (!input.good()) return false;
     std::vector<char> buffer((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-    if (buffer.empty()) return false;
+    if (buffer.empty()) {
+        error = "Resume data is empty";
+        return false;
+    }
 
     lt::error_code ec;
     params = lt::read_resume_data(lt::span<char const>(buffer.data(), buffer.size()), ec);
@@ -334,6 +337,9 @@ int32_t sgx_libtorrent_add_magnet_with_options(
         lt::add_torrent_params params;
         std::string resume_error;
         bool loaded_resume = load_resume_data(resume_data_path, params, resume_error);
+        if (!loaded_resume && !resume_error.empty()) {
+            session->set_error("Failed to load resume data: " + resume_error);
+        }
         if (!loaded_resume) {
             params = lt::parse_magnet_uri(magnet_uri, ec);
         }
@@ -407,6 +413,9 @@ int32_t sgx_libtorrent_add_torrent_file_with_options(
         lt::add_torrent_params params;
         std::string resume_error;
         bool loaded_resume = load_resume_data(resume_data_path, params, resume_error);
+        if (!loaded_resume && !resume_error.empty()) {
+            session->set_error("Failed to load resume data: " + resume_error);
+        }
         if (!loaded_resume) {
             params.ti = std::make_shared<lt::torrent_info>(torrent_file_path);
         } else if (!params.ti) {
@@ -575,8 +584,11 @@ int32_t sgx_libtorrent_get_status(SGXLibtorrentSession *session, int32_t handle_
     status->is_finished = native.is_finished ? 1 : 0;
     status->is_seeding = native.is_seeding ? 1 : 0;
     status->is_paused = (handle->flags() & lt::torrent_flags::paused) ? 1 : 0;
-    status->has_metadata = native.state != lt::torrent_status::downloading_metadata ? 1 : 0;
+    status->has_metadata = handle->torrent_file() ? 1 : 0;
     status->has_error = native.errc ? 1 : 0;
+    if (native.errc) {
+        session->set_error(native.errc.message());
+    }
     status->is_sequential_download = (handle->flags() & lt::torrent_flags::sequential_download) ? 1 : 0;
     status->needs_resume_data_save = handle->need_save_resume_data() ? 1 : 0;
     status->total_wanted = native.total_wanted;

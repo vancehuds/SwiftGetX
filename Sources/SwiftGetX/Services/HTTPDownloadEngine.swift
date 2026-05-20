@@ -17,7 +17,7 @@ final class HTTPDownloadEngine: DownloadEngine {
         retryLimit: Int
     ) {
         self.multithreadingEnabled = multithreadingEnabled
-        self.segmentCount = multithreadingEnabled ? max(1, segmentCount) : 1
+        self.segmentCount = multithreadingEnabled ? min(max(1, segmentCount), segmentScanLimit) : 1
         self.hidesTemporaryFiles = hidesTemporaryFiles
         self.retryLimit = max(0, retryLimit)
     }
@@ -156,6 +156,13 @@ private actor HTTPDownloadRunState {
 private struct HTTPDownloadWorker: Sendable {
     private static let bufferSize = 64 * 1024
     private static let minimumSplitSize: Int64 = 1024 * 1024
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.waitsForConnectivity = true
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 7 * 24 * 60 * 60
+        return URLSession(configuration: configuration)
+    }()
 
     let segmentCount: Int
     let hidesTemporaryFiles: Bool
@@ -230,8 +237,12 @@ private struct HTTPDownloadWorker: Sendable {
         }
 
         if segmentedBytes > 0 {
-            let manifest = try layout.loadManifest()
-                ?? legacyManifest(for: request, layout: layout, metadata: metadata)
+            let manifest: HTTPDownloadManifest
+            if let storedManifest = try? layout.loadManifest() {
+                manifest = storedManifest
+            } else {
+                manifest = try legacyManifest(for: request, layout: layout, metadata: metadata)
+            }
             metadata = metadata.filled(from: manifest)
             try validate(manifest: manifest, request: request, against: metadata)
             try layout.writeManifest(manifest, hidden: hidesTemporaryFiles)
@@ -308,7 +319,11 @@ private struct HTTPDownloadWorker: Sendable {
                 layout: layout,
                 destination: destination
             )
-        } catch HTTPDownloadError.rangeNotSupported {
+        } catch {
+            guard Self.shouldFallbackToSingleStream(after: error) else {
+                throw error
+            }
+
             try await ensureActive(request.id)
             layout.removeTemporaryFiles(maxSegments: segmentScanLimit)
 
@@ -340,6 +355,13 @@ private struct HTTPDownloadWorker: Sendable {
 
         var metadata = metadata
         var existingBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
+        if existingBytes > 0,
+           metadata.contentLength > 0,
+           existingBytes > metadata.contentLength
+        {
+            try Data().write(to: layout.singlePartURL)
+            existingBytes = 0
+        }
         if existingBytes > 0,
            metadata.contentLength > 0,
            existingBytes == metadata.contentLength
@@ -382,7 +404,7 @@ private struct HTTPDownloadWorker: Sendable {
             applyIfRange(to: &urlRequest, metadata: metadata, request: request)
         }
 
-        let (stream, response) = try await URLSession.shared.bytes(for: urlRequest)
+        let (stream, response) = try await Self.session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw HTTPDownloadError.invalidResponse(L10n.string("error_invalid_server_response"))
         }
@@ -406,6 +428,33 @@ private struct HTTPDownloadWorker: Sendable {
                 existingBytes = 0
             }
             metadata = metadata.merging(response: httpResponse, resumedFrom: 0)
+        case 416 where shouldResume:
+            if let totalBytes = Self.unsatisfiedRangeTotal(from: httpResponse),
+               totalBytes > 0,
+               existingBytes == totalBytes
+            {
+                metadata.contentLength = totalBytes
+                try finalizeSinglePart(
+                    request: request,
+                    metadata: metadata,
+                    layout: layout,
+                    destination: destination,
+                    downloadedBytes: existingBytes
+                )
+                return
+            }
+
+            try Data().write(to: layout.singlePartURL)
+            var restartMetadata = metadata.merging(response: httpResponse, resumedFrom: 0)
+            restartMetadata.supportsResume = false
+            try await downloadSingle(
+                url: url,
+                request: request,
+                metadata: restartMetadata,
+                layout: layout,
+                destination: destination
+            )
+            return
         default:
             throw HTTPDownloadError.serverStatus(httpResponse.statusCode)
         }
@@ -531,6 +580,7 @@ private struct HTTPDownloadWorker: Sendable {
         try await ensureActive(request.id)
 
         let plan = manifest.segmentPlan
+        try layout.repairOversizedSegments(for: plan)
         let initialBytes = try layout.segmentProgress(for: plan)
         let progress = SegmentProgress(initialBytes: initialBytes)
         let summary = connectionSummary(segmentCount: plan.segments.count, supportsResume: true)
@@ -739,9 +789,13 @@ private struct HTTPDownloadWorker: Sendable {
         }
         layout.setFileHidden(at: segmentURL, hidden: hidesTemporaryFiles)
 
-        let localBytes = HTTPTemporaryLayout.localSize(at: segmentURL)
-        guard localBytes <= segment.length else {
-            throw HTTPDownloadError.invalidLocalData(L10n.string("error_segment_too_large", segment.index))
+        var localBytes = HTTPTemporaryLayout.localSize(at: segmentURL)
+        if localBytes > segment.length {
+            await progress.add(-localBytes)
+            try FileManager.default.removeItem(at: segmentURL)
+            FileManager.default.createFile(atPath: segmentURL.path, contents: nil)
+            layout.setFileHidden(at: segmentURL, hidden: hidesTemporaryFiles)
+            localBytes = 0
         }
         guard localBytes < segment.length else { return }
 
@@ -750,7 +804,7 @@ private struct HTTPDownloadWorker: Sendable {
         urlRequest.setValue("bytes=\(start)-\(segment.end)", forHTTPHeaderField: "Range")
         applyIfRange(to: &urlRequest, metadata: metadata, request: request)
 
-        let (stream, response) = try await URLSession.shared.bytes(for: urlRequest)
+        let (stream, response) = try await Self.session.bytes(for: urlRequest)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw HTTPDownloadError.invalidResponse(L10n.string("error_invalid_server_response"))
         }
@@ -759,6 +813,9 @@ private struct HTTPDownloadWorker: Sendable {
                 throw HTTPDownloadError.rangeNotSupported
             }
             if (400...599).contains(httpResponse.statusCode) {
+                if httpResponse.statusCode == 416 {
+                    throw HTTPDownloadError.rangeNotSupported
+                }
                 throw HTTPDownloadError.serverStatus(httpResponse.statusCode)
             }
             throw HTTPDownloadError.invalidResponse(L10n.string("error_server_did_not_return_range"))
@@ -843,7 +900,7 @@ private struct HTTPDownloadWorker: Sendable {
         var metadata = HTTPMetadata.unknown
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: headRequest)
+            let (_, response) = try await Self.session.data(for: headRequest)
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode)
             else {
@@ -866,7 +923,9 @@ private struct HTTPDownloadWorker: Sendable {
         }
 
         metadata = metadata.filled(from: request)
-        guard !metadata.supportsResume, segmentCount > 1 || request.supportsResume else {
+        let needsRangeProbe = (!metadata.supportsResume && (segmentCount > 1 || request.supportsResume))
+            || (metadata.contentLength <= 0 && (segmentCount > 1 || request.supportsResume))
+        guard needsRangeProbe else {
             return metadata
         }
 
@@ -878,7 +937,7 @@ private struct HTTPDownloadWorker: Sendable {
         request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 
         do {
-            let (_, response) = try await URLSession.shared.bytes(for: request)
+            let (_, response) = try await Self.session.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 return .unknown
             }
@@ -935,7 +994,9 @@ private struct HTTPDownloadWorker: Sendable {
         metadata: HTTPMetadata,
         request: DownloadRequest
     ) {
-        if let eTag = request.eTag ?? metadata.eTag {
+        if let eTag = request.eTag ?? metadata.eTag,
+           !eTag.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("w/")
+        {
             urlRequest.setValue(eTag, forHTTPHeaderField: "If-Range")
         } else if let lastModified = request.lastModified ?? metadata.lastModified {
             urlRequest.setValue(lastModified, forHTTPHeaderField: "If-Range")
@@ -1078,13 +1139,37 @@ private struct HTTPDownloadWorker: Sendable {
                  .cannotConnectToHost,
                  .cannotFindHost,
                  .dnsLookupFailed,
-                 .notConnectedToInternet:
+                 .notConnectedToInternet,
+                 .cannotLoadFromNetwork,
+                 .resourceUnavailable:
                 return true
             default:
                 return false
             }
         }
         return false
+    }
+
+    private static func shouldFallbackToSingleStream(after error: Error) -> Bool {
+        guard let httpError = error as? HTTPDownloadError else { return false }
+        switch httpError {
+        case .rangeNotSupported, .serverStatus(416):
+            return true
+        case .invalidResponse, .serverStatus, .incompleteSegment, .invalidLocalData, .validatorChanged:
+            return false
+        }
+    }
+
+    private static func unsatisfiedRangeTotal(from response: HTTPURLResponse) -> Int64? {
+        guard response.statusCode == 416,
+              let rawRange = response.value(forHTTPHeaderField: "Content-Range")
+        else {
+            return nil
+        }
+
+        let trimmed = rawRange.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("bytes */") else { return nil }
+        return Int64(trimmed.dropFirst("bytes */".count))
     }
 
     static func pausedSnapshot(for request: DownloadRequest) -> DownloadSnapshot {
@@ -1160,6 +1245,14 @@ private struct HTTPTemporaryLayout: Sendable {
                 throw HTTPDownloadError.invalidLocalData(L10n.string("error_segment_too_large", segment.index))
             }
             return partialResult + size
+        }
+    }
+
+    func repairOversizedSegments(for plan: SegmentPlan) throws {
+        for segment in plan.segments {
+            let url = segmentURL(index: segment.index)
+            guard Self.localSize(at: url) > segment.length else { continue }
+            try FileManager.default.removeItem(at: url)
         }
     }
 

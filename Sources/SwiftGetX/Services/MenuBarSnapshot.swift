@@ -13,6 +13,7 @@ struct MenuBarTaskSnapshot: Equatable, Identifiable {
 struct MenuBarSnapshot: Equatable {
     let totalCount: Int
     let runningCount: Int
+    let seedingCount: Int
     let queuedCount: Int
     let pausedCount: Int
     let verifyingCount: Int
@@ -24,6 +25,7 @@ struct MenuBarSnapshot: Equatable {
     init(tasks: [DownloadTask], recentLimit: Int = 5) {
         totalCount = tasks.count
         runningCount = tasks.count { $0.status == .running }
+        seedingCount = tasks.count { $0.status == .seeding }
         queuedCount = tasks.count { $0.status == .queued }
         pausedCount = tasks.count { $0.status == .paused }
         verifyingCount = tasks.count { $0.status == .verifying }
@@ -52,6 +54,9 @@ struct MenuBarSnapshot: Equatable {
     var statusSymbolName: String {
         if runningCount > 0 {
             return "arrow.down.circle.fill"
+        }
+        if seedingCount > 0 {
+            return "arrow.up.circle.fill"
         }
         if verifyingCount > 0 {
             return "checkmark.seal"
@@ -86,14 +91,16 @@ struct MenuBarSnapshot: Equatable {
             0
         case .verifying:
             1
-        case .queued:
+        case .seeding:
             2
-        case .paused:
+        case .queued:
             3
-        case .failed:
+        case .paused:
             4
-        case .completed:
+        case .failed:
             5
+        case .completed:
+            6
         }
     }
 }

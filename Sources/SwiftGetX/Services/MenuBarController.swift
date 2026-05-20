@@ -138,8 +138,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         submenu.addItem(disabledItem(taskDetailTitle(for: task)))
         submenu.addItem(NSMenuItem.separator())
 
+        let isPausable = task.status == .running || task.status == .seeding
         let toggleItem = submenu.addItem(
-            withTitle: task.status == .running ? L10n.string("action_pause") : L10n.string("action_start"),
+            withTitle: isPausable ? L10n.string("action_pause") : L10n.string("action_start"),
             action: #selector(toggleTask(_:)),
             keyEquivalent: ""
         )
@@ -200,6 +201,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         case .running:
             let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond)
             return "\(task.name) · \(percent)% · \(speed)/s"
+        case .seeding:
+            return "\(task.name) · \(L10n.string("download_status_seeding"))"
         case .completed:
             return "\(task.name) · \(L10n.string("download_status_completed"))"
         case .failed:
@@ -277,7 +280,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             return
         }
 
-        if task.status == .running {
+        if task.status == .running || task.status == .seeding {
             coordinator?.pause(task)
         } else {
             coordinator?.resume(task)
@@ -302,7 +305,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             return
         }
 
-        coordinator?.remove(task, deletingFiles: task.status != .completed)
+        coordinator?.remove(task, deletingFiles: !task.hasFinishedDownloading)
         updateStatusItem()
     }
 }

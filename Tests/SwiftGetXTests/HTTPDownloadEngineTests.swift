@@ -153,6 +153,65 @@ struct HTTPDownloadEngineTests {
         #expect(downloaded == payload)
     }
 
+    @Test("redownloads oversized single part temp file")
+    func redownloadsOversizedSinglePartTempFile() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        try Data(repeating: 7, count: payload.count + 128)
+            .write(to: URL(fileURLWithPath: destination.path + ".part"))
+
+        let engine = HTTPDownloadEngine()
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            totalBytes: Int64(payload.count),
+            downloadedBytes: Int64(payload.count + 128),
+            supportsResume: true,
+            eTag: "\"test\""
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part"))
+    }
+
+    @Test("finalizes single part temp file when it already matches known size")
+    func finalizesSinglePartTempFileWhenItAlreadyMatchesKnownSize() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        try payload.write(to: URL(fileURLWithPath: destination.path + ".part"))
+
+        let engine = HTTPDownloadEngine()
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            totalBytes: Int64(payload.count),
+            downloadedBytes: Int64(payload.count),
+            supportsResume: true,
+            eTag: "\"test\""
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part"))
+    }
+
     @Test("retries transient server failures")
     func retriesTransientServerFailures() async throws {
         let payload = Self.payload()
@@ -212,10 +271,113 @@ struct HTTPDownloadEngineTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
     }
 
+    @Test("recovers from corrupt segment manifest")
+    func recoversFromCorruptSegmentManifest() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let plan = SegmentPlan.make(totalBytes: Int64(payload.count), segmentCount: 4)
+        for segment in plan.segments {
+            let keptLength = max(1, Int(segment.length / 3))
+            let range = Int(segment.start)..<(Int(segment.start) + keptLength)
+            try payload.subdata(in: range).write(to: URL(fileURLWithPath: destination.path + ".part\(segment.index)"))
+        }
+        try Data("{broken".utf8).write(to: URL(fileURLWithPath: destination.path + ".segments"))
+
+        let engine = HTTPDownloadEngine()
+        engine.configure(segmentCount: 4, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            totalBytes: Int64(payload.count),
+            downloadedBytes: Int64(payload.count / 3),
+            supportsResume: true,
+            eTag: "\"test\""
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
+    }
+
+    @Test("redownloads oversized segment temp file")
+    func redownloadsOversizedSegmentTempFile() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let plan = SegmentPlan.make(totalBytes: Int64(payload.count), segmentCount: 4)
+        for segment in plan.segments {
+            let length = Int(segment.index == 0 ? segment.length + 64 : max(1, segment.length / 2))
+            let range = Int(segment.start)..<min(Int(segment.start) + length, payload.count)
+            try payload.subdata(in: range).write(to: URL(fileURLWithPath: destination.path + ".part\(segment.index)"))
+        }
+
+        let engine = HTTPDownloadEngine()
+        engine.configure(segmentCount: 4, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            totalBytes: Int64(payload.count),
+            downloadedBytes: Int64(payload.count / 2),
+            supportsResume: true,
+            eTag: "\"test\""
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
+    }
+
     @Test("falls back to single stream when segmented server ignores range")
     func fallsBackToSingleStreamWhenSegmentedServerIgnoresRange() async throws {
         let payload = Self.largePayload()
         let server = try RangeTestServer(payload: payload, behavior: .ignoreRange)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 4, retryLimit: 0)
+        await engine.start(Self.request(source: server.url, destination: destination))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
+        #expect(recorder.snapshots.contains {
+            $0.connectionSummary == L10n.string(
+                "http_connection_summary",
+                L10n.string("http_connection_single_stream"),
+                L10n.string("http_connection_not_resumable")
+            )
+        })
+    }
+
+    @Test("falls back to single stream when segmented server rejects range")
+    func fallsBackToSingleStreamWhenSegmentedServerRejectsRange() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload, behavior: .rejectRangeRequests)
         try await server.start()
         defer { server.stop() }
 
@@ -319,6 +481,37 @@ struct HTTPDownloadEngineTests {
                 L10n.string("http_connection_segments", 4),
                 L10n.string("http_connection_resumable")
             )
+        })
+    }
+
+    @Test("falls back to range probe when HEAD omits content length")
+    func fallsBackToRangeProbeWhenHEADOmitsContentLength() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload, behavior: .headWithoutContentLength)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 4, retryLimit: 0)
+        await engine.start(Self.request(source: server.url, destination: destination))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(recorder.snapshots.contains {
+            $0.totalBytes == Int64(payload.count)
+                && $0.connectionSummary == L10n.string(
+                    "http_connection_summary",
+                    L10n.string("http_connection_segments", 4),
+                    L10n.string("http_connection_resumable")
+                )
         })
     }
 
@@ -441,6 +634,8 @@ private final class RangeTestServer: @unchecked Sendable {
         case mismatchedContentRange
         case changingGETValidator
         case headWithoutRangeMetadata
+        case headWithoutContentLength
+        case rejectRangeRequests
     }
 
     private let payload: Data
@@ -509,6 +704,17 @@ private final class RangeTestServer: @unchecked Sendable {
                 )
             }
 
+            if behavior == .headWithoutContentLength {
+                return Self.httpResponse(
+                    status: "200 OK",
+                    headers: [
+                        "Accept-Ranges": "bytes",
+                        "ETag": "\"test\""
+                    ],
+                    body: Data()
+                )
+            }
+
             return Self.httpResponse(
                 status: "200 OK",
                 headers: baseHeaders(contentLength: payload.count, eTag: "\"test\""),
@@ -555,6 +761,17 @@ private final class RangeTestServer: @unchecked Sendable {
             )
         }
 
+        if behavior == .rejectRangeRequests, hasRange {
+            return Self.httpResponse(
+                status: "416 Range Not Satisfiable",
+                headers: [
+                    "Content-Range": "bytes */\(payload.count)",
+                    "ETag": "\"test\""
+                ],
+                body: Data()
+            )
+        }
+
         let range = requestedRange ?? 0..<payload.count
         let body = payload.subdata(in: range)
         let eTag = behavior == .changingGETValidator ? "\"changed\"" : "\"test\""
@@ -596,6 +813,7 @@ private final class RangeTestServer: @unchecked Sendable {
         let parts = rawRange.split(separator: "-", maxSplits: 1).map(String.init)
         let start = Int(parts.first ?? "0") ?? 0
         let end = Int(parts.dropFirst().first ?? "") ?? (payloadCount - 1)
+        guard start < payloadCount else { return start..<start }
         return start..<(min(end, payloadCount - 1) + 1)
     }
 

@@ -15,6 +15,7 @@ if enableNativeLibtorrent && !FileManager.default.fileExists(atPath: libtorrentA
 }
 
 var swiftGetXDependencies: [Target.Dependency] = ["SwiftGetXCore"]
+var swiftGetXTestDependencies: [Target.Dependency] = ["SwiftGetX", "SwiftGetXCore"]
 var targets: [Target] = [
     .target(
         name: "SwiftGetXCore",
@@ -24,6 +25,7 @@ var targets: [Target] = [
 
 if enableNativeLibtorrent {
     swiftGetXDependencies.append("CSwiftGetXLibtorrent")
+    swiftGetXTestDependencies.append("CSwiftGetXLibtorrent")
     targets.append(
         .target(
             name: "CSwiftGetXLibtorrent",
@@ -106,7 +108,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SwiftGetXTests",
-            dependencies: ["SwiftGetX", "SwiftGetXCore"]
+            dependencies: swiftGetXTestDependencies
         )
     ]
 )

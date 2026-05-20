@@ -81,6 +81,7 @@
 "download_status_paused" = "已暂停";
 "download_status_queued" = "等待中";
 "download_status_running" = "下载中";
+"download_status_seeding" = "做种中";
 "download_status_verifying" = "校验中";
 "empty_tasks_message" = "点击左上角加号，粘贴直链、磁力链接或种子文件地址。";
 "empty_tasks_title" = "还没有下载任务";
@@ -129,6 +130,7 @@
 "inspector_tab_logs" = "日志";
 "inspector_tab_overview" = "概览";
 "log_download_completed" = "下载完成";
+"log_download_ready_seeding" = "下载完成，正在做种";
 "log_paused" = "已暂停";
 "log_restored_paused_after_restart" = "应用重启后任务已恢复为暂停状态";
 "log_start_download" = "开始下载";

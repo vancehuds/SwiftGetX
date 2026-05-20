@@ -19,6 +19,7 @@ struct MenuBarSnapshotTests {
         let tasks = [
             makeTask(status: .running, speed: 1_000),
             makeTask(status: .running, speed: 2_500),
+            makeTask(status: .seeding, speed: 900),
             makeTask(status: .queued),
             makeTask(status: .completed),
             makeTask(status: .failed)
@@ -26,8 +27,9 @@ struct MenuBarSnapshotTests {
 
         let snapshot = MenuBarSnapshot(tasks: tasks)
 
-        #expect(snapshot.totalCount == 5)
+        #expect(snapshot.totalCount == 6)
         #expect(snapshot.runningCount == 2)
+        #expect(snapshot.seedingCount == 1)
         #expect(snapshot.queuedCount == 1)
         #expect(snapshot.completedCount == 1)
         #expect(snapshot.failedCount == 1)
@@ -42,20 +44,21 @@ struct MenuBarSnapshotTests {
         let paused = makeTask(name: "paused", status: .paused, createdAt: baseDate.addingTimeInterval(10))
         let failed = makeTask(name: "failed", status: .failed, createdAt: baseDate.addingTimeInterval(20))
         let queued = makeTask(name: "queued", status: .queued, createdAt: baseDate.addingTimeInterval(30))
+        let seeding = makeTask(name: "seeding", status: .seeding, createdAt: baseDate.addingTimeInterval(35))
         let verifying = makeTask(name: "verifying", status: .verifying, createdAt: baseDate.addingTimeInterval(40))
         let running = makeTask(name: "running", status: .running, createdAt: baseDate.addingTimeInterval(50))
 
         let snapshot = MenuBarSnapshot(
-            tasks: [completedNewest, paused, failed, queued, verifying, running],
+            tasks: [completedNewest, paused, failed, queued, seeding, verifying, running],
             recentLimit: 5
         )
 
         #expect(snapshot.recentTasks.map(\.name) == [
             "running",
             "verifying",
+            "seeding",
             "queued",
-            "paused",
-            "failed"
+            "paused"
         ])
     }
 

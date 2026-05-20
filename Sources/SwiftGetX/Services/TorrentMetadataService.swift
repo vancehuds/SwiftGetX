@@ -129,6 +129,9 @@ actor TorrentMetadataService {
                 return preview
             }
         } catch {
+            let metadataStatus: TorrentMetadataStatus = (error as? TorrentMetadataError) == .metadataTimeout
+                ? .fetching
+                : .unavailable
             return TorrentMetadataPreview(
                 source: source,
                 kind: .torrentMagnet,
@@ -136,7 +139,7 @@ actor TorrentMetadataService {
                 resolvedTorrentFilePath: nil,
                 files: [],
                 totalBytes: 0,
-                metadataStatus: .unavailable,
+                metadataStatus: metadataStatus,
                 errorMessage: error.localizedDescription
             )
         }

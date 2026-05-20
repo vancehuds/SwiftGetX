@@ -73,7 +73,7 @@ final class DownloadCoordinator {
         )
 
         guard let tasks = try? modelContext.fetch(descriptor) else { return }
-        for task in tasks where task.status == .running || task.status == .verifying {
+        for task in tasks where task.status == .running || task.status == .seeding || task.status == .verifying {
             task.status = .paused
             task.appendLog(L10n.string("log_restored_paused_after_restart"))
         }
@@ -252,7 +252,7 @@ final class DownloadCoordinator {
 
     func remove(_ task: DownloadTask, deletingFiles: Bool) {
         guard let modelContext else { return }
-        let shouldDeleteLocalData = deletingFiles || task.status != .completed
+        let shouldDeleteLocalData = deletingFiles || !task.hasFinishedDownloading
         let request = DownloadRequest(task: task)
         Task {
             await engine(for: request.kind).remove(request, deletingFiles: shouldDeleteLocalData)
@@ -376,7 +376,7 @@ final class DownloadCoordinator {
     }
 
     func pauseAll() {
-        for task in tasks() where task.status == .running || task.status == .queued || task.status == .verifying {
+        for task in tasks() where task.status == .running || task.status == .seeding || task.status == .queued || task.status == .verifying {
             pause(task)
         }
     }
@@ -471,14 +471,25 @@ final class DownloadCoordinator {
         }
 
         switch snapshot.status {
-        case .completed:
-            task.completedAt = .now
-            task.speedBytesPerSecond = 0
-            task.appendLog(L10n.string("log_download_completed"))
-            if settings?.completionNotificationsEnabled ?? true {
-                NotificationManager.notifyCompletion(for: task)
+        case .seeding:
+            if task.completedAt == nil {
+                task.completedAt = .now
+                task.appendLog(L10n.string("log_download_ready_seeding"))
+                if settings?.completionNotificationsEnabled ?? true {
+                    NotificationManager.notifyCompletion(for: task)
+                }
+                scheduleQueue()
             }
-            scheduleQueue()
+        case .completed:
+            task.speedBytesPerSecond = 0
+            if task.completedAt == nil {
+                task.completedAt = .now
+                task.appendLog(L10n.string("log_download_completed"))
+                if settings?.completionNotificationsEnabled ?? true {
+                    NotificationManager.notifyCompletion(for: task)
+                }
+                scheduleQueue()
+            }
         case .failed:
             task.speedBytesPerSecond = 0
             task.appendLog(snapshot.errorMessage ?? L10n.string("error_download_failed"))
@@ -511,6 +522,7 @@ final class DownloadCoordinator {
 enum DownloadFilter: String, CaseIterable, Identifiable {
     case all
     case running
+    case seeding
     case queued
     case paused
     case completed
@@ -524,6 +536,7 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: L10n.string("filter_all")
         case .running: L10n.string("download_status_running")
+        case .seeding: L10n.string("download_status_seeding")
         case .queued: L10n.string("download_status_queued")
         case .paused: L10n.string("download_status_paused")
         case .completed: L10n.string("download_status_completed")
@@ -537,6 +550,7 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: "tray.full"
         case .running: "arrow.down.circle"
+        case .seeding: "arrow.up.circle"
         case .queued: "clock"
         case .paused: "pause.circle"
         case .completed: "checkmark.circle"
@@ -552,6 +566,8 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
             true
         case .running:
             task.status == .running
+        case .seeding:
+            task.status == .seeding
         case .queued:
             task.status == .queued
         case .paused:

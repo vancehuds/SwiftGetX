@@ -15,6 +15,11 @@ struct ToolbarView: View {
         allTasks.filter { $0.status == .running }.reduce(0) { $0 + $1.speedBytesPerSecond }
     }
 
+    private var selectedTaskIsPausable: Bool {
+        guard let status = coordinator.selectedTask?.status else { return false }
+        return status == .running || status == .seeding
+    }
+
     var body: some View {
         @Bindable var coordinator = coordinator
 
@@ -47,13 +52,13 @@ struct ToolbarView: View {
                     Button {
                         guard let task = coordinator.selectedTask else { return }
                         switch task.status {
-                        case .running, .queued, .verifying:
+                        case .running, .seeding, .queued, .verifying:
                             coordinator.pause(task)
                         default:
                             coordinator.resume(task)
                         }
                     } label: {
-                        Image(systemName: coordinator.selectedTask?.status == .running ? "pause.fill" : "play.fill")
+                        Image(systemName: selectedTaskIsPausable ? "pause.fill" : "play.fill")
                     }
                     .buttonStyle(IconButtonStyle())
                     .disabled(coordinator.selectedTask == nil)

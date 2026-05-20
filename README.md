@@ -140,6 +140,32 @@ graph TD
 
 ## 🚀 快速上手 (Quick Start - 面向开发者本地编译)
 
+### 一键本地编译与测试
+仓库提供了本地开发入口脚本，默认执行轻量构建并运行测试（默认禁用 Native libtorrent，适合日常快速验证）：
+
+```sh
+Scripts/local-build.sh
+```
+
+常用参数：
+
+```sh
+# 只编译，不跑测试
+Scripts/local-build.sh --skip-tests
+
+# Release 构建
+Scripts/local-build.sh --release
+
+# 启用 Native libtorrent 后构建并测试
+Scripts/local-build.sh --native-libtorrent
+
+# 组装 SwiftGetX.app 与 SwiftGetX.dmg
+Scripts/local-build.sh --release --dmg
+
+# 构建后安装 Chrome Native Messaging Host（可省略 ID 自动发现）
+Scripts/local-build.sh --install-native-host <your-extension-id>
+```
+
 ### 1. 基础构建（极速开发模式 - 默认禁用 BT）
 为了能让任何开发者在拿到仓库的 3 秒内成功编译并跑通，SwiftGetX 默认采用**占位适配器模式**，此时**完全不需要**下载复杂的 C++ 依赖：
 

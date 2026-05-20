@@ -58,7 +58,11 @@ struct TorrentMetadataServiceTests {
 
         #expect(preview.kind == .torrentMagnet)
         #expect(preview.displayName == "Demo")
+        #if canImport(CSwiftGetXLibtorrent)
+        #expect(preview.metadataStatus == .fetching)
+        #else
         #expect(preview.metadataStatus == .unavailable)
+        #endif
         #expect(preview.files.isEmpty)
     }
 
@@ -69,7 +73,11 @@ struct TorrentMetadataServiceTests {
         let preview = await service.preview(source: "magnet:?xt=urn:btih:abcdef&dn=Timeout")
 
         #expect(preview.displayName == "Timeout")
+        #if canImport(CSwiftGetXLibtorrent)
+        #expect(preview.metadataStatus == .fetching)
+        #else
         #expect(preview.metadataStatus == .unavailable)
+        #endif
     }
 
     private static func singleFileTorrentData(name: String, length: Int) -> Data {

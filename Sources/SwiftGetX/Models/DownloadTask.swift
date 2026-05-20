@@ -114,6 +114,10 @@ final class DownloadTask {
         status == .completed || status == .failed
     }
 
+    var hasFinishedDownloading: Bool {
+        status == .completed || status == .seeding
+    }
+
     var torrentMetadataStatus: TorrentMetadataStatus {
         get {
             guard let rawValue = torrentMetadataStatusRawValue else { return .unknown }
@@ -246,6 +250,7 @@ enum DownloadKind: String, Codable, CaseIterable, Identifiable {
 enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
     case queued
     case running
+    case seeding
     case paused
     case verifying
     case completed
@@ -259,6 +264,8 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             L10n.string("download_status_queued")
         case .running:
             L10n.string("download_status_running")
+        case .seeding:
+            L10n.string("download_status_seeding")
         case .paused:
             L10n.string("download_status_paused")
         case .verifying:
@@ -276,6 +283,8 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             "clock"
         case .running:
             "arrow.down.circle.fill"
+        case .seeding:
+            "arrow.up.circle.fill"
         case .paused:
             "pause.circle"
         case .verifying:

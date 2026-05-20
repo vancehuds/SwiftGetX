@@ -47,8 +47,9 @@ struct TaskListView: View {
                                     }
                                 }
                                 .contextMenu {
-                                    Button(task.status == .running ? L10n.string("action_pause") : L10n.string("action_start")) {
-                                        if task.status == .running {
+                                    let isPausable = task.status == .running || task.status == .seeding
+                                    Button(isPausable ? L10n.string("action_pause") : L10n.string("action_start")) {
+                                        if isPausable {
                                             coordinator.pause(task)
                                         } else {
                                             coordinator.resume(task)
@@ -82,7 +83,7 @@ struct TaskListView: View {
             )
         ) {
             if let taskToDelete {
-                if taskToDelete.status == .completed {
+                if taskToDelete.hasFinishedDownloading {
                     Button(L10n.string("delete_task_only"), role: .destructive) {
                         coordinator.remove(taskToDelete, deletingFiles: false)
                         self.taskToDelete = nil
@@ -103,7 +104,7 @@ struct TaskListView: View {
             }
         } message: {
             if let taskToDelete {
-                if taskToDelete.status == .completed {
+                if taskToDelete.hasFinishedDownloading {
                     Text(L10n.string("delete_task_completed_message"))
                 } else {
                     Text(L10n.string("delete_task_unfinished_message"))
@@ -117,7 +118,7 @@ struct TaskListView: View {
 
     private func summary(for tasks: [DownloadTask]) -> String {
         let running = tasks.filter { $0.status == .running }.count
-        let completed = tasks.filter { $0.status == .completed }.count
+        let completed = tasks.filter(\.hasFinishedDownloading).count
         return L10n.string("task_list_summary", tasks.count, running, completed)
     }
 }
@@ -227,21 +228,22 @@ private struct TaskRowView: View {
         .overlay(alignment: .topTrailing) {
             if isHovered {
                 HStack(spacing: layout.value(6)) {
+                    let isPausable = task.status == .running || task.status == .seeding
                     Button {
-                        if task.status == .running {
+                        if isPausable {
                             coordinator.pause(task)
                         } else {
                             coordinator.resume(task)
                         }
                     } label: {
-                        Image(systemName: task.status == .running ? "pause.fill" : "play.fill")
+                        Image(systemName: isPausable ? "pause.fill" : "play.fill")
                             .font(layout.font(10, weight: .bold))
                             .foregroundStyle(Color.primary)
                             .frame(width: layout.value(26), height: layout.value(26))
                             .background(Color.primary.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
-                    .help(task.status == .running ? L10n.string("action_pause") : L10n.string("action_start"))
+                    .help(isPausable ? L10n.string("action_pause") : L10n.string("action_start"))
 
                     Button {
                         let url = URL(fileURLWithPath: task.savePath)
@@ -292,6 +294,8 @@ private struct TaskRowView: View {
             .secondary
         case .running:
             .blue
+        case .seeding:
+            .mint
         case .paused:
             .orange
         case .verifying:

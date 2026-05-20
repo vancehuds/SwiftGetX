@@ -256,16 +256,35 @@ struct NewTaskSheet: View {
             return
         }
 
-        var nextPreviews = [TorrentMetadataPreview]()
         let previewService = TorrentMetadataService(
             magnetTimeout: .seconds(settings.torrentMagnetMetadataTimeoutSeconds)
         )
-        for source in sources {
-            if Task.isCancelled { return }
-            let suggested = sources.count == 1 ? suggestedFilename : nil
-            let preview = await previewService.preview(source: source, suggestedFilename: suggested)
-            nextPreviews.append(preview)
+        let nextPreviews = await withTaskGroup(
+            of: (Int, TorrentMetadataPreview)?.self,
+            returning: [TorrentMetadataPreview].self
+        ) { group in
+            for (index, source) in sources.enumerated() {
+                let suggested = sources.count == 1 ? suggestedFilename : nil
+                group.addTask {
+                    guard !Task.isCancelled else { return nil }
+                    let preview = await previewService.preview(source: source, suggestedFilename: suggested)
+                    return (index, preview)
+                }
+            }
+
+            var orderedPreviews = Array<TorrentMetadataPreview?>(repeating: nil, count: sources.count)
+            for await result in group {
+                guard !Task.isCancelled else {
+                    group.cancelAll()
+                    return []
+                }
+                if let result {
+                    orderedPreviews[result.0] = result.1
+                }
+            }
+            return orderedPreviews.compactMap(\.self)
         }
+        if Task.isCancelled { return }
 
         await MainActor.run {
             guard previewSources == sources else { return }

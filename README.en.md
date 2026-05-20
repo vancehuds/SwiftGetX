@@ -143,6 +143,32 @@ If you prefer to run pre-built binaries directly without compiling from source, 
 
 ## 🚀 Quick Start (For Developers compiling from Source)
 
+### One-command Local Build and Test
+The repository includes a local development entrypoint. By default, it runs the lightweight build and test suite with Native libtorrent disabled:
+
+```sh
+Scripts/local-build.sh
+```
+
+Common options:
+
+```sh
+# Build only, without tests
+Scripts/local-build.sh --skip-tests
+
+# Release build
+Scripts/local-build.sh --release
+
+# Build and test with Native libtorrent enabled
+Scripts/local-build.sh --native-libtorrent
+
+# Assemble SwiftGetX.app and SwiftGetX.dmg
+Scripts/local-build.sh --release --dmg
+
+# Install the Chrome Native Messaging host after build
+Scripts/local-build.sh --install-native-host <your-extension-id>
+```
+
 ### 1. Default Compilation (Swift-Only HTTP Mode)
 To build and test the codebase instantly without external dependencies:
 

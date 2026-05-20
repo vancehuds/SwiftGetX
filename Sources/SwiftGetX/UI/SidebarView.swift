@@ -126,6 +126,8 @@ private extension DownloadFilter {
             .primary
         case .running:
             .blue
+        case .seeding:
+            .mint
         case .queued:
             .secondary
         case .paused:
