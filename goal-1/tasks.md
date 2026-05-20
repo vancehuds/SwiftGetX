@@ -478,17 +478,34 @@ Next step:
 
 ## Task 12: Torrent Path Layout and Resume Schema
 
-Status: [ ]
+Status: [x]
 
 Implement `TorrentContentLayout` with explicit save directory, content root, file paths, offsets, lengths, priorities, path traversal protection, duplicate path detection, control-character/length checks, and a pure Swift resume-state schema.
 
 Work performed:
 
+- Added `TorrentContentLayout`, `TorrentContentFile`, and `TorrentContentPriority` to `SwiftGetXTorrentCore` for pure Swift torrent file mapping with explicit save directory, output name, content root, final file URL for single-file torrents, per-file URLs, offsets, lengths, and priorities.
+- Preserved raw torrent path components in `TorrentFileInfo` and added `TorrentMetainfo.isMultiFile`/`isSingleFile` so layout code can distinguish single-file torrents from multi-file torrents that happen to contain one file.
+- Added layout validation for missing files, non-contiguous file indexes, unsafe path components, absolute/root-like paths, `..`, empty components, slash/backslash injection, control/bidi characters, per-component and full-path byte limits, duplicate path collisions, and total-length overflow.
+- Added `TorrentCoreResumeState` and supporting resume schema types for completed piece bitsets, partial blocks, file modification/fingerprint checks, tracker state, peer ban list, schema versioning, info-hash/layout validation, and stable JSON encode/decode with decode-time validation.
+- Added focused torrent-core tests for safe single/multi-file layouts, one-file multi-file torrents, offsets, priorities, content root/final file paths, unsafe/malicious paths, duplicate paths, and resume-state round trips plus invalid piece/block/version/hash/layout cases.
+
 Verification evidence:
+
+- `swift test --filter SwiftGetXTorrentCore` passed with 16 tests in 1 suite.
+- `swift build` passed.
+- `swift test` passed with 161 tests across 14 suites.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Task 12 establishes the pure Swift layout and resume-state model, but it does not yet replace libtorrent runtime resume data or wire the layout into a running Swift torrent engine. That remains Task 14+ and peer/storage tasks.
+- Task 13 still needs app-level BT save path semantics and deletion boundary work so UI/model paths and local delete confirmations use the new layout consistently.
+- Disk-space preflight and sandbox boundary checks for actual torrent storage writes remain in later storage/filesystem tasks.
+
 Next step:
+
+- Large Check 4: Torrent Metadata Foundation.
 
 ## Large Check 4: Torrent Metadata Foundation
 

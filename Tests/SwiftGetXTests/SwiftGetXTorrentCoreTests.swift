@@ -111,6 +111,307 @@ struct SwiftGetXTorrentCoreTests {
         }
     }
 
+    @Test("builds safe content layout with offsets and priorities")
+    func buildsSafeContentLayoutWithOffsetsAndPriorities() throws {
+        let saveDirectory = URL(fileURLWithPath: "/tmp/SwiftGetXDownloads", isDirectory: true)
+        let layout = try TorrentContentLayout(
+            files: [
+                TorrentFileInfo(index: 0, path: "album/a.txt", length: 10),
+                TorrentFileInfo(index: 1, path: "album/nested/b.txt", length: 20)
+            ],
+            saveDirectory: saveDirectory,
+            priorities: [1: .high]
+        )
+
+        #expect(layout.saveDirectory.path == "/tmp/SwiftGetXDownloads")
+        #expect(layout.outputName == "album")
+        #expect(layout.contentRoot.path == "/tmp/SwiftGetXDownloads/album")
+        #expect(layout.isMultiFile)
+        #expect(layout.finalFileURL == nil)
+        #expect(layout.totalLength == 30)
+        #expect(layout.files.map(\.relativePath) == ["a.txt", "nested/b.txt"])
+        #expect(layout.files.map(\.offset) == [0, 10])
+        #expect(layout.files.map(\.endOffset) == [10, 30])
+        #expect(layout.files.map(\.priority) == [.normal, .high])
+        #expect(layout.files[1].fileURL.path == "/tmp/SwiftGetXDownloads/album/nested/b.txt")
+        #expect(layout.file(containingGlobalOffset: 10)?.index == 1)
+        #expect(layout.file(containingGlobalOffset: 30) == nil)
+    }
+
+    @Test("single-file layout keeps save directory as content root")
+    func singleFileLayoutKeepsSaveDirectoryAsContentRoot() throws {
+        let saveDirectory = URL(fileURLWithPath: "/tmp/SwiftGetXDownloads", isDirectory: true)
+        let layout = try TorrentContentLayout(
+            files: [
+                TorrentFileInfo(index: 0, path: "demo.bin", length: 42)
+            ],
+            saveDirectory: saveDirectory
+        )
+
+        #expect(layout.contentRoot.path == "/tmp/SwiftGetXDownloads")
+        #expect(layout.outputName == "demo.bin")
+        #expect(!layout.isMultiFile)
+        #expect(layout.finalFileURL?.path == "/tmp/SwiftGetXDownloads/demo.bin")
+        #expect(layout.files.first?.fileURL.path == "/tmp/SwiftGetXDownloads/demo.bin")
+    }
+
+    @Test("multi-file metainfo keeps content root even with one file")
+    func multiFileMetainfoKeepsContentRootEvenWithOneFile() throws {
+        let info = bencodeDictionary([
+            ("files", bencodeList([
+                bencodeDictionary([
+                    ("length", bencodeInteger(10)),
+                    ("path", bencodeList([bencodeString("only.bin")]))
+                ])
+            ])),
+            ("name", bencodeString("bundle")),
+            ("piece length", bencodeInteger(16_384)),
+            ("pieces", bencodeData(Data("bbbbbbbbbbbbbbbbbbbb".utf8)))
+        ])
+        let metainfo = try TorrentMetainfo.parse(data: torrentData(announce: nil, info: info))
+        let layout = try TorrentContentLayout(
+            metainfo: metainfo,
+            saveDirectory: URL(fileURLWithPath: "/tmp/SwiftGetXDownloads", isDirectory: true),
+            outputName: "renamed-bundle"
+        )
+
+        #expect(metainfo.isMultiFile)
+        #expect(layout.isMultiFile)
+        #expect(layout.outputName == "renamed-bundle")
+        #expect(layout.contentRoot.path == "/tmp/SwiftGetXDownloads/renamed-bundle")
+        #expect(layout.files.map(\.relativePath) == ["only.bin"])
+        #expect(layout.files.first?.fileURL.path == "/tmp/SwiftGetXDownloads/renamed-bundle/only.bin")
+    }
+
+    @Test("rejects unsafe torrent content paths")
+    func rejectsUnsafeTorrentContentPaths() {
+        let saveDirectory = URL(fileURLWithPath: "/tmp/SwiftGetXDownloads", isDirectory: true)
+
+        #expect(throws: TorrentContentLayoutError.invalidPathComponent(fileIndex: 0, component: "..")) {
+            try TorrentContentLayout(
+                files: [TorrentFileInfo(index: 0, path: "album/../escape.bin", length: 1, pathComponents: ["album", "..", "escape.bin"])],
+                saveDirectory: saveDirectory
+            )
+        }
+        #expect(throws: TorrentContentLayoutError.invalidPathComponent(fileIndex: 0, component: "")) {
+            try TorrentContentLayout(
+                files: [TorrentFileInfo(index: 0, path: "album/", length: 1, pathComponents: ["album", ""])],
+                saveDirectory: saveDirectory
+            )
+        }
+        #expect(throws: TorrentContentLayoutError.invalidPathComponent(fileIndex: 0, component: "/etc")) {
+            try TorrentContentLayout(
+                files: [TorrentFileInfo(index: 0, path: "/etc/passwd", length: 1, pathComponents: ["/etc", "passwd"])],
+                saveDirectory: saveDirectory
+            )
+        }
+        #expect(throws: TorrentContentLayoutError.invalidPathComponent(fileIndex: 0, component: "bad\u{202E}name.bin")) {
+            try TorrentContentLayout(
+                files: [TorrentFileInfo(index: 0, path: "album/bad\u{202E}name.bin", length: 1, pathComponents: ["album", "bad\u{202E}name.bin"])],
+                saveDirectory: saveDirectory
+            )
+        }
+        #expect(throws: TorrentContentLayoutError.pathTooLong(fileIndex: 0, path: "very-long-name.bin")) {
+            try TorrentContentLayout(
+                files: [TorrentFileInfo(index: 0, path: "album/very-long-name.bin", length: 1)],
+                saveDirectory: saveDirectory,
+                maximumPathBytes: 8
+            )
+        }
+        #expect(throws: TorrentContentLayoutError.duplicatePath(fileIndex: 1, path: "A.txt")) {
+            try TorrentContentLayout(
+                files: [
+                    TorrentFileInfo(index: 0, path: "album/a.txt", length: 1),
+                    TorrentFileInfo(index: 1, path: "album/A.txt", length: 1)
+                ],
+                saveDirectory: saveDirectory
+            )
+        }
+    }
+
+    @Test("torrent metainfo unsafe path components reach layout validation")
+    func torrentMetainfoUnsafePathComponentsReachLayoutValidation() throws {
+        let info = bencodeDictionary([
+            ("files", bencodeList([
+                bencodeDictionary([
+                    ("length", bencodeInteger(1)),
+                    ("path", bencodeList([bencodeString("nested"), bencodeString("")]))
+                ])
+            ])),
+            ("name", bencodeString("album")),
+            ("piece length", bencodeInteger(16_384)),
+            ("pieces", bencodeData(Data("bbbbbbbbbbbbbbbbbbbb".utf8)))
+        ])
+        let metainfo = try TorrentMetainfo.parse(data: torrentData(announce: nil, info: info))
+
+        #expect(metainfo.files.first?.pathComponents == ["album", "nested", ""])
+        #expect(throws: TorrentContentLayoutError.invalidPathComponent(fileIndex: 0, component: "")) {
+            try TorrentContentLayout(
+                metainfo: metainfo,
+                saveDirectory: URL(fileURLWithPath: "/tmp/SwiftGetXDownloads", isDirectory: true)
+            )
+        }
+    }
+
+    @Test("pure Swift resume state round trips structured progress")
+    func pureSwiftResumeStateRoundTripsStructuredProgress() throws {
+        let updatedAt = Date(timeIntervalSince1970: 1_234)
+        let state = try TorrentCoreResumeState(
+            infoHashV1Hex: "2c5e446faaaacea19b3f4e1df8d64213aaf88d1c",
+            pieceCount: 4,
+            layoutTotalLength: 30,
+            completedPieceIndexes: [3, 1, 3],
+            partialBlocks: [
+                try TorrentResumePartialBlock(pieceIndex: 2, offset: 16_384, length: 4_096),
+                try TorrentResumePartialBlock(pieceIndex: 0, offset: 0, length: 16_384, checksumSHA1Hex: "abc")
+            ],
+            fileChecks: [
+                try TorrentResumeFileCheck(fileIndex: 0, path: "a.txt", length: 10, modificationDate: updatedAt, contentFingerprint: "size:10")
+            ],
+            trackerStates: [
+                try TorrentResumeTrackerState(url: "udp://tracker.example:80", tier: 0, failureCount: 2, lastError: "timeout")
+            ],
+            peerBans: [
+                try TorrentResumePeerBan(peerID: "-SGX-", address: "127.0.0.1:6881", reason: "bad piece", bannedUntil: updatedAt)
+            ],
+            updatedAt: updatedAt
+        )
+        let encoded = try JSONEncoder().encode(state)
+        let decoded = try JSONDecoder().decode(TorrentCoreResumeState.self, from: encoded)
+
+        #expect(decoded == state)
+        #expect(decoded.version == TorrentCoreResumeState.schemaVersion)
+        #expect(decoded.completedPieces.completedPieceIndexes == [1, 3])
+        #expect(decoded.completedPieces.contains(3))
+        #expect(decoded.partialBlocks.map(\.pieceIndex) == [0, 2])
+        #expect(decoded.trackerStates.first?.failureCount == 2)
+        #expect(decoded.peerBans.first?.reason == "bad piece")
+    }
+
+    @Test("resume state validates info hash version and layout")
+    func resumeStateValidatesInfoHashVersionAndLayout() throws {
+        let saveDirectory = URL(fileURLWithPath: "/tmp/SwiftGetXDownloads", isDirectory: true)
+        let info = bencodeDictionary([
+            ("files", bencodeList([
+                bencodeDictionary([
+                    ("length", bencodeInteger(10)),
+                    ("path", bencodeList([bencodeString("a.txt")]))
+                ]),
+                bencodeDictionary([
+                    ("length", bencodeInteger(20)),
+                    ("path", bencodeList([bencodeString("nested"), bencodeString("b.txt")]))
+                ])
+            ])),
+            ("name", bencodeString("album")),
+            ("piece length", bencodeInteger(16_384)),
+            ("pieces", bencodeData(Data("bbbbbbbbbbbbbbbbbbbb".utf8)))
+        ])
+        let metainfo = try TorrentMetainfo.parse(data: torrentData(announce: nil, info: info))
+        let layout = try TorrentContentLayout(metainfo: metainfo, saveDirectory: saveDirectory)
+        let state = try TorrentCoreResumeState.empty(
+            for: metainfo,
+            layout: layout,
+            updatedAt: Date(timeIntervalSince1970: 1_234)
+        )
+        let encoded = try state.encodedJSON()
+        let decoded = try TorrentCoreResumeState.decodeJSON(
+            encoded,
+            expectedInfoHashV1Hex: metainfo.infoHashV1Hex,
+            expectedLayout: layout
+        )
+
+        #expect(decoded.fileChecks.map(\.path) == ["a.txt", "nested/b.txt"])
+        #expect(decoded.layoutTotalLength == 30)
+        #expect(throws: TorrentResumeStateError.invalidInfoHash(metainfo.infoHashV1Hex)) {
+            try decoded.validate(expectedInfoHashV1Hex: "0000000000000000000000000000000000000000")
+        }
+        #expect(throws: TorrentResumeStateError.unsupportedVersion(2)) {
+            try JSONDecoder().decode(
+                TorrentCoreResumeState.self,
+                from: Data(
+                    """
+                    {
+                      "version": 2,
+                      "infoHashV1Hex": "2c5e446faaaacea19b3f4e1df8d64213aaf88d1c",
+                      "layoutTotalLength": 30,
+                      "completedPieces": {
+                        "pieceCount": 4,
+                        "completedPieceIndexes": []
+                      },
+                      "partialBlocks": [],
+                      "fileChecks": [],
+                      "trackerStates": [],
+                      "peerBans": [],
+                      "updatedAt": 1234
+                    }
+                    """.utf8
+                )
+            )
+        }
+    }
+
+    @Test("resume state rejects invalid piece and block references")
+    func resumeStateRejectsInvalidPieceAndBlockReferences() throws {
+        #expect(throws: TorrentResumeStateError.invalidPieceIndex(4)) {
+            try TorrentCoreResumeState(
+                infoHashV1Hex: "2c5e446faaaacea19b3f4e1df8d64213aaf88d1c",
+                pieceCount: 4,
+                layoutTotalLength: 30,
+                completedPieceIndexes: [4]
+            )
+        }
+        #expect(throws: TorrentResumeStateError.invalidPieceIndex(4)) {
+            try TorrentCoreResumeState(
+                infoHashV1Hex: "2c5e446faaaacea19b3f4e1df8d64213aaf88d1c",
+                pieceCount: 4,
+                layoutTotalLength: 30,
+                partialBlocks: [
+                    try TorrentResumePartialBlock(pieceIndex: 4, offset: 0, length: 1)
+                ]
+            )
+        }
+        #expect(throws: TorrentResumeStateError.duplicatePartialBlock(pieceIndex: 0, offset: 0)) {
+            try TorrentCoreResumeState(
+                infoHashV1Hex: "2c5e446faaaacea19b3f4e1df8d64213aaf88d1c",
+                pieceCount: 4,
+                layoutTotalLength: 30,
+                partialBlocks: [
+                    try TorrentResumePartialBlock(pieceIndex: 0, offset: 0, length: 1),
+                    try TorrentResumePartialBlock(pieceIndex: 0, offset: 0, length: 2)
+                ]
+            )
+        }
+        #expect(throws: TorrentResumeStateError.invalidBlockRange(pieceIndex: 0)) {
+            try TorrentResumePartialBlock(pieceIndex: 0, offset: 0, length: 0)
+        }
+        #expect(throws: TorrentResumeStateError.duplicatePartialBlock(pieceIndex: 0, offset: 0)) {
+            try JSONDecoder().decode(
+                TorrentCoreResumeState.self,
+                from: Data(
+                    """
+                    {
+                      "version": 1,
+                      "infoHashV1Hex": "2c5e446faaaacea19b3f4e1df8d64213aaf88d1c",
+                      "layoutTotalLength": 30,
+                      "completedPieces": {
+                        "pieceCount": 4,
+                        "completedPieceIndexes": [1, 3]
+                      },
+                      "partialBlocks": [
+                        { "pieceIndex": 0, "offset": 0, "length": 1 },
+                        { "pieceIndex": 0, "offset": 0, "length": 2 }
+                      ],
+                      "fileChecks": [],
+                      "trackerStates": [],
+                      "peerBans": [],
+                      "updatedAt": 1234
+                    }
+                    """.utf8
+                )
+            )
+        }
+    }
+
     @Test("parses magnet hex btih display name trackers and length")
     func parsesMagnetHexBtihDisplayNameTrackersAndLength() throws {
         let magnet = try MagnetURI.parse(

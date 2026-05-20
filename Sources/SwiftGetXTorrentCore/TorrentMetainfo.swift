@@ -21,11 +21,15 @@ public enum TorrentCoreError: Error, Equatable, Sendable, LocalizedError {
 public struct TorrentFileInfo: Codable, Equatable, Sendable {
     public var index: Int
     public var path: String
+    public var pathComponents: [String]
     public var length: Int64
 
-    public init(index: Int, path: String, length: Int64) {
+    public init(index: Int, path: String, length: Int64, pathComponents: [String]? = nil) {
         self.index = index
         self.path = path
+        self.pathComponents = pathComponents ?? path
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .map(String.init)
         self.length = length
     }
 }
@@ -38,11 +42,16 @@ public struct TorrentMetainfo: Equatable, Sendable {
     public var announce: String?
     public var announceList: [[String]]
     public var isPrivate: Bool
+    public var isMultiFile: Bool
     public var infoDictionaryBytes: Data
     public var infoHashV1: Data
 
     public var totalLength: Int64 {
         files.reduce(0) { $0 + $1.length }
+    }
+
+    public var isSingleFile: Bool {
+        !isMultiFile
     }
 
     public var infoHashV1Hex: String {
@@ -73,14 +82,17 @@ public struct TorrentMetainfo: Equatable, Sendable {
         }
         let pieces = try pieces(from: info[stringKey("pieces")])
 
+        let parsedFiles = try files(from: info, rootName: name)
+
         return TorrentMetainfo(
             name: name,
-            files: try files(from: info, rootName: name),
+            files: parsedFiles.files,
             pieceLength: pieceLength,
             pieces: pieces,
             announce: root[stringKey("announce")]?.stringValue,
             announceList: announceList(from: root[stringKey("announce-list")]),
             isPrivate: integer(in: info, key: "private") == 1,
+            isMultiFile: parsedFiles.isMultiFile,
             infoDictionaryBytes: infoDictionaryBytes,
             infoHashV1: Data(hash)
         )
@@ -90,7 +102,10 @@ public struct TorrentMetainfo: Equatable, Sendable {
         try parse(data: Data(contentsOf: url))
     }
 
-    private static func files(from info: [Data: BencodeValue], rootName: String) throws -> [TorrentFileInfo] {
+    private static func files(from info: [Data: BencodeValue], rootName: String) throws -> (
+        files: [TorrentFileInfo],
+        isMultiFile: Bool
+    ) {
         if case .list(let fileValues)? = info[stringKey("files")] {
             let files = try fileValues.enumerated().map { offset, value -> TorrentFileInfo in
                 guard case .dictionary(let fileDictionary) = value,
@@ -108,19 +123,20 @@ public struct TorrentMetainfo: Equatable, Sendable {
                 return TorrentFileInfo(
                     index: offset,
                     path: ([rootName] + components).joined(separator: "/"),
-                    length: length
+                    length: length,
+                    pathComponents: [rootName] + components
                 )
             }
             guard !files.isEmpty else {
                 throw TorrentCoreError.invalidMetainfo("Torrent contains no files.")
             }
-            return files
+            return (files, true)
         }
 
         guard let length = integer(in: info, key: "length"), length >= 0 else {
             throw TorrentCoreError.invalidMetainfo("Missing single-file length.")
         }
-        return [TorrentFileInfo(index: 0, path: rootName, length: length)]
+        return ([TorrentFileInfo(index: 0, path: rootName, length: length, pathComponents: [rootName])], false)
     }
 
     private static func pieces(from value: BencodeValue?) throws -> [Data] {
@@ -165,7 +181,7 @@ public struct TorrentMetainfo: Equatable, Sendable {
     ) -> [String]? {
         let value = dictionary[stringKey(preferredKey)] ?? dictionary[stringKey(fallbackKey)]
         guard case .list(let components)? = value else { return nil }
-        let strings = components.compactMap(\.stringValue).filter { !$0.isEmpty }
+        let strings = components.compactMap(\.stringValue)
         return strings.isEmpty ? nil : strings
     }
 
