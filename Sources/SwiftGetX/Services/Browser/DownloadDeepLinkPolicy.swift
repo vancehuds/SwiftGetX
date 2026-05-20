@@ -9,6 +9,7 @@ struct DownloadDeepLinkValidation: Equatable, Sendable {
 enum DownloadDeepLinkPolicy {
     static let maximumURLLength = 8 * 1_024
     static let maximumPublicTaskCount = 20
+    static let maximumTrustedPayloadTaskCount = 100
 
     static func validation(
         for url: URL,
@@ -40,6 +41,28 @@ enum DownloadDeepLinkPolicy {
                 handoffAck: handoffAck,
                 now: now
             ),
+            sourceCount: sources.count
+        )
+    }
+
+    static func validationForTrustedPayloadSource(_ source: String) -> DownloadDeepLinkValidation? {
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              hasNoDangerousCharacters(source, allowsSourceDelimiters: true)
+        else {
+            return nil
+        }
+
+        let sources = SourceParser.extractSources(from: source)
+        guard !sources.isEmpty,
+              sources.count <= maximumTrustedPayloadTaskCount,
+              sources.allSatisfy(isAllowedDownloadSource),
+              !containsRejectedTopLevelScheme(in: source)
+        else {
+            return nil
+        }
+
+        return DownloadDeepLinkValidation(
+            linkTrust: .trustedNativeHandoff,
             sourceCount: sources.count
         )
     }

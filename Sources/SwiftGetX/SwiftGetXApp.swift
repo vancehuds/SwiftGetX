@@ -181,11 +181,12 @@ struct SwiftGetXApp: App {
         }
         guard let source else { return false }
 
-        let sources = SourceParser.extractSources(from: source)
-        guard !sources.isEmpty else { return false }
+        guard let validation = DownloadDeepLinkPolicy.validationForTrustedPayloadSource(source) else {
+            return false
+        }
 
         draft.source = source
-        draft.sourceCount = sources.count
+        draft.sourceCount = validation.sourceCount
         draft.requiresNativePayloadSource = false
         return true
     }

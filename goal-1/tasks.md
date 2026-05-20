@@ -236,17 +236,38 @@ Next step:
 
 ## Large Check 2: Browser and HTTP Metadata
 
-Status: [ ]
+Status: [x]
 
 Review Tasks 4-6 for security, parser correctness, localization, tests, and compatibility with existing download flows. Run targeted tests and fix issues.
 
 Work performed:
 
+- Audited Tasks 4-6 across deep-link validation, trusted native payload recovery, Chrome extension scan/takeover flow, popup error localization, browser-context persistence, `Content-Disposition` parsing, HTTP redirect metadata, and fresh-vs-resumed download filename handling.
+- Found that trusted native payload source text fetched from the localhost handoff server was only parsed before replacing the deep-link preview source. Added `DownloadDeepLinkPolicy.validationForTrustedPayloadSource` so native payload text is bounded, rejects control/bidi characters, rejects dangerous top-level schemes, requires allowed source schemes, and caps scanner batches at 100 sources.
+- Updated `SwiftGetXApp.applyPayloadSource` to use the trusted payload validator before mutating the draft source and source count.
+- Found that browser/context-provided suggested filenames could be persisted into HTTP response metadata without the same filename hardening used for server `Content-Disposition`. Added model-level suggested filename sanitization in `HTTPResponseMetadata`, including control-character, path-separator, illegal filename, empty, `"."`, `".."`, and bidirectional override handling.
+- Added focused regression tests for trusted native payload source bounds/unsafe text and HTTP metadata suggested filename sanitization.
+- Confirmed the Chrome extension takeover path still only cancels/erases Chrome downloads after `sendToSwiftGetX` returns `ok`; native-host runtime errors, app rejection, and unexpected exceptions still fall back to Chrome download.
+- Confirmed extension scan/popup JavaScript and localization JSON remain syntactically valid.
+
 Verification evidence:
+
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/popup.js` passed.
+- Node JSON parsing passed for `Sources/SwiftGetX/Resources/ChromeExtension/_locales/en/messages.json` and `Sources/SwiftGetX/Resources/ChromeExtension/_locales/zh_CN/messages.json`.
+- `swift test --filter NativeMessageHost --filter HTTPDownloadEngine --filter TorrentFileTests` passed with 60 tests across 3 suites.
+- `swift test` passed with 113 tests across 12 suites.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Extension metadata enrichment remains best-effort and can be limited by CORS, authentication, HEAD/range rejection, or slow servers; candidates still fall back to URL/title-based classification.
+- Browser extension filename parsing is intentionally lightweight, but Swift now re-sanitizes persisted HTTP metadata filenames before they can affect task naming or save paths.
+- End-to-end browser automation against a real installed extension/native host was not run in this check; behavior was verified by static inspection, native-host/deep-link tests, and app-side HTTP tests.
+
 Next step:
+
+- Task 7: HTTP New-Task Preview.
 
 ## Task 7: HTTP New-Task Preview
 

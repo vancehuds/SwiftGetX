@@ -46,7 +46,7 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
         self.sourcePageURL = Self.redactedURL(sourcePageURL)
         self.mimeType = Self.nonEmpty(mimeType)
         self.contentDisposition = Self.nonEmpty(contentDisposition)
-        self.suggestedFilename = Self.nonEmpty(suggestedFilename)
+        self.suggestedFilename = Self.sanitizedFilename(suggestedFilename)
         self.server = Self.nonEmpty(server)
         self.supportsResume = supportsResume
         self.contentLength = contentLength
@@ -113,5 +113,31 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
             return nil
         }
         return trimmed
+    }
+
+    private static func sanitizedFilename(_ value: String?) -> String? {
+        guard let value = nonEmpty(value) else { return nil }
+        let withoutUnsafeScalars = String(value.unicodeScalars.map { scalar in
+            if isBidirectionalOverride(scalar) {
+                return "-"
+            }
+            return String(scalar)
+        }.joined())
+        let sanitized = SourceParser
+            .sanitizeFilename(withoutUnsafeScalars)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sanitized.isEmpty, sanitized != ".", sanitized != ".." else {
+            return nil
+        }
+        return sanitized
+    }
+
+    private static func isBidirectionalOverride(_ scalar: UnicodeScalar) -> Bool {
+        switch scalar.value {
+        case 0x202A...0x202E, 0x2066...0x2069:
+            true
+        default:
+            false
+        }
     }
 }

@@ -160,4 +160,19 @@ struct TorrentFileTests {
         #expect(task.displaySource == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
         #expect(task.httpResponseMetadataJSON?.contains("secret") == false)
     }
+
+    @Test("HTTP response metadata sanitizes suggested filenames")
+    func httpResponseMetadataSanitizesSuggestedFilenames() {
+        let metadata = HTTPResponseMetadata(
+            suggestedFilename: " ../unsafe:bad\(String(UnicodeScalar(1)))name.zip "
+        )
+        let bidiMetadata = HTTPResponseMetadata(
+            suggestedFilename: "photo\u{202E}gpj.zip"
+        )
+        let emptyMetadata = HTTPResponseMetadata(suggestedFilename: ".")
+
+        #expect(metadata.suggestedFilename == "..-unsafe-bad-name.zip")
+        #expect(bidiMetadata.suggestedFilename == "photo-gpj.zip")
+        #expect(emptyMetadata.suggestedFilename == nil)
+    }
 }

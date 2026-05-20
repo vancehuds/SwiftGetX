@@ -151,6 +151,36 @@ struct NativeMessageHostTests {
         #expect(draft.requiresUserConfirmation == false)
     }
 
+    @Test("trusted native payload source validation allows bounded multi-link sources")
+    func trustedNativePayloadSourceValidationAllowsBoundedMultiLinkSources() {
+        let source = (0..<DownloadDeepLinkPolicy.maximumTrustedPayloadTaskCount)
+            .map { "https://example.com/file-\($0).zip" }
+            .joined(separator: "\n")
+
+        let validation = DownloadDeepLinkPolicy.validationForTrustedPayloadSource(source)
+
+        #expect(validation?.linkTrust == .trustedNativeHandoff)
+        #expect(validation?.sourceCount == DownloadDeepLinkPolicy.maximumTrustedPayloadTaskCount)
+    }
+
+    @Test("trusted native payload source validation rejects unsafe sources")
+    func trustedNativePayloadSourceValidationRejectsUnsafeSources() {
+        let tooManySources = (0...DownloadDeepLinkPolicy.maximumTrustedPayloadTaskCount)
+            .map { "https://example.com/file-\($0).zip" }
+            .joined(separator: "\n")
+        let unsafeSources = [
+            "https://example.com/file.zip\u{0000}",
+            "https://example.com/file\u{202E}gpj.zip",
+            "https://example.com/file.zip\njavascript:alert(1)",
+            "https://example.com/file.zip\nswiftgetx://download?url=https://example.com/file.zip",
+            tooManySources
+        ]
+
+        for source in unsafeSources {
+            #expect(DownloadDeepLinkPolicy.validationForTrustedPayloadSource(source) == nil)
+        }
+    }
+
     @Test("public download deep links require confirmation and carry no browser context")
     func publicDownloadDeepLinksRequireConfirmation() throws {
         let url = try #require(DeepLinkBuilder.downloadURL(
