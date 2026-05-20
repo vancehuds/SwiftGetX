@@ -1,6 +1,7 @@
 const NATIVE_HOST_NAME = "com.swiftgetx.native";
 const DEFAULT_OPTIONS = {
-  takeoverDownloads: false
+  takeoverDownloads: true,
+  takeoverDownloadsUserSet: false
 };
 const DOWNLOAD_SOURCE_PATTERN = /(magnet:\?|https?:\/\/|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)/i;
 
@@ -40,7 +41,11 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 
   chrome.storage.local.get(DEFAULT_OPTIONS, (options) => {
-    chrome.storage.local.set({ ...DEFAULT_OPTIONS, ...options });
+    const nextOptions = { ...DEFAULT_OPTIONS, ...options };
+    if (!options.takeoverDownloadsUserSet) {
+      nextOptions.takeoverDownloads = true;
+    }
+    chrome.storage.local.set(nextOptions);
   });
 });
 
@@ -65,23 +70,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chrome.downloads.onCreated.addListener((downloadItem) => {
-  chrome.storage.local.get(DEFAULT_OPTIONS, async (options) => {
-    if (!options.takeoverDownloads || !isSupportedSource(downloadItem.url)) {
-      return;
-    }
-
-    const result = await sendToSwiftGetX({
-      url: downloadItem.url,
-      suggestedFilename: downloadItem.filename,
-      sourcePageUrl: downloadItem.referrer,
-      source: "download-takeover"
-    });
-
-    if (result.ok) {
-      chrome.downloads.cancel(downloadItem.id);
-    }
+  handleDownloadCreated(downloadItem).catch((error) => {
+    markFailure(error.message || String(error));
   });
 });
+
+async function handleDownloadCreated(downloadItem) {
+  const options = await getOptions();
+  if (!options.takeoverDownloads || !isSupportedSource(downloadItem.url)) {
+    return;
+  }
+
+  await callDownloads("pause", downloadItem.id);
+
+  const result = await sendToSwiftGetX({
+    url: downloadItem.url,
+    suggestedFilename: filenameFromPath(downloadItem.filename) || filenameFromURL(downloadItem.url),
+    sourcePageUrl: downloadItem.referrer,
+    source: "download-takeover"
+  });
+
+  if (result.ok) {
+    await callDownloads("cancel", downloadItem.id);
+    await callDownloads("erase", { id: downloadItem.id });
+    return;
+  }
+
+  await callDownloads("resume", downloadItem.id);
+}
 
 async function handleContextMenuClick(info, tab) {
   switch (info.menuItemId) {
@@ -204,6 +220,26 @@ async function sendToSwiftGetX(payload) {
   });
 }
 
+function getOptions() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(DEFAULT_OPTIONS, (options) => {
+      resolve({ ...DEFAULT_OPTIONS, ...options });
+    });
+  });
+}
+
+function callDownloads(method, ...args) {
+  return new Promise((resolve) => {
+    chrome.downloads[method](...args, () => {
+      const runtimeError = chrome.runtime.lastError;
+      if (runtimeError) {
+        console.warn(`SwiftGetX downloads.${method}: ${runtimeError.message}`);
+      }
+      resolve(!runtimeError);
+    });
+  });
+}
+
 function isSupportedSource(value) {
   return DOWNLOAD_SOURCE_PATTERN.test(value || "");
 }
@@ -216,6 +252,15 @@ function filenameFromURL(value) {
   } catch {
     return undefined;
   }
+}
+
+function filenameFromPath(value) {
+  if (!value) {
+    return undefined;
+  }
+
+  const lastSegment = value.split(/[\\/]/).filter(Boolean).pop();
+  return lastSegment || undefined;
 }
 
 function markSuccess() {

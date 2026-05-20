@@ -2,21 +2,26 @@ import AppKit
 import Foundation
 import SwiftGetXCore
 
-let input = FileHandle.standardInput.readDataToEndOfFile()
-
 do {
-    let messages = try NativeMessageHost.decodeMessages(from: input)
-    var accepted = 0
+    guard let message = try NativeMessageHost.readMessage() else {
+        throw NativeHostError.emptyInput
+    }
 
-    for message in messages where message.action == "download" {
-        guard let url = DeepLinkBuilder.downloadURL(for: message.url) else { continue }
-        NSWorkspace.shared.open(url)
-        accepted += 1
+    guard message.action == "download" else {
+        throw NativeHostError.unsupportedAction(message.action)
+    }
+
+    guard let url = DeepLinkBuilder.downloadURL(for: message.url) else {
+        throw NativeHostError.invalidDownloadSource
+    }
+
+    guard NSWorkspace.shared.open(url) else {
+        throw NativeHostError.openFailed
     }
 
     let response = NativeMessageResponse(
-        ok: accepted > 0,
-        message: accepted > 0 ? "accepted \(accepted) download(s)" : "no supported messages"
+        ok: true,
+        message: "accepted download"
     )
     FileHandle.standardOutput.write(try NativeMessageHost.encodeResponse(response))
 } catch {
@@ -26,5 +31,25 @@ do {
     )
     if let data = try? NativeMessageHost.encodeResponse(response) {
         FileHandle.standardOutput.write(data)
+    }
+}
+
+private enum NativeHostError: LocalizedError {
+    case emptyInput
+    case unsupportedAction(String)
+    case invalidDownloadSource
+    case openFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyInput:
+            return "Native host received no message"
+        case .unsupportedAction(let action):
+            return "Unsupported native message action: \(action)"
+        case .invalidDownloadSource:
+            return "Invalid download source"
+        case .openFailed:
+            return "Unable to open SwiftGetX download URL"
+        }
     }
 }

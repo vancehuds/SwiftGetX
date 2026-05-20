@@ -10,12 +10,10 @@ public enum NativeMessageHost {
                 throw NativeMessageError.incompleteLengthPrefix
             }
 
-            let length = data[offset..<(offset + 4)].withUnsafeBytes { pointer in
-                pointer.load(as: UInt32.self).littleEndian
-            }
+            let length = decodeLength(data[offset..<(offset + 4)])
             offset += 4
 
-            let end = offset + Int(length)
+            let end = offset + length
             guard end <= data.count else {
                 throw NativeMessageError.incompletePayload
             }
@@ -28,12 +26,37 @@ public enum NativeMessageHost {
         return messages
     }
 
+    public static func readMessage(from input: FileHandle = .standardInput) throws -> BrowserDownloadMessage? {
+        let lengthData = input.readData(ofLength: 4)
+        guard !lengthData.isEmpty else { return nil }
+        guard lengthData.count == 4 else {
+            throw NativeMessageError.incompleteLengthPrefix
+        }
+
+        let length = decodeLength(lengthData)
+        let payload = input.readData(ofLength: length)
+        guard payload.count == length else {
+            throw NativeMessageError.incompletePayload
+        }
+
+        return try JSONDecoder().decode(BrowserDownloadMessage.self, from: payload)
+    }
+
     public static func encodeResponse(_ response: NativeMessageResponse) throws -> Data {
         let payload = try JSONEncoder().encode(response)
         var length = UInt32(payload.count).littleEndian
         var data = Data(bytes: &length, count: 4)
         data.append(payload)
         return data
+    }
+
+    private static func decodeLength(_ data: Data) -> Int {
+        let bytes = Array(data)
+        let value = UInt32(bytes[0])
+            | (UInt32(bytes[1]) << 8)
+            | (UInt32(bytes[2]) << 16)
+            | (UInt32(bytes[3]) << 24)
+        return Int(value)
     }
 }
 

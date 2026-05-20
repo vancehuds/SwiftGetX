@@ -1,6 +1,6 @@
 # Browser Integration
 
-SwiftGetX uses explicit browser handoff instead of silently intercepting every download.
+SwiftGetX uses explicit browser handoff plus an opt-out Chrome download takeover.
 
 ## Safari
 
@@ -13,7 +13,8 @@ SwiftGetX uses explicit browser handoff instead of silently intercepting every d
 - Resources live in `Sources/SwiftGetX/Resources/ChromeExtension`.
 - The extension uses `chrome.runtime.sendNativeMessage("com.swiftgetx.native", ...)`.
 - Context menus can send links, the current page, selected text, and media URLs to SwiftGetX.
-- The popup can send the current page, send the current selection, scan a page for likely download links, and optionally hand off Chrome-created downloads.
+- The popup can send the current page, send the current selection, scan a page for likely download links, and toggle Chrome download takeover.
+- Chrome download takeover is enabled by default. When Chrome creates a supported HTTP, HTTPS, magnet, or `.torrent` download, the extension pauses the Chrome item, sends it to SwiftGetX, then cancels and erases the Chrome item only after the native host accepts it. If handoff fails, the extension resumes the original Chrome download.
 - Build the native host with `swift build`.
 - Install the Native Messaging host manifest with:
 
@@ -21,6 +22,7 @@ SwiftGetX uses explicit browser handoff instead of silently intercepting every d
 Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHost <chrome-extension-id>
 ```
 
+- If installing from an app bundle, the manifest path must point at `SwiftGetX.app/Contents/MacOS/SwiftGetXNativeHost`, not the main `SwiftGetX` app executable.
 - The native host opens `swiftgetx://download?url=...`, which the main app handles through `onOpenURL`.
 - Package a local ZIP and CRX with:
 

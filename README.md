@@ -106,7 +106,7 @@ SWIFTGETX_HOMEBREW_PREFIX=/path/to/homebrew SWIFTGETX_ENABLE_LIBTORRENT=1 swift 
 
 ## 浏览器集成
 
-SwiftGetX 采用显式浏览器交接，不会静默拦截所有下载。
+SwiftGetX 采用显式浏览器交接，并支持可关闭的 Chrome 下载接管。
 
 ### Chrome
 
@@ -135,6 +135,8 @@ Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHo
 ```
 
 Chrome 扩展调用 `chrome.runtime.sendNativeMessage("com.swiftgetx.native", ...)`，`SwiftGetXNativeHost` 读取 4-byte little-endian length-prefixed JSON 后打开 `swiftgetx://download?url=...`，主 app 通过 `onOpenURL` 接收。
+
+Chrome 下载接管默认开启。扩展在 Chrome 创建支持的 HTTP、HTTPS、magnet 或 `.torrent` 下载后，会先暂停 Chrome 原任务，发送到 SwiftGetX；只有 native host 接受后才取消并清除 Chrome 原任务。如果发送失败，扩展会恢复 Chrome 原下载。可以在扩展 popup 里关闭“接管 Chrome 下载”。
 
 ### Safari
 
@@ -205,7 +207,11 @@ Homebrew 的 OpenSSL bottle 可能会在 macOS 14 debug 构建时输出 deployme
 
 - `SwiftGetXNativeHost` 已通过 `swift build` 构建。
 - `Scripts/install-native-host.sh` 中传入的是实际 Chrome extension id。
-- `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.swiftgetx.native.json` 里的 `path` 指向可执行的 native host。
+- `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.swiftgetx.native.json` 里的 `path` 指向可执行的 native host，例如 `.build/.../SwiftGetXNativeHost` 或 `SwiftGetX.app/Contents/MacOS/SwiftGetXNativeHost`，不要指向主 app 可执行文件。
+
+### Chrome 没有自动接管下载
+
+检查扩展 popup 里的“接管 Chrome 下载”是否开启。更新后的扩展默认开启接管；新版本里手动切换后会保留你的选择。
 
 ## 贡献提示
 

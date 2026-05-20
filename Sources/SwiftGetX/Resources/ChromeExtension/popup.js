@@ -1,5 +1,6 @@
 const DEFAULT_OPTIONS = {
-  takeoverDownloads: false
+  takeoverDownloads: true,
+  takeoverDownloadsUserSet: false
 };
 
 let activeTab;
@@ -18,7 +19,10 @@ document.getElementById("send-selection").addEventListener("click", sendSelectio
 document.getElementById("scan-links").addEventListener("click", scanLinks);
 sendCandidatesButton.addEventListener("click", sendAllCandidates);
 takeoverDownloads.addEventListener("change", () => {
-  chrome.storage.local.set({ takeoverDownloads: takeoverDownloads.checked });
+  chrome.storage.local.set({
+    takeoverDownloads: takeoverDownloads.checked,
+    takeoverDownloadsUserSet: true
+  });
 });
 
 init();

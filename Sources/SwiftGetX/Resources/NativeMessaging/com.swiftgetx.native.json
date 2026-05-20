@@ -1,7 +1,7 @@
 {
   "name": "com.swiftgetx.native",
   "description": "SwiftGetX Native Messaging host",
-  "path": "/Applications/SwiftGetX.app/Contents/MacOS/SwiftGetX",
+  "path": "/Applications/SwiftGetX.app/Contents/MacOS/SwiftGetXNativeHost",
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://REPLACE_WITH_CHROME_EXTENSION_ID/"
