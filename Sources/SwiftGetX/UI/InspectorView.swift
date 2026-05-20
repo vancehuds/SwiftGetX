@@ -112,6 +112,7 @@ struct InspectorView: View {
         case .verifying: .indigo
         case .completed: .green
         case .failed: .red
+        case .cancelled: .gray
         }
     }
 }
@@ -221,6 +222,7 @@ private struct OverviewPanel: View {
         case .verifying: .indigo
         case .completed: .green
         case .failed: .red
+        case .cancelled: .gray
         }
     }
 }

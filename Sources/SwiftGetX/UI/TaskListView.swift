@@ -58,6 +58,42 @@ struct TaskListView: View {
                                     Button(L10n.string("action_recheck")) {
                                         coordinator.recheck(task)
                                     }
+                                    if task.status == .failed || task.status == .cancelled {
+                                        Button(L10n.string("action_retry_task")) {
+                                            coordinator.retry(task)
+                                        }
+                                    }
+                                    if let errorMessage = task.errorMessage,
+                                       !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    {
+                                        Button(L10n.string("action_copy_error")) {
+                                            coordinator.copyErrorMessage(task)
+                                        }
+                                    }
+                                    if task.kind == .http {
+                                        Button(L10n.string("action_reprobe_metadata")) {
+                                            coordinator.reprobeHTTPMetadata(task)
+                                        }
+                                        if task.status == .failed || task.status == .cancelled || task.status == .paused {
+                                            Button(L10n.string("action_rename_and_continue")) {
+                                                coordinator.renameAndContinue(task)
+                                            }
+                                        }
+                                        if HTTPPartialDataStore(savePath: task.savePath).hasData {
+                                            Button(L10n.string("action_retain_partial_data")) {
+                                                coordinator.retainPartialData(task)
+                                            }
+                                            Button(L10n.string("action_open_partial_data")) {
+                                                coordinator.openPartialData(task)
+                                            }
+                                            Button(L10n.string("action_reveal_partial_data")) {
+                                                coordinator.revealPartialData(task)
+                                            }
+                                            Button(L10n.string("action_delete_partial_data"), role: .destructive) {
+                                                coordinator.deletePartialData(task)
+                                            }
+                                        }
+                                    }
                                     if task.isQueueManageable {
                                         Divider()
                                         Button(L10n.string("queue_move_top")) {
@@ -236,11 +272,11 @@ private struct TaskRowView: View {
                         Text(L10n.string("download_status_paused"))
                             .font(layout.font(11, weight: .medium))
                             .foregroundStyle(.orange)
-                    } else if task.status == .failed {
+                    } else if task.status == .failed || task.status == .cancelled {
                         Text(L10n.string("task_failed_message", task.errorMessage ?? L10n.string("error_unknown")))
                             .font(layout.font(11, weight: .medium))
                             .lineLimit(1)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(task.status == .cancelled ? .gray : .red)
                     } else {
                         Text(task.status.title)
                             .font(layout.font(11, weight: .medium))
@@ -334,6 +370,8 @@ private struct TaskRowView: View {
             .green
         case .failed:
             .red
+        case .cancelled:
+            .gray
         }
     }
 }

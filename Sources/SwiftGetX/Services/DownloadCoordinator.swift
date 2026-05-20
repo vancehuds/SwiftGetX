@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 import SwiftData
@@ -384,12 +385,19 @@ final class DownloadCoordinator {
         scheduleQueue()
     }
 
+    func retry(_ task: DownloadTask) {
+        guard task.status == .failed || task.status == .cancelled || task.status == .paused else { return }
+        task.appendLog(L10n.string("log_retry_task"))
+        resume(task)
+    }
+
     func cancel(_ task: DownloadTask) {
         let shouldScheduleQueue = task.usesActiveDownloadSlot
-        task.status = .failed
+        task.status = .cancelled
         task.speedBytesPerSecond = 0
         task.errorMessage = L10n.string("error_task_cancelled")
         task.nextQueueRetryAt = nil
+        task.queueFailureCount = 0
         task.appendLog(L10n.string("log_task_cancelled"))
         let request = DownloadRequest(task: task)
         save()
@@ -402,11 +410,14 @@ final class DownloadCoordinator {
     func remove(_ task: DownloadTask, deletingFiles: Bool) {
         guard let modelContext else { return }
         let shouldScheduleQueue = task.usesActiveDownloadSlot
-        let shouldDeleteLocalData = deletingFiles || !task.hasFinishedDownloading
+        let shouldDeleteLocalData = deletingFiles
         let request = DownloadRequest(task: task)
 
         if shouldDeleteLocalData {
             try? FileManager.default.removeItem(atPath: task.savePath)
+            if task.kind == .http {
+                HTTPPartialDataStore(savePath: task.savePath).removeData()
+            }
         }
         if task.kind == .torrentMagnet || task.kind == .torrentFile {
             TorrentResumeStore.removeResumeData(for: task.id)
@@ -421,6 +432,119 @@ final class DownloadCoordinator {
 
         runEngineOperation(schedulesQueueAfterFreeingSlot: shouldScheduleQueue) {
             await self.engine(for: request.kind).remove(request, deletingFiles: shouldDeleteLocalData)
+        }
+    }
+
+    func deletePartialData(_ task: DownloadTask) {
+        guard task.kind == .http else { return }
+        HTTPPartialDataStore(savePath: task.savePath).removeData()
+        if !task.hasFinishedDownloading {
+            task.downloadedBytes = 0
+            task.speedBytesPerSecond = 0
+        }
+        task.appendLog(L10n.string("log_deleted_partial_data"))
+        save()
+    }
+
+    func retainPartialData(_ task: DownloadTask) {
+        guard task.kind == .http else { return }
+        let store = HTTPPartialDataStore(savePath: task.savePath)
+        guard store.hasData else { return }
+        task.downloadedBytes = max(task.downloadedBytes, store.downloadedBytes)
+        task.speedBytesPerSecond = 0
+        task.appendLog(L10n.string("log_retained_partial_data"))
+        save()
+    }
+
+    func openPartialData(_ task: DownloadTask) {
+        guard task.kind == .http,
+              let url = HTTPPartialDataStore(savePath: task.savePath).preferredDataURL
+        else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    func revealPartialData(_ task: DownloadTask) {
+        guard task.kind == .http else { return }
+        guard let url = HTTPPartialDataStore(savePath: task.savePath).preferredDataURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    func copyErrorMessage(_ task: DownloadTask) {
+        guard let errorMessage = task.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !errorMessage.isEmpty
+        else {
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(errorMessage, forType: .string)
+        task.appendLog(L10n.string("log_copied_error"))
+        save()
+    }
+
+    func renameAndContinue(_ task: DownloadTask) {
+        guard task.kind == .http,
+              task.status == .failed || task.status == .cancelled || task.status == .paused
+        else {
+            return
+        }
+        let currentURL = URL(fileURLWithPath: task.savePath)
+        let resolvedURL = Self.nextContinuationURL(for: currentURL)
+
+        do {
+            try HTTPPartialDataStore(savePath: task.savePath).moveData(to: resolvedURL.path)
+            task.savePath = resolvedURL.path
+            task.name = resolvedURL.lastPathComponent
+            task.appendLog(L10n.string("log_renamed_and_queued", resolvedURL.lastPathComponent))
+            resume(task)
+        } catch {
+            task.status = .failed
+            task.errorMessage = error.localizedDescription
+            task.appendLog(error.localizedDescription)
+            save()
+        }
+    }
+
+    func reprobeHTTPMetadata(_ task: DownloadTask) {
+        guard task.kind == .http,
+              let url = URL(string: task.source)
+        else {
+            return
+        }
+        let previousStatus = task.status
+        task.status = .verifying
+        task.speedBytesPerSecond = 0
+        task.appendLog(L10n.string("log_reprobe_metadata_started"))
+        let request = DownloadRequest(
+            task: task,
+            browserContext: runtimeBrowserContexts[task.id] ?? task.browserContext,
+            httpOptions: runtimeHTTPOptions[task.id] ?? task.httpOptions
+        )
+        save()
+
+        guard runsEngines else {
+            task.status = previousStatus
+            save()
+            return
+        }
+
+        Task {
+            let metadata = await HTTPMetadataProbe(
+                segmentCount: settings?.httpSegmentCount ?? 1,
+                probesRangeForIncompleteMetadata: true,
+                timeoutInterval: 12
+            ).probe(url: url, request: request)
+            task.totalBytes = metadata.contentLength > 0 ? metadata.contentLength : task.totalBytes
+            task.supportsResume = metadata.supportsResume
+            task.eTag = metadata.eTag ?? task.eTag
+            task.lastModified = metadata.lastModified ?? task.lastModified
+            if let responseMetadata = metadata.responseMetadata {
+                task.httpResponseMetadata = responseMetadata.merged(over: task.httpResponseMetadata)
+            }
+            task.status = previousStatus == .running || previousStatus == .verifying ? .paused : previousStatus
+            task.appendLog(L10n.string("log_reprobe_metadata_finished"))
+            save()
         }
     }
 
@@ -536,7 +660,7 @@ final class DownloadCoordinator {
     }
 
     func resumeAll() {
-        for task in allTasks() where task.status == .paused || task.status == .failed || task.status == .queued {
+        for task in allTasks() where task.status == .paused || task.status == .failed || task.status == .cancelled || task.status == .queued {
             resume(task)
         }
     }
@@ -608,6 +732,12 @@ final class DownloadCoordinator {
             predicate: #Predicate { $0.id == taskID }
         )
         guard let task = try? modelContext.fetch(descriptor).first else { return }
+        if task.status == .cancelled {
+            task.speedBytesPerSecond = 0
+            task.downloadedBytes = max(task.downloadedBytes, snapshot.downloadedBytes)
+            save()
+            return
+        }
 
         task.status = snapshot.status
         if let name = snapshot.name {
@@ -696,6 +826,13 @@ final class DownloadCoordinator {
         case .failed:
             task.speedBytesPerSecond = 0
             handleFailedTask(task, message: snapshot.errorMessage ?? L10n.string("error_download_failed"))
+            scheduleQueue()
+            runtimeBrowserContexts[task.id] = nil
+            runtimeHTTPOptions[task.id] = nil
+        case .cancelled:
+            task.speedBytesPerSecond = 0
+            task.nextQueueRetryAt = nil
+            task.appendLog(L10n.string("log_task_cancelled"))
             scheduleQueue()
             runtimeBrowserContexts[task.id] = nil
             runtimeHTTPOptions[task.id] = nil
@@ -858,10 +995,32 @@ final class DownloadCoordinator {
             3
         case .failed:
             4
-        case .seeding:
+        case .cancelled:
             5
-        case .completed:
+        case .seeding:
             6
+        case .completed:
+            7
+        }
+    }
+
+    private static func nextContinuationURL(for url: URL) -> URL {
+        let directory = url.deletingLastPathComponent()
+        let baseName = url.deletingPathExtension().lastPathComponent
+        let pathExtension = url.pathExtension
+
+        var index = 2
+        while true {
+            let filename = pathExtension.isEmpty
+                ? "\(baseName) \(index)"
+                : "\(baseName) \(index).\(pathExtension)"
+            let candidate = directory.appendingPathComponent(filename)
+            if !FileManager.default.fileExists(atPath: candidate.path),
+               !HTTPPartialDataStore(savePath: candidate.path).hasData
+            {
+                return candidate
+            }
+            index += 1
         }
     }
 
@@ -879,6 +1038,7 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
     case paused
     case completed
     case failed
+    case cancelled
     case http
     case torrent
 
@@ -893,6 +1053,7 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         case .paused: L10n.string("download_status_paused")
         case .completed: L10n.string("download_status_completed")
         case .failed: L10n.string("download_status_failed")
+        case .cancelled: L10n.string("download_status_cancelled")
         case .http: "HTTP"
         case .torrent: "BT"
         }
@@ -907,6 +1068,7 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         case .paused: "pause.circle"
         case .completed: "checkmark.circle"
         case .failed: "exclamationmark.triangle"
+        case .cancelled: "xmark.circle"
         case .http: "link"
         case .torrent: "point.3.connected.trianglepath.dotted"
         }
@@ -928,6 +1090,8 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
             task.status == .completed
         case .failed:
             task.status == .failed
+        case .cancelled:
+            task.status == .cancelled
         case .http:
             task.kind == .http
         case .torrent:

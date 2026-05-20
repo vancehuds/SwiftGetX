@@ -19,6 +19,7 @@ struct MenuBarSnapshot: Equatable {
     let verifyingCount: Int
     let completedCount: Int
     let failedCount: Int
+    let cancelledCount: Int
     let totalDownloadSpeed: Int64
     let recentTasks: [MenuBarTaskSnapshot]
 
@@ -31,6 +32,7 @@ struct MenuBarSnapshot: Equatable {
         verifyingCount = tasks.count { $0.status == .verifying }
         completedCount = tasks.count { $0.status == .completed }
         failedCount = tasks.count { $0.status == .failed }
+        cancelledCount = tasks.count { $0.status == .cancelled }
         totalDownloadSpeed = tasks
             .filter { $0.status == .running }
             .reduce(Int64(0)) { $0 + $1.speedBytesPerSecond }
@@ -70,6 +72,9 @@ struct MenuBarSnapshot: Equatable {
         if failedCount > 0 {
             return "exclamationmark.triangle.fill"
         }
+        if cancelledCount > 0 {
+            return "xmark.circle.fill"
+        }
         if completedCount > 0 {
             return "checkmark.circle.fill"
         }
@@ -99,8 +104,10 @@ struct MenuBarSnapshot: Equatable {
             4
         case .failed:
             5
-        case .completed:
+        case .cancelled:
             6
+        case .completed:
+            7
         }
     }
 }

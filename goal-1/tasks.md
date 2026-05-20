@@ -410,17 +410,39 @@ Next step:
 
 ## Task 10: Failure Recovery, Cancellation, and File Preflight
 
-Status: [ ]
+Status: [x]
 
 Add a distinct cancelled state, retry/copy-error/reprobe/rename-and-continue actions, HTTP status-specific user messages, disk-space and permission preflight, and clear retain/delete/open partial-file operations.
 
 Work performed:
 
+- Added `DownloadStatus.cancelled` across the model, filters, task list, inspector, and menu-bar snapshot/controller paths, including queue-manageable/terminal semantics and Resume All support.
+- Updated cancellation and retry handling so user-cancelled tasks keep a distinct cancelled state, clear queue failure/backoff state, refill freed queue slots, and ignore stale late engine snapshots except for preserving higher downloaded byte counts.
+- Added HTTP failure recovery actions for retry, copy error, reprobe metadata, rename-and-continue, and retain/open/reveal/delete partial data, with context-menu wiring and localized English/Simplified Chinese strings.
+- Added `HTTPPartialDataStore` to centralize single-part, segmented, and merge-file partial data discovery, byte accounting, removal, and continuation-path moves.
+- Changed HTTP task removal so task-only removal retains partial HTTP data, while explicit file deletion removes final and partial local data.
+- Added HTTP local preflight checks for missing destination folders, parent path type, destination directory conflicts, write permissions/probe writes, and available disk capacity before network requests.
+- Added status-specific HTTP error messages for 401, 403, 404, 416, 429, and 5xx responses, and kept 416/range fallback behavior where appropriate.
+- Added regression tests for cancelled queue behavior, retry recovery, stale snapshot protection, partial-data retain/delete/rename/remove semantics, HTTP preflight failure, status-specific HTTP failures, and menu-bar cancelled counts/status priority.
+
 Verification evidence:
+
+- `swift test --filter DownloadCoordinator` passed with 16 tests in the `DownloadCoordinator` suite.
+- `swift test --filter HTTPDownloadEngine` passed with 39 tests in the `HTTPDownloadEngine` suite.
+- `swift test --filter MenuBarSnapshot` passed with 4 tests in the `MenuBarSnapshot` suite.
+- `swift test` passed with 147 tests across 13 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Partial-file open/reveal actions use `NSWorkspace` and were compile-verified plus covered indirectly by partial-data discovery tests, but not UI-automated.
+- Disk capacity preflight depends on macOS volume capacity APIs; insufficient-space behavior is implemented but not forced in tests because reliably exhausting a volume is not safe in this workflow.
+- Rename-and-continue currently chooses a continuation filename such as `file 2.ext` and moves partial HTTP data there before queueing; broader user-selectable conflict policies remain future settings/UI work.
+
 Next step:
+
+- Task 11: SwiftGetXTorrentCore Target and Metadata Parsers.
 
 ## Task 11: SwiftGetXTorrentCore Target and Metadata Parsers
 

@@ -133,7 +133,7 @@ final class DownloadTask {
     }
 
     var isTerminal: Bool {
-        status == .completed || status == .failed
+        status == .completed || status == .failed || status == .cancelled
     }
 
     var usesActiveDownloadSlot: Bool {
@@ -141,7 +141,7 @@ final class DownloadTask {
     }
 
     var isQueueManageable: Bool {
-        status == .queued || status == .paused || status == .failed
+        status == .queued || status == .paused || status == .failed || status == .cancelled
     }
 
     var hasFinishedDownloading: Bool {
@@ -328,6 +328,7 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
     case verifying
     case completed
     case failed
+    case cancelled
 
     var id: String { rawValue }
 
@@ -347,6 +348,8 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             L10n.string("download_status_completed")
         case .failed:
             L10n.string("download_status_failed")
+        case .cancelled:
+            L10n.string("download_status_cancelled")
         }
     }
 
@@ -366,6 +369,8 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             "checkmark.circle.fill"
         case .failed:
             "exclamationmark.triangle.fill"
+        case .cancelled:
+            "xmark.circle.fill"
         }
     }
 }

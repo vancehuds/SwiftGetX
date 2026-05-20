@@ -171,6 +171,8 @@ private extension DownloadFilter {
             .green
         case .failed:
             .red
+        case .cancelled:
+            .gray
         case .http:
             .indigo
         case .torrent:

@@ -238,6 +238,106 @@ struct HTTPDownloadEngineTests {
         #expect(recorder.snapshots.contains { $0.retryCount == 1 })
     }
 
+    @Test("fails before network request when destination parent is a file")
+    func failsBeforeNetworkRequestWhenDestinationParentIsAFile() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let parentFile = directory.appendingPathComponent("download-parent")
+        FileManager.default.createFile(atPath: parentFile.path, contents: Data())
+        let destination = parentFile.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 1)
+
+        await engine.start(Self.request(source: server.url, destination: destination))
+
+        let failed = try #require(recorder.snapshots.last(where: { $0.status == .failed }))
+        #expect(failed.errorMessage?.contains(parentFile.path) == true)
+        #expect(server.requests.isEmpty)
+    }
+
+    @Test("fails before network request when destination folder is missing")
+    func failsBeforeNetworkRequestWhenDestinationFolderIsMissing() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let missingDirectory = directory.appendingPathComponent("missing")
+        let destination = missingDirectory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 1)
+
+        await engine.start(Self.request(source: server.url, destination: destination))
+
+        let failed = try #require(recorder.snapshots.last(where: { $0.status == .failed }))
+        #expect(failed.errorMessage == L10n.string("error_download_directory_missing", missingDirectory.path))
+        #expect(server.requests.isEmpty)
+    }
+
+    @Test("emits status-specific HTTP failure messages")
+    func emitsStatusSpecificHTTPFailureMessages() async throws {
+        let cases: [(Int, String)] = [
+            (401, L10n.string("error_server_status_401")),
+            (403, L10n.string("error_server_status_403")),
+            (404, L10n.string("error_server_status_404")),
+            (416, L10n.string("error_server_status_416")),
+            (429, L10n.string("error_server_status_429")),
+            (503, L10n.string("error_server_status_5xx", 503))
+        ]
+
+        for (status, message) in cases {
+            let server = try RangeTestServer(payload: Self.payload(), behavior: .alwaysFailGET(status: status))
+            try await server.start()
+            defer { server.stop() }
+
+            let directory = try Self.makeTemporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+
+            let recorder = SnapshotRecorder()
+            let engine = HTTPDownloadEngine()
+            engine.onSnapshot = { snapshot in
+                recorder.append(snapshot)
+            }
+            engine.configure(segmentCount: 1, retryLimit: 0)
+
+            await engine.start(Self.request(
+                source: server.url,
+                destination: directory.appendingPathComponent("payload-\(status).bin")
+            ))
+
+            let failed = try #require(recorder.snapshots.last(where: { $0.status == .failed }))
+            #expect(failed.errorMessage == message)
+        }
+    }
+
+    @Test("uses status-specific HTTP failure messages")
+    func usesStatusSpecificHTTPFailureMessages() {
+        #expect(HTTPDownloadError.serverStatus(401).errorDescription == L10n.string("error_server_status_401"))
+        #expect(HTTPDownloadError.serverStatus(403).errorDescription == L10n.string("error_server_status_403"))
+        #expect(HTTPDownloadError.serverStatus(404).errorDescription == L10n.string("error_server_status_404"))
+        #expect(HTTPDownloadError.serverStatus(416).errorDescription == L10n.string("error_server_status_416"))
+        #expect(HTTPDownloadError.serverStatus(429).errorDescription == L10n.string("error_server_status_429"))
+        #expect(HTTPDownloadError.serverStatus(503).errorDescription == L10n.string("error_server_status_5xx", 503))
+        #expect(HTTPDownloadError.serverStatus(418).errorDescription == L10n.string("error_server_status", 418))
+    }
+
     @Test("honors per-task segment override")
     func honorsPerTaskSegmentOverride() async throws {
         let payload = Self.largePayload()
@@ -633,8 +733,8 @@ struct HTTPDownloadEngineTests {
         #expect(recorder.snapshots.contains { $0.retryCount == 1 })
     }
 
-    @Test("removes partial HTTP data when deleting unfinished task")
-    func removesPartialHTTPDataWhenDeletingUnfinishedTask() async throws {
+    @Test("retains partial HTTP data unless deleting files is explicit")
+    func retainsPartialHTTPDataUnlessDeletingFilesIsExplicit() async throws {
         let directory = try Self.makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
@@ -654,6 +754,18 @@ struct HTTPDownloadEngineTests {
             totalBytes: 4_096,
             downloadedBytes: 2_048
         ), deletingFiles: false)
+
+        #expect(FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(FileManager.default.fileExists(atPath: destination.path + ".part0"))
+        #expect(FileManager.default.fileExists(atPath: destination.path + ".part1"))
+
+        await engine.remove(Self.request(
+            source: URL(string: "http://example.com/payload.bin")!,
+            destination: destination,
+            status: .paused,
+            totalBytes: 4_096,
+            downloadedBytes: 2_048
+        ), deletingFiles: true)
 
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part0"))
@@ -1195,6 +1307,7 @@ private final class RangeTestServer: @unchecked Sendable {
         case redirectToMetadata
         case failFirstGET(status: Int)
         case failFirstRangedGET(status: Int)
+        case alwaysFailGET(status: Int)
         case ignoreRange
         case mismatchedContentRange
         case changingGETValidator
@@ -1332,6 +1445,14 @@ private final class RangeTestServer: @unchecked Sendable {
         lock.unlock()
 
         if case .failFirstGET(let status) = behavior, currentGETCount == 1 {
+            return Self.httpResponse(
+                status: "\(status) Server Error",
+                headers: baseHeaders(contentLength: 0, eTag: "\"test\""),
+                body: Data()
+            )
+        }
+
+        if case .alwaysFailGET(let status) = behavior {
             return Self.httpResponse(
                 status: "\(status) Server Error",
                 headers: baseHeaders(contentLength: 0, eTag: "\"test\""),

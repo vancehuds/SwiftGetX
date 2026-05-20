@@ -76,7 +76,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             keyEquivalent: ""
         )
         resumeItem.target = self
-        resumeItem.isEnabled = snapshot.pausedCount > 0 || snapshot.failedCount > 0 || snapshot.queuedCount > 0
+        resumeItem.isEnabled = snapshot.pausedCount > 0
+            || snapshot.failedCount > 0
+            || snapshot.cancelledCount > 0
+            || snapshot.queuedCount > 0
 
         menu.addItem(
             withTitle: L10n.string("menu_open_download_directory"),
@@ -207,6 +210,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             return "\(task.name) · \(L10n.string("download_status_completed"))"
         case .failed:
             return "\(task.name) · \(L10n.string("download_status_failed"))"
+        case .cancelled:
+            return "\(task.name) · \(L10n.string("download_status_cancelled"))"
         default:
             return "\(task.name) · \(task.status.title) · \(percent)%"
         }

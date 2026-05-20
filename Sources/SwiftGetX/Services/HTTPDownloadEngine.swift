@@ -69,15 +69,15 @@ final class HTTPDownloadEngine: DownloadEngine {
 
     func remove(_ request: DownloadRequest, deletingFiles: Bool) async {
         await cancel(request)
-        if deletingFiles || request.status != .completed {
+        if deletingFiles {
             try? FileManager.default.removeItem(atPath: request.savePath)
-            HTTPTemporaryLayout(savePath: request.savePath).removeTemporaryFiles(maxSegments: segmentScanLimit)
+            HTTPPartialDataStore(savePath: request.savePath).removeData()
         }
     }
 
     func recheck(_ request: DownloadRequest) async {
         let fileURL = URL(fileURLWithPath: request.savePath)
-        let size = HTTPTemporaryLayout.localSize(at: fileURL)
+        let size = HTTPPartialDataStore.localSize(at: fileURL)
         let status: DownloadStatus = request.totalBytes > 0 && size == request.totalBytes ? .completed : .failed
         emit(
             DownloadSnapshot(
@@ -118,7 +118,7 @@ final class HTTPDownloadEngine: DownloadEngine {
     }
 }
 
-private let segmentScanLimit = 128
+private let segmentScanLimit = HTTPPartialDataStore.maxSegmentCount
 
 private actor HTTPDownloadRunState {
     private var activeTaskIDs = Set<UUID>()
@@ -451,9 +451,10 @@ private struct HTTPDownloadWorker: Sendable {
     private func download(url: URL, request: DownloadRequest) async throws {
         var destination = URL(fileURLWithPath: request.savePath)
         var layout = HTTPTemporaryLayout(savePath: request.savePath)
-        try FileManager.default.createDirectory(
-            at: destination.deletingLastPathComponent(),
-            withIntermediateDirectories: true
+        try Self.preflight(
+            destination: destination,
+            expectedBytes: request.totalBytes,
+            existingBytes: layout.temporaryProgress(maxSegments: segmentScanLimit)
         )
 
         var metadata = await HTTPMetadataProbe(segmentCount: segmentCount)
@@ -466,6 +467,11 @@ private struct HTTPDownloadWorker: Sendable {
         )
         destination = prepared.destination
         layout = prepared.layout
+        try Self.preflight(
+            destination: destination,
+            expectedBytes: max(metadata.contentLength, request.totalBytes),
+            existingBytes: layout.temporaryProgress(maxSegments: segmentScanLimit)
+        )
 
         let singlePartBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
         let segmentedBytes = layout.segmentProgress(maxSegments: segmentScanLimit)
@@ -545,6 +551,76 @@ private struct HTTPDownloadWorker: Sendable {
             layout: layout,
             destination: destination
         )
+    }
+
+    private static func preflight(destination: URL, expectedBytes: Int64, existingBytes: Int64) throws {
+        let fileManager = FileManager.default
+        let directory = destination.deletingLastPathComponent()
+        var isDirectory: ObjCBool = false
+
+        guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory) else {
+            throw HTTPDownloadError.localPreflight(L10n.string("error_download_directory_missing", directory.path))
+        }
+        guard isDirectory.boolValue else {
+            throw HTTPDownloadError.localPreflight(L10n.string("error_download_directory_not_folder", directory.path))
+        }
+
+        var destinationIsDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: destination.path, isDirectory: &destinationIsDirectory),
+           destinationIsDirectory.boolValue
+        {
+            throw HTTPDownloadError.localPreflight(L10n.string("error_download_path_is_directory", destination.path))
+        }
+
+        guard fileManager.isWritableFile(atPath: directory.path) else {
+            throw HTTPDownloadError.localPreflight(L10n.string("error_download_directory_not_writable", directory.path))
+        }
+
+        let probeURL = directory.appendingPathComponent(".swiftgetx-write-\(UUID().uuidString)")
+        do {
+            try Data().write(to: probeURL, options: .withoutOverwriting)
+            try? fileManager.removeItem(at: probeURL)
+        } catch {
+            try? fileManager.removeItem(at: probeURL)
+            throw HTTPDownloadError.localPreflight(
+                L10n.string("error_download_write_probe_failed", directory.path, error.localizedDescription)
+            )
+        }
+
+        let remainingBytes = max(0, expectedBytes - max(0, existingBytes))
+        guard expectedBytes > 0,
+              let availableBytes = availableCapacity(for: directory),
+              availableBytes < remainingBytes
+        else {
+            return
+        }
+
+        throw HTTPDownloadError.localPreflight(
+            L10n.string(
+                "error_insufficient_disk_space",
+                formatByteCount(remainingBytes),
+                formatByteCount(availableBytes)
+            )
+        )
+    }
+
+    private static func availableCapacity(for directory: URL) -> Int64? {
+        let keys: Set<URLResourceKey> = [
+            .volumeAvailableCapacityForImportantUsageKey,
+            .volumeAvailableCapacityKey
+        ]
+        guard let values = try? directory.resourceValues(forKeys: keys) else { return nil }
+        if let capacity = values.volumeAvailableCapacityForImportantUsage {
+            return capacity
+        }
+        if let capacity = values.volumeAvailableCapacity {
+            return Int64(capacity)
+        }
+        return nil
+    }
+
+    private static func formatByteCount(_ byteCount: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
     }
 
     private func prepareInitialDestination(
@@ -1381,7 +1457,7 @@ private struct HTTPDownloadWorker: Sendable {
         switch httpError {
         case .rangeNotSupported, .serverStatus(416):
             return true
-        case .invalidResponse, .serverStatus, .incompleteSegment, .invalidLocalData, .validatorChanged:
+        case .invalidResponse, .serverStatus, .incompleteSegment, .invalidLocalData, .localPreflight, .validatorChanged:
             return false
         }
     }
@@ -1703,6 +1779,7 @@ enum HTTPDownloadError: LocalizedError, Equatable {
     case serverStatus(Int)
     case incompleteSegment
     case invalidLocalData(String)
+    case localPreflight(String)
     case rangeNotSupported
     case validatorChanged
 
@@ -1712,7 +1789,7 @@ enum HTTPDownloadError: LocalizedError, Equatable {
             status == 408 || status == 429 || (500...599).contains(status)
         case .incompleteSegment:
             true
-        case .invalidResponse, .invalidLocalData, .rangeNotSupported, .validatorChanged:
+        case .invalidResponse, .invalidLocalData, .localPreflight, .rangeNotSupported, .validatorChanged:
             false
         }
     }
@@ -1722,15 +1799,36 @@ enum HTTPDownloadError: LocalizedError, Equatable {
         case .invalidResponse(let message):
             message
         case .serverStatus(let status):
-            L10n.string("error_server_status", status)
+            Self.serverStatusDescription(status)
         case .incompleteSegment:
             L10n.string("error_incomplete_segment")
         case .invalidLocalData(let message):
+            message
+        case .localPreflight(let message):
             message
         case .rangeNotSupported:
             L10n.string("error_range_not_supported")
         case .validatorChanged:
             L10n.string("error_validator_changed")
+        }
+    }
+
+    private static func serverStatusDescription(_ status: Int) -> String {
+        switch status {
+        case 401:
+            L10n.string("error_server_status_401")
+        case 403:
+            L10n.string("error_server_status_403")
+        case 404:
+            L10n.string("error_server_status_404")
+        case 416:
+            L10n.string("error_server_status_416")
+        case 429:
+            L10n.string("error_server_status_429")
+        case 500...599:
+            L10n.string("error_server_status_5xx", status)
+        default:
+            L10n.string("error_server_status", status)
         }
     }
 }

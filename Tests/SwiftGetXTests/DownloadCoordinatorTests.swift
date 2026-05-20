@@ -158,7 +158,7 @@ struct DownloadCoordinatorTests {
         fixture.coordinator.cancel(active)
         await waitForStatus(next, .running)
 
-        #expect(active.status == .failed)
+        #expect(active.status == .cancelled)
         #expect(active.errorMessage == L10n.string("error_task_cancelled"))
         #expect(next.status == .running)
         fixture.settings.concurrentTaskLimit = 0
@@ -220,6 +220,153 @@ struct DownloadCoordinatorTests {
         #expect(task.logEntries.contains { $0.contains("Limit reached") })
     }
 
+    @Test("retry queues recoverable tasks and clears failure state")
+    func retryQueuesRecoverableTasksAndClearsFailureState() throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 0
+        let failed = makeTask(name: "Failed", status: .failed, queuePosition: 1)
+        let cancelled = makeTask(name: "Cancelled", status: .cancelled, queuePosition: 2)
+        let paused = makeTask(name: "Paused", status: .paused, queuePosition: 3)
+        for task in [failed, cancelled, paused] {
+            task.errorMessage = "Authentication expired"
+            task.queueFailureCount = 2
+            task.nextQueueRetryAt = .now.addingTimeInterval(60)
+            fixture.context.insert(task)
+        }
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        for task in [failed, cancelled, paused] {
+            fixture.coordinator.retry(task)
+        }
+
+        for task in [failed, cancelled, paused] {
+            #expect(task.status == .queued)
+            #expect(task.errorMessage == nil)
+            #expect(task.queueFailureCount == 0)
+            #expect(task.nextQueueRetryAt == nil)
+            #expect(task.logEntries.contains { $0.contains(L10n.string("log_retry_task")) })
+            #expect(task.logEntries.contains { $0.contains(L10n.string("log_queued_for_resume")) })
+        }
+    }
+
+    @Test("cancelled tasks ignore stale engine snapshots")
+    func cancelledTasksIgnoreStaleEngineSnapshots() throws {
+        let fixture = try makeFixture()
+        let task = makeTask(name: "Cancelled", status: .cancelled, queuePosition: 1)
+        task.downloadedBytes = 128
+        task.errorMessage = L10n.string("error_task_cancelled")
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.apply(DownloadSnapshot(
+            taskID: task.id,
+            status: .failed,
+            totalBytes: 4096,
+            downloadedBytes: 1024,
+            speedBytesPerSecond: 900,
+            etaSeconds: 10,
+            errorMessage: "Late failure",
+            supportsResume: true,
+            eTag: "\"late\"",
+            lastModified: "late"
+        ))
+
+        #expect(task.status == .cancelled)
+        #expect(task.downloadedBytes == 1024)
+        #expect(task.speedBytesPerSecond == 0)
+        #expect(task.errorMessage == L10n.string("error_task_cancelled"))
+        #expect(task.totalBytes == 0)
+        #expect(task.eTag == nil)
+    }
+
+    @Test("partial data actions retain delete and rename HTTP data")
+    func partialDataActionsRetainDeleteAndRenameHTTPData() throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 0
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let partURL = URL(fileURLWithPath: destination.path + ".part")
+        try Data(repeating: 7, count: 2_048).write(to: partURL)
+        let task = makeTask(
+            name: "Payload",
+            status: .failed,
+            queuePosition: 1,
+            savePath: destination.path
+        )
+        task.downloadedBytes = 128
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.retainPartialData(task)
+
+        #expect(task.downloadedBytes == 2_048)
+        #expect(FileManager.default.fileExists(atPath: partURL.path))
+
+        fixture.coordinator.renameAndContinue(task)
+
+        let renamedDestination = directory.appendingPathComponent("payload 2.bin")
+        let renamedPartURL = URL(fileURLWithPath: renamedDestination.path + ".part")
+        #expect(task.status == .queued)
+        #expect(task.name == "payload 2.bin")
+        #expect(task.savePath == renamedDestination.path)
+        #expect(!FileManager.default.fileExists(atPath: partURL.path))
+        #expect(FileManager.default.fileExists(atPath: renamedPartURL.path))
+
+        fixture.coordinator.deletePartialData(task)
+
+        #expect(!FileManager.default.fileExists(atPath: renamedPartURL.path))
+        #expect(task.downloadedBytes == 0)
+        #expect(task.logEntries.contains { $0.contains(L10n.string("log_deleted_partial_data")) })
+    }
+
+    @Test("removing task only retains HTTP partial data while deleting files removes it")
+    func removingTaskOnlyRetainsHTTPPartialDataWhileDeletingFilesRemovesIt() throws {
+        let retainedFixture = try makeFixture()
+        let retainedDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: retainedDirectory) }
+        let retainedDestination = retainedDirectory.appendingPathComponent("payload.bin")
+        let retainedPartURL = URL(fileURLWithPath: retainedDestination.path + ".part")
+        try Data(repeating: 3, count: 1024).write(to: retainedPartURL)
+        let retainedTask = makeTask(
+            name: "Retained",
+            status: .failed,
+            queuePosition: 1,
+            savePath: retainedDestination.path
+        )
+        retainedFixture.context.insert(retainedTask)
+        try retainedFixture.context.save()
+        retainedFixture.coordinator.attach(modelContext: retainedFixture.context, settings: retainedFixture.settings)
+
+        retainedFixture.coordinator.remove(retainedTask, deletingFiles: false)
+
+        #expect(FileManager.default.fileExists(atPath: retainedPartURL.path))
+
+        let deletedFixture = try makeFixture()
+        let deletedDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: deletedDirectory) }
+        let deletedDestination = deletedDirectory.appendingPathComponent("payload.bin")
+        let deletedPartURL = URL(fileURLWithPath: deletedDestination.path + ".part")
+        try Data(repeating: 4, count: 1024).write(to: deletedPartURL)
+        let deletedTask = makeTask(
+            name: "Deleted",
+            status: .failed,
+            queuePosition: 1,
+            savePath: deletedDestination.path
+        )
+        deletedFixture.context.insert(deletedTask)
+        try deletedFixture.context.save()
+        deletedFixture.coordinator.attach(modelContext: deletedFixture.context, settings: deletedFixture.settings)
+
+        deletedFixture.coordinator.remove(deletedTask, deletingFiles: true)
+
+        #expect(!FileManager.default.fileExists(atPath: deletedPartURL.path))
+    }
+
     @Test("restart policy queues unfinished active tasks")
     func restartPolicyQueuesUnfinishedActiveTasks() throws {
         let fixture = try makeFixture()
@@ -277,8 +424,9 @@ struct DownloadCoordinatorTests {
         let queued = makeTask(name: "Queued", status: .queued, queuePosition: 2)
         let verifying = makeTask(name: "Verifying", status: .verifying, queuePosition: 3)
         let failed = makeTask(name: "Failed", status: .failed, queuePosition: 4)
-        let completed = makeTask(name: "Completed", status: .completed, queuePosition: 5)
-        for task in [running, queued, verifying, failed, completed] {
+        let cancelled = makeTask(name: "Cancelled", status: .cancelled, queuePosition: 5)
+        let completed = makeTask(name: "Completed", status: .completed, queuePosition: 6)
+        for task in [running, queued, verifying, failed, cancelled, completed] {
             fixture.context.insert(task)
         }
         try fixture.context.save()
@@ -292,6 +440,7 @@ struct DownloadCoordinatorTests {
         #expect(queued.status == .paused)
         #expect(verifying.status == .paused)
         #expect(failed.status == .failed)
+        #expect(cancelled.status == .cancelled)
         #expect(completed.status == .completed)
 
         fixture.coordinator.resumeAll()
@@ -300,6 +449,7 @@ struct DownloadCoordinatorTests {
         #expect(queued.status == .queued)
         #expect(verifying.status == .queued)
         #expect(failed.status == .queued)
+        #expect(cancelled.status == .queued)
         #expect(completed.status == .completed)
     }
 
@@ -322,17 +472,25 @@ struct DownloadCoordinatorTests {
         name: String,
         status: DownloadStatus = .queued,
         queuePosition: Double,
-        queuePriority: DownloadQueuePriority = .normal
+        queuePriority: DownloadQueuePriority = .normal,
+        savePath: String? = nil
     ) -> DownloadTask {
         DownloadTask(
             name: name,
             source: "http://127.0.0.1:1/\(name)",
             kind: .http,
             status: status,
-            savePath: "/tmp/\(name)",
+            savePath: savePath ?? "/tmp/\(name)",
             queuePosition: queuePosition,
             queuePriority: queuePriority
         )
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 
     private func failureSnapshot(for task: DownloadTask, message: String) -> DownloadSnapshot {
