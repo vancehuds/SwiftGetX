@@ -24,7 +24,10 @@ jobs:
         run: swift test
 
       - name: Install native packaging dependencies
-        run: brew install cmake boost openssl
+        run: |
+          for formula in cmake boost openssl; do
+            brew list "$formula" &>/dev/null || brew list "${formula}@3" &>/dev/null || brew install "$formula"
+          done
 
       - name: Package DMG
         run: Scripts/package-dmg.sh release dist --dmg
