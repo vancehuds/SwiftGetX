@@ -24,17 +24,17 @@ struct TaskListView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 18)
-                .padding(.vertical, 16)
+                .padding(.vertical, 14)
 
                 Divider()
-                    .opacity(0.35)
+                    .opacity(0.24)
 
                 if tasks.isEmpty {
                     EmptyTaskView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 8) {
+                        LazyVStack(spacing: 7) {
                             ForEach(tasks) { task in
                                 TaskRowView(
                                     task: task,
@@ -68,7 +68,7 @@ struct TaskListView: View {
                                 }
                             }
                         }
-                        .padding(14)
+                        .padding(12)
                     }
                 }
             }
@@ -139,7 +139,7 @@ private struct TaskRowView: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(statusColor)
                 .frame(width: 34, height: 34)
-                .background(statusColor.opacity(colorScheme == .dark ? 0.14 : 0.09), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(statusColor.opacity(colorScheme == .dark ? 0.14 : 0.09), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
@@ -220,7 +220,7 @@ private struct TaskRowView: View {
         }
         .padding(12)
         .background {
-            GlassCellBackground(isSelected: isSelected, tint: statusColor, cornerRadius: 12)
+            GlassCellBackground(isSelected: isSelected, tint: statusColor, cornerRadius: 8)
         }
         .overlay(alignment: .topTrailing) {
             if isHovered {
@@ -268,7 +268,7 @@ private struct TaskRowView: View {
                     .help("删除任务")
                 }
                 .padding(4)
-                .background(.ultraThinMaterial, in: Capsule())
+                .background(.regularMaterial, in: Capsule())
                 .overlay {
                     Capsule()
                         .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 1)
@@ -309,7 +309,7 @@ private struct EmptyTaskView: View {
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.secondary)
                 .frame(width: 72, height: 72)
-                .background(Color.primary.opacity(0.04), in: Circle())
+                .background(ContentSurfaceBackground(cornerRadius: 36))
 
             VStack(spacing: 6) {
                 Text("还没有下载任务")

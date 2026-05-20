@@ -8,31 +8,16 @@ struct SidebarView: View {
         @Bindable var coordinator = coordinator
 
         GlassSurface(level: .panel, cornerRadius: 18) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 26, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 32, height: 32)
-
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("SwiftGetX")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.primary)
-                        Text("下载管理器")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 16)
-
-                Divider()
-                    .opacity(0.35)
-                    .padding(.horizontal, 10)
-
+            VStack(alignment: .leading, spacing: 10) {
                 ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 5) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("任务")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 4)
+                            .padding(.bottom, 2)
+
                         ForEach(DownloadFilter.allCases) { filter in
                             SidebarRow(
                                 filter: filter,
@@ -45,35 +30,37 @@ struct SidebarView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 8)
+                    .padding(8)
                 }
 
                 Spacer()
 
-                GlassSurface(level: .floating, cornerRadius: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Label("浏览器接管", systemImage: "safari")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label("浏览器接管", systemImage: "safari")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.primary)
 
-                            Spacer()
+                        Spacer()
 
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 6, height: 6)
-                        }
-
-                        Text("Safari + Chrome 扩展已就绪。系统会自动捕获并把下载发送到 SwiftGetX。")
-                            .font(.system(size: 10.5))
-                            .lineSpacing(2)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
                     }
-                    .padding(12)
+
+                    Text("Safari + Chrome 扩展已就绪")
+                        .font(.system(size: 10.5))
+                        .lineSpacing(2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .background {
+                    ContentSurfaceBackground(cornerRadius: 10)
                 }
                 .padding(10)
             }
+            .padding(.top, 8)
         }
     }
 }
@@ -88,11 +75,7 @@ private struct SidebarRow: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(filter.statusColor)
-                    .frame(width: 6, height: 6)
-
+            HStack(spacing: 10) {
                 Image(systemName: filter.symbolName)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? filter.statusColor : .secondary)
@@ -110,20 +93,20 @@ private struct SidebarRow: View {
                         .foregroundStyle(isSelected ? .primary : .secondary)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(
-                            Color.primary.opacity(isSelected ? 0.08 : 0.05),
-                            in: Capsule()
-                        )
+                        .background(Color.primary.opacity(isSelected ? 0.08 : 0.045), in: Capsule())
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
             .contentShape(Rectangle())
             .background {
-                if isSelected {
-                    GlassCellBackground(isSelected: true, tint: filter.statusColor, cornerRadius: 12)
-                } else if isHovered {
-                    GlassCellBackground(isSelected: false, tint: filter.statusColor.opacity(0.2), cornerRadius: 12)
+                if isSelected || isHovered {
+                    ContentSurfaceBackground(
+                        isSelected: isSelected,
+                        isHovered: isHovered,
+                        tint: filter.statusColor,
+                        cornerRadius: 8
+                    )
                 }
             }
         }

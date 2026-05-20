@@ -47,7 +47,7 @@ struct NewTaskSheet: View {
                         .padding(8)
                 }
                 .background {
-                    GlassCellBackground(cornerRadius: 12)
+                    ContentSurfaceBackground(cornerRadius: 8)
                 }
 
                 HStack(spacing: 12) {
@@ -77,7 +77,7 @@ struct NewTaskSheet: View {
                 }
                 .padding(10)
                 .background {
-                    GlassCellBackground(cornerRadius: 12)
+                    ContentSurfaceBackground(cornerRadius: 8)
                 }
 
                 SourcePreviewView(sourceText: sourceText)
@@ -161,7 +161,7 @@ private struct SourcePreviewView: View {
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .background(ContentSurfaceBackground(cornerRadius: 6))
                         }
                         
                         if sources.count > 4 {
@@ -178,7 +178,7 @@ private struct SourcePreviewView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            GlassCellBackground(cornerRadius: 12)
+            ContentSurfaceBackground(cornerRadius: 8)
         }
     }
 

@@ -9,7 +9,7 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var settings = settings
 
-        GlassSurface(level: .floating, cornerRadius: 24) {
+        GlassSurface(level: .panel, cornerRadius: 18) {
             Form {
                 Section("下载") {
                     HStack {

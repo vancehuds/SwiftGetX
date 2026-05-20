@@ -21,7 +21,7 @@ struct InspectorView: View {
                     .padding(.bottom, 12)
 
                     Divider()
-                        .opacity(0.35)
+                        .opacity(0.24)
 
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 14) {
@@ -41,14 +41,11 @@ struct InspectorView: View {
                     .transition(.opacity)
                 } else {
                     VStack(spacing: 16) {
-                        ZStack {
-                            Circle()
-                                .fill(Color.primary.opacity(0.04))
-                                .frame(width: 64, height: 64)
-                            Image(systemName: "sidebar.right")
-                                .font(.system(size: 26, weight: .light))
-                                .foregroundStyle(.secondary)
-                        }
+                        Image(systemName: "sidebar.right")
+                            .font(.system(size: 26, weight: .light))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 64, height: 64)
+                            .background(ContentSurfaceBackground(cornerRadius: 32))
 
                         Text("选择任务查看详情")
                             .font(.system(size: 14, weight: .semibold))
@@ -97,8 +94,12 @@ struct InspectorView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(16)
-        .background(Color.primary.opacity(0.02))
+        .padding(14)
+        .background {
+            ContentSurfaceBackground(tint: statusColor(for: task.status), cornerRadius: 10)
+        }
+        .padding(14)
+        .padding(.bottom, 2)
     }
 
     private func statusColor(for status: DownloadStatus) -> Color {
@@ -244,7 +245,7 @@ private struct MetricCard: View {
         }
         .padding(12)
         .background {
-            GlassCellBackground(cornerRadius: 12)
+            ContentSurfaceBackground(cornerRadius: 8)
         }
     }
 }
@@ -310,7 +311,7 @@ private struct FilesPanel: View {
                         }
                         .padding(10)
                         .background {
-                            GlassCellBackground(cornerRadius: 10)
+                            ContentSurfaceBackground(cornerRadius: 8)
                         }
                     }
                     .buttonStyle(.plain)
@@ -371,7 +372,7 @@ private struct LogsPanel: View {
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background {
-                        GlassCellBackground(cornerRadius: 8)
+                        ContentSurfaceBackground(cornerRadius: 8)
                     }
                 }
             }
@@ -398,7 +399,7 @@ private struct DetailRow: View {
         }
         .padding(12)
         .background {
-            GlassCellBackground(cornerRadius: 12)
+            ContentSurfaceBackground(cornerRadius: 8)
         }
     }
 }

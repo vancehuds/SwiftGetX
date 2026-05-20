@@ -15,26 +15,34 @@ struct ContentView: View {
         ZStack {
             AppBackground()
 
-            VStack(spacing: 10) {
-                ClipboardSuggestionBar()
-
+            VStack(spacing: 12) {
                 ToolbarView(
                     showingNewTask: $showingNewTask
                 )
 
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     SidebarView(tasks: allTasks)
-                        .frame(width: 196)
+                        .frame(width: 210)
 
                     TaskListView(tasks: visibleTasks)
                         .frame(minWidth: 520)
 
                     InspectorView()
-                        .frame(width: 320)
+                        .frame(width: 340)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(12)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 14)
+
+            VStack {
+                ClipboardSuggestionBar()
+                    .padding(.top, 58)
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .allowsHitTesting(clipboardMonitor.suggestedSource != nil)
         }
         .frame(minWidth: 1080, minHeight: 680)
         .sheet(isPresented: $showingNewTask) {
@@ -95,6 +103,8 @@ private struct ClipboardSuggestionBar: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
+            .frame(maxWidth: 760)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 }
@@ -103,7 +113,19 @@ private struct AppBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Color(nsColor: colorScheme == .dark ? .windowBackgroundColor : .underPageBackgroundColor)
+        ZStack {
+            Color(nsColor: colorScheme == .dark ? .windowBackgroundColor : .underPageBackgroundColor)
+
+            LinearGradient(
+                colors: [
+                    Color.accentColor.opacity(colorScheme == .dark ? 0.10 : 0.08),
+                    Color.clear
+                ],
+                startPoint: .topLeading,
+                endPoint: .center
+            )
+            .blendMode(colorScheme == .dark ? .screen : .normal)
+        }
         .ignoresSafeArea()
     }
 }

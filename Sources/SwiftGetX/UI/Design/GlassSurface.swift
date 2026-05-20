@@ -47,7 +47,7 @@ struct GlassSurface<Content: View>: View {
         case .background:
             .thinMaterial
         case .panel:
-            .regularMaterial
+            .thinMaterial
         case .floating:
             .regularMaterial
         }
@@ -61,12 +61,12 @@ struct GlassSurface<Content: View>: View {
 
     private var surfaceTint: Color {
         switch (level, colorScheme) {
-        case (.background, .dark): Color.white.opacity(0.04)
-        case (.background, _): Color.white.opacity(0.18)
-        case (.panel, .dark): Color.white.opacity(0.06)
-        case (.panel, _): Color.white.opacity(0.28)
-        case (.floating, .dark): Color.white.opacity(0.08)
-        case (.floating, _): Color.white.opacity(0.34)
+        case (.background, .dark): Color.white.opacity(0.02)
+        case (.background, _): Color.white.opacity(0.10)
+        case (.panel, .dark): Color.white.opacity(0.035)
+        case (.panel, _): Color.white.opacity(0.18)
+        case (.floating, .dark): Color.white.opacity(0.07)
+        case (.floating, _): Color.white.opacity(0.30)
         }
     }
 
@@ -86,74 +86,96 @@ struct GlassSurface<Content: View>: View {
 
     private var shadowColor: Color {
         colorScheme == .dark
-            ? Color.black.opacity(level == .floating ? 0.22 : 0.14)
-            : Color.black.opacity(level == .floating ? 0.08 : 0.05)
+            ? Color.black.opacity(level == .floating ? 0.24 : 0.10)
+            : Color.black.opacity(level == .floating ? 0.10 : 0.045)
     }
 
     private var shadowRadius: CGFloat {
         switch level {
         case .background: 0
-        case .panel: 8
-        case .floating: 12
+        case .panel: 6
+        case .floating: 16
         }
     }
 
     private var shadowY: CGFloat {
         switch level {
         case .background: 0
-        case .panel: 2
+        case .panel: 1
         case .floating: 6
         }
     }
 }
 
-struct GlassCellBackground: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+struct ContentSurfaceBackground: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var isSelected = false
+    var isHovered = false
     var tint: Color = .accentColor
-    var cornerRadius: CGFloat = 14
-
-    @State private var isHovered = false
+    var cornerRadius: CGFloat = 8
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
 
-        ZStack {
-            if reduceTransparency {
-                shape
-                    .fill(isSelected ? tint.opacity(0.14) : Color(nsColor: .controlBackgroundColor))
-            } else {
-                shape
-                    .fill(isSelected ? .regularMaterial : .thinMaterial)
+        shape
+            .fill(baseFill)
+            .overlay {
+                shape.fill(selectionFill)
             }
+            .overlay {
+                shape.strokeBorder(borderColor, lineWidth: 1)
+            }
+    }
 
-            shape
-                .fill(
-                    isSelected
-                        ? tint.opacity(colorScheme == .dark ? 0.18 : 0.12)
-                        : Color.primary.opacity(isHovered ? (colorScheme == .dark ? 0.07 : 0.045) : 0)
-                )
+    private var baseFill: Color {
+        if reduceTransparency {
+            return Color(nsColor: .controlBackgroundColor)
         }
-        .overlay {
-            shape
-                .strokeBorder(
-                    isSelected ? tint.opacity(0.32) : borderColor,
-                    lineWidth: 1
-                )
+
+        return colorScheme == .dark
+            ? Color(nsColor: .controlBackgroundColor).opacity(0.72)
+            : Color(nsColor: .controlBackgroundColor).opacity(0.82)
+    }
+
+    private var selectionFill: Color {
+        if isSelected {
+            return tint.opacity(colorScheme == .dark ? 0.22 : 0.13)
         }
+        return Color.primary.opacity(isHovered ? (colorScheme == .dark ? 0.07 : 0.045) : 0)
+    }
+
+    private var borderColor: Color {
+        if isSelected {
+            return tint.opacity(colorScheme == .dark ? 0.42 : 0.34)
+        }
+
+        return colorScheme == .dark
+            ? Color.white.opacity(0.10)
+            : Color.black.opacity(0.06)
+    }
+}
+
+struct GlassCellBackground: View {
+    var isSelected = false
+    var tint: Color = .accentColor
+    var cornerRadius: CGFloat = 8
+
+    @State private var isHovered = false
+
+    var body: some View {
+        ContentSurfaceBackground(
+            isSelected: isSelected,
+            isHovered: isHovered,
+            tint: tint,
+            cornerRadius: cornerRadius
+        )
         .animation(.easeOut(duration: 0.12), value: isHovered)
         .animation(.easeOut(duration: 0.12), value: isSelected)
         .onHover { hovering in
             isHovered = hovering
         }
-    }
-
-    private var borderColor: Color {
-        colorScheme == .dark
-            ? Color.white.opacity(0.10)
-            : Color.black.opacity(0.06)
     }
 }
 
@@ -193,16 +215,16 @@ struct GlassIconButtonBackground: View {
 
     var body: some View {
         Circle()
-            .fill(reduceTransparency ? Color.primary.opacity(0.08) : Color.clear)
+            .fill(reduceTransparency ? Color(nsColor: .controlBackgroundColor) : Color.clear)
             .background {
                 if !reduceTransparency {
                     Circle()
-                        .fill(.thinMaterial)
+                        .fill(.regularMaterial)
                 }
             }
             .overlay {
                 Circle()
-                    .fill(isPressed ? Color.primary.opacity(0.18) : Color.primary.opacity(isHovered ? 0.08 : 0.04))
+                    .fill(isPressed ? Color.primary.opacity(0.18) : Color.primary.opacity(isHovered ? 0.09 : 0.035))
             }
             .overlay {
                 Circle()
@@ -236,4 +258,3 @@ struct IconButtonStyle: ButtonStyle {
             .opacity(isEnabled ? 1 : 0.45)
     }
 }
-

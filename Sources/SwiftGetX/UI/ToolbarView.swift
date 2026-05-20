@@ -19,6 +19,21 @@ struct ToolbarView: View {
 
         GlassSurface(level: .floating, cornerRadius: 16) {
             HStack(spacing: 12) {
+                HStack(spacing: 9) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+
+                    Text("SwiftGetX")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+                .padding(.trailing, 2)
+
+                Divider()
+                    .frame(height: 22)
+                    .opacity(0.28)
+
                 HStack(spacing: 8) {
                     Button {
                         showingNewTask = true
@@ -69,10 +84,10 @@ struct ToolbarView: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 34)
-                .frame(width: 240)
+                .frame(width: 280)
                 .background {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(.thinMaterial)
+                        .fill(Color(nsColor: .controlBackgroundColor).opacity(colorScheme == .dark ? 0.64 : 0.70))
                         .overlay {
                             RoundedRectangle(cornerRadius: 9, style: .continuous)
                                 .fill(Color.primary.opacity(colorScheme == .dark ? 0.05 : 0.035))
@@ -106,10 +121,7 @@ struct ToolbarView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(
-                    Color.primary.opacity(0.04),
-                    in: Capsule()
-                )
+                .background(Color.primary.opacity(0.04), in: Capsule())
                 .overlay {
                     Capsule()
                         .strokeBorder(
@@ -134,8 +146,8 @@ struct ToolbarView: View {
                     .help("设置")
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
         }
     }
 }
