@@ -4,33 +4,6 @@ import Testing
 
 @Suite("TorrentMetadataService")
 struct TorrentMetadataServiceTests {
-    @Test("parses single-file torrent metadata")
-    func parsesSingleFileTorrentMetadata() throws {
-        let data = Self.singleFileTorrentData(name: "demo.bin", length: 42)
-
-        let metadata = try TorrentFileParser.parse(data: data)
-
-        #expect(metadata.name == "demo.bin")
-        #expect(metadata.totalBytes == 42)
-        #expect(metadata.files == [
-            TorrentFile(index: 0, path: "demo.bin", size: 42)
-        ])
-    }
-
-    @Test("parses multi-file torrent metadata")
-    func parsesMultiFileTorrentMetadata() throws {
-        let data = Self.multiFileTorrentData()
-
-        let metadata = try TorrentFileParser.parse(data: data)
-
-        #expect(metadata.name == "album")
-        #expect(metadata.totalBytes == 30)
-        #expect(metadata.files == [
-            TorrentFile(index: 0, path: "album/a.txt", size: 10),
-            TorrentFile(index: 1, path: "album/nested/b.txt", size: 20)
-        ])
-    }
-
     @Test("copies local torrent file into cache before preview")
     func copiesLocalTorrentFileIntoCacheBeforePreview() async throws {
         let directory = try Self.makeTemporaryDirectory()
@@ -81,11 +54,7 @@ struct TorrentMetadataServiceTests {
     }
 
     private static func singleFileTorrentData(name: String, length: Int) -> Data {
-        Data("d4:infod6:lengthi\(length)e4:name\(name.count):\(name)ee".utf8)
-    }
-
-    private static func multiFileTorrentData() -> Data {
-        Data("d4:infod5:filesld6:lengthi10e4:pathl5:a.txteed6:lengthi20e4:pathl6:nested5:b.txteee4:name5:albumee".utf8)
+        Data("d4:infod6:lengthi\(length)e4:name\(name.count):\(name)12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaaee".utf8)
     }
 
     private static func makeTemporaryDirectory() throws -> URL {

@@ -14,12 +14,16 @@ if enableNativeLibtorrent && !FileManager.default.fileExists(atPath: libtorrentA
     fatalError("SwiftGetX native libtorrent builds require \(libtorrentArchivePath). Run Scripts/build-libtorrent.sh first, or unset SWIFTGETX_ENABLE_LIBTORRENT for the lightweight fallback build.")
 }
 
-var swiftGetXDependencies: [Target.Dependency] = ["SwiftGetXCore"]
-var swiftGetXTestDependencies: [Target.Dependency] = ["SwiftGetX", "SwiftGetXCore"]
+var swiftGetXDependencies: [Target.Dependency] = ["SwiftGetXCore", "SwiftGetXTorrentCore"]
+var swiftGetXTestDependencies: [Target.Dependency] = ["SwiftGetX", "SwiftGetXCore", "SwiftGetXTorrentCore"]
 var targets: [Target] = [
     .target(
         name: "SwiftGetXCore",
         path: "Sources/SwiftGetXCore"
+    ),
+    .target(
+        name: "SwiftGetXTorrentCore",
+        path: "Sources/SwiftGetXTorrentCore"
     )
 ]
 
@@ -73,7 +77,8 @@ let package = Package(
     ],
     products: [
         .executable(name: "SwiftGetX", targets: ["SwiftGetX"]),
-        .executable(name: "SwiftGetXNativeHost", targets: ["SwiftGetXNativeHost"])
+        .executable(name: "SwiftGetXNativeHost", targets: ["SwiftGetXNativeHost"]),
+        .library(name: "SwiftGetXTorrentCore", targets: ["SwiftGetXTorrentCore"])
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.0.0")

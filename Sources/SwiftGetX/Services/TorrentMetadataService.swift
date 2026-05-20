@@ -3,6 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 import SwiftGetXCore
+import SwiftGetXTorrentCore
 
 struct TorrentMetadataPreview: Equatable, Sendable {
     var source: String
@@ -118,7 +119,7 @@ actor TorrentMetadataService {
     private func previewTorrentFile(source: String, suggestedFilename: String?) async -> TorrentMetadataPreview {
         do {
             let cachedURL = try await cachedTorrentFile(for: source)
-            let metadata = try TorrentFileParser.parse(url: cachedURL)
+            let metadata = try TorrentMetainfo.parse(url: cachedURL)
             let displayName = suggestedFilename?.nonEmpty
                 ?? metadata.name.nonEmpty
                 ?? SourceParser.displayName(for: source, kind: .torrentFile)
@@ -128,8 +129,10 @@ actor TorrentMetadataService {
                 kind: .torrentFile,
                 displayName: displayName,
                 resolvedTorrentFilePath: cachedURL.path,
-                files: metadata.files,
-                totalBytes: metadata.totalBytes,
+                files: metadata.files.map {
+                    TorrentFile(index: $0.index, path: $0.path, size: $0.length, progress: 0)
+                },
+                totalBytes: metadata.totalLength,
                 metadataStatus: .available,
                 errorMessage: nil
             )
@@ -258,185 +261,6 @@ enum TorrentMetadataError: LocalizedError, Equatable {
         case .invalidBencode:
             L10n.string("error_invalid_bencode")
         }
-    }
-}
-
-struct ParsedTorrentMetadata: Equatable, Sendable {
-    var name: String
-    var files: [TorrentFile]
-
-    var totalBytes: Int64 {
-        files.reduce(0) { $0 + $1.size }
-    }
-}
-
-enum TorrentFileParser {
-    static func parse(url: URL) throws -> ParsedTorrentMetadata {
-        let data = try Data(contentsOf: url)
-        return try parse(data: data)
-    }
-
-    static func parse(data: Data) throws -> ParsedTorrentMetadata {
-        let value = try BencodeParser(data: data).parse()
-        guard case .dictionary(let root) = value,
-              let info = root["info"],
-              case .dictionary(let infoDictionary) = info
-        else {
-            throw TorrentMetadataError.invalidTorrentFile
-        }
-
-        let name = stringValue(infoDictionary["name"]) ?? stringValue(infoDictionary["name.utf-8"]) ?? "torrent"
-
-        if case .list(let fileValues)? = infoDictionary["files"] {
-            let files = fileValues.enumerated().compactMap { offset, value -> TorrentFile? in
-                guard case .dictionary(let fileDictionary) = value,
-                      let length = integerValue(fileDictionary["length"])
-                else {
-                    return nil
-                }
-
-                let pathComponents = pathComponents(from: fileDictionary["path.utf-8"])
-                    ?? pathComponents(from: fileDictionary["path"])
-                    ?? ["file-\(offset)"]
-                let path = ([name] + pathComponents).joined(separator: "/")
-                return TorrentFile(index: offset, path: path, size: length, progress: 0)
-            }
-
-            guard !files.isEmpty else { throw TorrentMetadataError.invalidTorrentFile }
-            return ParsedTorrentMetadata(name: name, files: files)
-        }
-
-        guard let length = integerValue(infoDictionary["length"]) else {
-            throw TorrentMetadataError.invalidTorrentFile
-        }
-
-        return ParsedTorrentMetadata(
-            name: name,
-            files: [TorrentFile(index: 0, path: name, size: length, progress: 0)]
-        )
-    }
-
-    private static func integerValue(_ value: BencodeValue?) -> Int64? {
-        guard case .integer(let integer)? = value else { return nil }
-        return integer
-    }
-
-    private static func stringValue(_ value: BencodeValue?) -> String? {
-        guard case .data(let data)? = value else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func pathComponents(from value: BencodeValue?) -> [String]? {
-        guard case .list(let components)? = value else { return nil }
-        let strings = components.compactMap(stringValue)
-        return strings.isEmpty ? nil : strings
-    }
-}
-
-enum BencodeValue: Equatable, Sendable {
-    case integer(Int64)
-    case data(Data)
-    case list([BencodeValue])
-    case dictionary([String: BencodeValue])
-}
-
-struct BencodeParser {
-    private let bytes: [UInt8]
-    private var index = 0
-
-    init(data: Data) {
-        bytes = Array(data)
-    }
-
-    func parse() throws -> BencodeValue {
-        var parser = self
-        let value = try parser.parseValue()
-        guard parser.index == parser.bytes.count else {
-            throw TorrentMetadataError.invalidBencode
-        }
-        return value
-    }
-
-    private mutating func parseValue() throws -> BencodeValue {
-        guard index < bytes.count else { throw TorrentMetadataError.invalidBencode }
-        let byte = bytes[index]
-        if byte == UInt8(ascii: "i") {
-            return try parseInteger()
-        }
-        if byte == UInt8(ascii: "l") {
-            return try parseList()
-        }
-        if byte == UInt8(ascii: "d") {
-            return try parseDictionary()
-        }
-        if byte >= UInt8(ascii: "0") && byte <= UInt8(ascii: "9") {
-            return try parseData()
-        }
-        throw TorrentMetadataError.invalidBencode
-    }
-
-    private mutating func parseInteger() throws -> BencodeValue {
-        index += 1
-        let start = index
-        while index < bytes.count, bytes[index] != UInt8(ascii: "e") {
-            index += 1
-        }
-        guard index < bytes.count,
-              let integer = Int64(String(decoding: bytes[start..<index], as: UTF8.self))
-        else {
-            throw TorrentMetadataError.invalidBencode
-        }
-        index += 1
-        return .integer(integer)
-    }
-
-    private mutating func parseData() throws -> BencodeValue {
-        let lengthStart = index
-        while index < bytes.count, bytes[index] != UInt8(ascii: ":") {
-            guard bytes[index] >= UInt8(ascii: "0") && bytes[index] <= UInt8(ascii: "9") else {
-                throw TorrentMetadataError.invalidBencode
-            }
-            index += 1
-        }
-        guard index < bytes.count,
-              let length = Int(String(decoding: bytes[lengthStart..<index], as: UTF8.self))
-        else {
-            throw TorrentMetadataError.invalidBencode
-        }
-        index += 1
-        guard length >= 0, index + length <= bytes.count else {
-            throw TorrentMetadataError.invalidBencode
-        }
-        let data = Data(bytes[index..<index + length])
-        index += length
-        return .data(data)
-    }
-
-    private mutating func parseList() throws -> BencodeValue {
-        index += 1
-        var values = [BencodeValue]()
-        while index < bytes.count, bytes[index] != UInt8(ascii: "e") {
-            values.append(try parseValue())
-        }
-        guard index < bytes.count else { throw TorrentMetadataError.invalidBencode }
-        index += 1
-        return .list(values)
-    }
-
-    private mutating func parseDictionary() throws -> BencodeValue {
-        index += 1
-        var values = [String: BencodeValue]()
-        while index < bytes.count, bytes[index] != UInt8(ascii: "e") {
-            guard case .data(let keyData) = try parseData(),
-                  let key = String(data: keyData, encoding: .utf8)
-            else {
-                throw TorrentMetadataError.invalidBencode
-            }
-            values[key] = try parseValue()
-        }
-        guard index < bytes.count else { throw TorrentMetadataError.invalidBencode }
-        index += 1
-        return .dictionary(values)
     }
 }
 

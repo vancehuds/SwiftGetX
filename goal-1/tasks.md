@@ -446,17 +446,35 @@ Next step:
 
 ## Task 11: SwiftGetXTorrentCore Target and Metadata Parsers
 
-Status: [ ]
+Status: [x]
 
 Create `SwiftGetXTorrentCore` and implement/test bencode, canonical info bytes, v1 info hash, single/multi-file metainfo, announce-list/private flag parsing, and magnet parsing for hex/base32 `btih`, `dn`, `tr`, and `xl`.
 
 Work performed:
 
+- Added a new pure Swift `SwiftGetXTorrentCore` target and library product, and wired it into the app/test target dependencies without changing the optional libtorrent path.
+- Implemented strict bencode parsing with byte-string, integer, list, and dictionary support, canonical dictionary key ordering checks, trailing-data detection, canonical integer/length validation, and deterministic re-encoding.
+- Implemented `TorrentMetainfo` parsing for BitTorrent v1 `.torrent` files, including retained canonical `info` dictionary bytes, SHA-1 v1 info hash, single-file and multi-file file lists, piece length, piece hashes, announce, announce-list tiers, and private flag.
+- Implemented `MagnetURI` parsing for `btih` hex/base32 info hashes, display name (`dn`), repeated tracker (`tr`) values, and exact length (`xl`).
+- Moved torrent file metadata parsing ownership out of `TorrentMetadataService` and into `SwiftGetXTorrentCore`, leaving the app service responsible only for caching/preview mapping into existing `TorrentFile` rows.
+- Added deterministic unit tests for valid/invalid bencode, canonical info bytes and known SHA-1 hashes, single/multi-file metainfo, announce-list/private metadata, invalid metainfo, and magnet hex/base32 parsing.
+
 Verification evidence:
+
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentMetadataService` passed with 11 tests across 2 suites.
+- `swift build` passed.
+- `swift test` passed with 153 tests across 14 suites.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Task 11 intentionally covers metadata parsing only. Path traversal, duplicate path detection, path length/control-character policy, and resume schema are still Task 12 scope.
+- The new parser validates canonical bencode and BEP 3 v1 metadata required by the Swift core, which is stricter than the previous lightweight preview parser; malformed or incomplete torrent fixtures now fail earlier.
+- Magnet metadata fetching over peers remains unavailable in this task; this only parses magnet URI parameters and info hashes.
+
 Next step:
+
+- Task 12: Torrent Path Layout and Resume Schema.
 
 ## Task 12: Torrent Path Layout and Resume Schema
 
