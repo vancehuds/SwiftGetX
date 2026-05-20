@@ -1,17 +1,46 @@
 import AppKit
 
 @MainActor
-final class MenuBarController {
+final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let menu = NSMenu()
+    private weak var coordinator: DownloadCoordinator?
+    private weak var settings: AppSettings?
+    private var refreshTimer: Timer?
+    private var taskLookup: [UUID: DownloadTask] = [:]
 
-    init() {
-        statusItem.button?.image = NSImage(systemSymbolName: "arrow.down.circle", accessibilityDescription: "SwiftGetX")
+    override init() {
+        super.init()
+        menu.delegate = self
+        statusItem.menu = menu
         statusItem.button?.imagePosition = .imageLeading
-        statusItem.menu = makeMenu()
+        updateStatusItem()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateStatusItem()
+            }
+        }
     }
 
-    private func makeMenu() -> NSMenu {
-        let menu = NSMenu()
+    func attach(coordinator: DownloadCoordinator, settings: AppSettings) {
+        self.coordinator = coordinator
+        self.settings = settings
+        updateStatusItem()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        rebuildMenu()
+        updateStatusItem()
+    }
+
+    private func rebuildMenu() {
+        menu.removeAllItems()
+        taskLookup.removeAll()
+
+        let snapshot = makeSnapshot()
+        addSummaryItems(snapshot)
+
+        menu.addItem(NSMenuItem.separator())
 
         menu.addItem(
             withTitle: "新建下载任务",
@@ -19,17 +48,39 @@ final class MenuBarController {
             keyEquivalent: "n"
         ).target = self
 
+        if !snapshot.recentTasks.isEmpty {
+            menu.addItem(NSMenuItem.separator())
+            let title = disabledItem("最近任务")
+            menu.addItem(title)
+
+            for taskSnapshot in snapshot.recentTasks {
+                guard let task = task(for: taskSnapshot.id) else { continue }
+                taskLookup[task.id] = task
+                menu.addItem(menuItem(for: taskSnapshot))
+            }
+        }
+
         menu.addItem(NSMenuItem.separator())
 
-        menu.addItem(
+        let pauseItem = menu.addItem(
             withTitle: "暂停全部",
             action: #selector(pauseAll),
             keyEquivalent: ""
-        ).target = self
+        )
+        pauseItem.target = self
+        pauseItem.isEnabled = snapshot.runningCount > 0 || snapshot.queuedCount > 0 || snapshot.verifyingCount > 0
 
-        menu.addItem(
+        let resumeItem = menu.addItem(
             withTitle: "恢复全部",
             action: #selector(resumeAll),
+            keyEquivalent: ""
+        )
+        resumeItem.target = self
+        resumeItem.isEnabled = snapshot.pausedCount > 0 || snapshot.failedCount > 0 || snapshot.queuedCount > 0
+
+        menu.addItem(
+            withTitle: "打开下载目录",
+            action: #selector(openDownloadDirectory),
             keyEquivalent: ""
         ).target = self
 
@@ -41,7 +92,134 @@ final class MenuBarController {
             keyEquivalent: ""
         ).target = self
 
-        return menu
+        menu.addItem(
+            withTitle: "设置…",
+            action: #selector(openSettings),
+            keyEquivalent: ","
+        ).target = self
+
+        menu.addItem(NSMenuItem.separator())
+
+        menu.addItem(
+            withTitle: "退出 SwiftGetX",
+            action: #selector(quitApp),
+            keyEquivalent: "q"
+        ).target = self
+    }
+
+    private func addSummaryItems(_ snapshot: MenuBarSnapshot) {
+        let summary = disabledItem(
+            "全部 \(snapshot.totalCount) · 下载中 \(snapshot.runningCount) · 等待 \(snapshot.queuedCount)"
+        )
+        summary.image = NSImage(systemSymbolName: snapshot.statusSymbolName, accessibilityDescription: nil)
+        menu.addItem(summary)
+
+        let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: snapshot.totalDownloadSpeed)
+        menu.addItem(disabledItem("速度 \(speed)/s · 已完成 \(snapshot.completedCount) · 失败 \(snapshot.failedCount)"))
+    }
+
+    private func menuItem(for task: MenuBarTaskSnapshot) -> NSMenuItem {
+        let item = NSMenuItem(title: taskMenuTitle(for: task), action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: task.status.symbolName, accessibilityDescription: task.status.title)
+        item.submenu = taskSubmenu(for: task)
+        return item
+    }
+
+    private func taskSubmenu(for task: MenuBarTaskSnapshot) -> NSMenu {
+        let submenu = NSMenu()
+        submenu.addItem(disabledItem(task.name))
+        submenu.addItem(disabledItem(taskDetailTitle(for: task)))
+        submenu.addItem(NSMenuItem.separator())
+
+        let toggleItem = submenu.addItem(
+            withTitle: task.status == .running ? "暂停" : "开始",
+            action: #selector(toggleTask(_:)),
+            keyEquivalent: ""
+        )
+        toggleItem.target = self
+        toggleItem.representedObject = task.id
+        toggleItem.isEnabled = task.status != .completed && task.status != .verifying
+
+        let revealItem = submenu.addItem(
+            withTitle: "在访达中显示",
+            action: #selector(revealTask(_:)),
+            keyEquivalent: ""
+        )
+        revealItem.target = self
+        revealItem.representedObject = task.id
+
+        submenu.addItem(NSMenuItem.separator())
+
+        let deleteItem = submenu.addItem(
+            withTitle: "删除任务",
+            action: #selector(deleteTask(_:)),
+            keyEquivalent: ""
+        )
+        deleteItem.target = self
+        deleteItem.representedObject = task.id
+
+        return submenu
+    }
+
+    private func updateStatusItem() {
+        let snapshot = makeSnapshot()
+        let image = NSImage(systemSymbolName: snapshot.statusSymbolName, accessibilityDescription: "SwiftGetX")
+        image?.isTemplate = true
+        statusItem.button?.image = image
+
+        if snapshot.totalDownloadSpeed > 0 {
+            statusItem.button?.title = ByteCountFormatter.downloadFormatter
+                .string(fromByteCount: snapshot.totalDownloadSpeed) + "/s"
+        } else {
+            statusItem.button?.title = ""
+        }
+        statusItem.button?.toolTip = toolTip(for: snapshot)
+    }
+
+    private func makeSnapshot() -> MenuBarSnapshot {
+        MenuBarSnapshot(tasks: coordinator?.allTasks() ?? [])
+    }
+
+    private func task(for id: UUID) -> DownloadTask? {
+        if let task = taskLookup[id] {
+            return task
+        }
+        return coordinator?.allTasks().first { $0.id == id }
+    }
+
+    private func taskMenuTitle(for task: MenuBarTaskSnapshot) -> String {
+        let percent = Int((task.progress * 100).rounded())
+        switch task.status {
+        case .running:
+            let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond)
+            return "\(task.name) · \(percent)% · \(speed)/s"
+        case .completed:
+            return "\(task.name) · 已完成"
+        case .failed:
+            return "\(task.name) · 失败"
+        default:
+            return "\(task.name) · \(task.status.title) · \(percent)%"
+        }
+    }
+
+    private func taskDetailTitle(for task: MenuBarTaskSnapshot) -> String {
+        let percent = Int((task.progress * 100).rounded())
+        if task.status == .running {
+            let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond)
+            return "\(task.status.title) · \(percent)% · \(speed)/s"
+        }
+        return "\(task.status.title) · \(percent)%"
+    }
+
+    private func toolTip(for snapshot: MenuBarSnapshot) -> String {
+        let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: snapshot.totalDownloadSpeed)
+        return "SwiftGetX · \(snapshot.runningCount) 下载中 · \(speed)/s"
+    }
+
+    private func disabledItem(_ title: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
     }
 
     @objc private func showNewTask() {
@@ -50,19 +228,80 @@ final class MenuBarController {
     }
 
     @objc private func pauseAll() {
-        NotificationCenter.default.post(name: .pauseAllDownloads, object: nil)
+        if let coordinator {
+            coordinator.pauseAll()
+        } else {
+            NotificationCenter.default.post(name: .pauseAllDownloads, object: nil)
+        }
     }
 
     @objc private func resumeAll() {
-        NotificationCenter.default.post(name: .resumeAllDownloads, object: nil)
+        if let coordinator {
+            coordinator.resumeAll()
+        } else {
+            NotificationCenter.default.post(name: .resumeAllDownloads, object: nil)
+        }
     }
 
     @objc private func openApp() {
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openSettings() {
+        NSApp.activate(ignoringOtherApps: true)
+        NotificationCenter.default.post(name: .openSwiftGetXSettings, object: nil)
+    }
+
+    @objc private func openDownloadDirectory() {
+        let directory = settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
+        NSWorkspace.shared.open(directory)
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
+    }
+
+    @objc private func toggleTask(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let task = task(for: id),
+              task.status != .completed,
+              task.status != .verifying
+        else {
+            return
+        }
+
+        if task.status == .running {
+            coordinator?.pause(task)
+        } else {
+            coordinator?.resume(task)
+        }
+        updateStatusItem()
+    }
+
+    @objc private func revealTask(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let task = task(for: id)
+        else {
+            return
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: task.savePath)])
+    }
+
+    @objc private func deleteTask(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID,
+              let task = task(for: id)
+        else {
+            return
+        }
+
+        coordinator?.remove(task, deletingFiles: task.status != .completed)
+        updateStatusItem()
     }
 }
 
 extension Notification.Name {
     static let pauseAllDownloads = Notification.Name("SwiftGetX.pauseAllDownloads")
     static let resumeAllDownloads = Notification.Name("SwiftGetX.resumeAllDownloads")
+    static let openSwiftGetXSettings = Notification.Name("SwiftGetX.openSettings")
 }

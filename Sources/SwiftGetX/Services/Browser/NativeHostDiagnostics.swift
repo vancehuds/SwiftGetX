@@ -11,6 +11,7 @@ final class NativeHostDiagnostics {
     private(set) var isChecking: Bool = false
 
     private let hostName = "com.swiftgetx.native"
+    private let extensionDiscovery = ChromeExtensionDiscovery()
 
     private var manifestDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -117,23 +118,31 @@ final class NativeHostDiagnostics {
 
         // 5. Check allowed_origins
         let origins = manifest.allowed_origins ?? []
-        let hasPlaceholder = origins.contains { $0.contains("REPLACE_WITH") }
+        let validOrigins = ChromeNativeMessagingOrigin.sanitizedOrigins(from: origins)
+        let hasPlaceholder = origins.contains(where: ChromeNativeMessagingOrigin.isPlaceholder)
         if hasPlaceholder {
+            let discoveredIDs = extensionDiscovery.discoverExtensionIDs()
+            let detail = discoveredIDs.isEmpty
+                ? "allowed_origins 中包含占位符。请先安装或启用 SwiftGetX Chrome 插件，然后点“尝试修复”。"
+                : "allowed_origins 中包含占位符，可自动写入已发现的 SwiftGetX Chrome 插件 ID。"
             return DiagnosticResult(
                 status: .warning,
-                statusMessage: "扩展 ID 未配置",
-                detailMessage: "allowed_origins 中包含占位符，请设置 Chrome 扩展 ID",
-                isRepairable: false
+                statusMessage: "扩展 ID 待配置",
+                detailMessage: detail,
+                isRepairable: true
             )
         }
 
-        let hasValidOrigin = origins.contains { $0.hasPrefix("chrome-extension://") && $0.count > 30 }
-        if !hasValidOrigin {
+        if validOrigins.isEmpty {
+            let discoveredIDs = extensionDiscovery.discoverExtensionIDs()
+            let detail = discoveredIDs.isEmpty
+                ? "未找到有效的 SwiftGetX Chrome 插件 ID。请先安装或启用插件，然后点“尝试修复”。"
+                : "未写入有效的 Chrome 扩展来源，可自动写入已发现的 SwiftGetX Chrome 插件 ID。"
             return DiagnosticResult(
                 status: .warning,
-                statusMessage: "扩展 ID 可能无效",
-                detailMessage: "allowed_origins 中没有有效的 Chrome 扩展来源",
-                isRepairable: false
+                statusMessage: "扩展 ID 待配置",
+                detailMessage: detail,
+                isRepairable: true
             )
         }
 
@@ -141,7 +150,7 @@ final class NativeHostDiagnostics {
         return DiagnosticResult(
             status: .ok,
             statusMessage: "一切正常",
-            detailMessage: "Native Host 已安装，路径正确",
+            detailMessage: "Native Host 已安装，已允许 \(validOrigins.count) 个 Chrome 插件来源",
             isRepairable: false
         )
     }
@@ -194,11 +203,26 @@ final class NativeHostDiagnostics {
         }
 
         // Read existing allowed_origins if manifest already exists (preserve extension ID)
-        var allowedOrigins: [String] = ["chrome-extension://REPLACE_WITH_CHROME_EXTENSION_ID/"]
+        var existingOrigins: [String] = []
         if let existingData = fm.contents(atPath: manifestURL.path),
            let existingManifest = try? JSONDecoder().decode(ManifestContent.self, from: existingData),
            let origins = existingManifest.allowed_origins, !origins.isEmpty {
-            allowedOrigins = origins
+            existingOrigins = origins
+        }
+
+        let discoveredIDs = extensionDiscovery.discoverExtensionIDs()
+        let allowedOrigins = ChromeNativeMessagingOrigin.merge(
+            existingOrigins: existingOrigins,
+            discoveredExtensionIDs: discoveredIDs
+        )
+
+        guard !allowedOrigins.isEmpty else {
+            return DiagnosticResult(
+                status: .warning,
+                statusMessage: "未发现插件 ID",
+                detailMessage: "找不到已安装的 SwiftGetX Chrome 插件。请先在 Chrome 中安装或启用插件，然后再次尝试修复。",
+                isRepairable: true
+            )
         }
 
         // Write manifest
@@ -231,7 +255,7 @@ final class NativeHostDiagnostics {
             return DiagnosticResult(
                 status: .ok,
                 statusMessage: "修复成功",
-                detailMessage: "Native Host 已重新安装到正确路径",
+                detailMessage: "Native Host 已重新安装，并写入 \(allowedOrigins.count) 个 Chrome 插件来源",
                 isRepairable: false
             )
         }

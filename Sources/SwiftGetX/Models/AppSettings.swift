@@ -19,6 +19,7 @@ final class AppSettings {
     var globalUploadLimitBytes: Int64 = 0
     var completionNotificationsEnabled = true
     var clipboardDetectionEnabled = true
+    var confirmBrowserTakeoverDownloads = true
     var stopSeedingAtRatio: Double = 1.0
 
     func apply(_ record: AppSettingsRecord) {
@@ -32,6 +33,7 @@ final class AppSettings {
         globalUploadLimitBytes = record.globalUploadLimitBytes
         completionNotificationsEnabled = record.completionNotificationsEnabled
         clipboardDetectionEnabled = record.clipboardDetectionEnabled
+        confirmBrowserTakeoverDownloads = record.confirmBrowserTakeoverDownloads
         stopSeedingAtRatio = record.stopSeedingAtRatio
     }
 
@@ -47,6 +49,7 @@ final class AppSettings {
             globalUploadLimitBytes: globalUploadLimitBytes,
             completionNotificationsEnabled: completionNotificationsEnabled,
             clipboardDetectionEnabled: clipboardDetectionEnabled,
+            confirmBrowserTakeoverDownloads: confirmBrowserTakeoverDownloads,
             stopSeedingAtRatio: stopSeedingAtRatio
         )
     }
@@ -62,6 +65,7 @@ final class AppSettings {
         record.globalUploadLimitBytes = globalUploadLimitBytes
         record.completionNotificationsEnabled = completionNotificationsEnabled
         record.clipboardDetectionEnabled = clipboardDetectionEnabled
+        record.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
         record.stopSeedingAtRatio = stopSeedingAtRatio
     }
 }
@@ -79,6 +83,7 @@ final class AppSettingsRecord {
     var globalUploadLimitBytes: Int64
     var completionNotificationsEnabled: Bool
     var clipboardDetectionEnabled: Bool
+    var confirmBrowserTakeoverDownloads: Bool = true
     var stopSeedingAtRatio: Double
 
     init(
@@ -93,6 +98,7 @@ final class AppSettingsRecord {
         globalUploadLimitBytes: Int64 = 0,
         completionNotificationsEnabled: Bool = true,
         clipboardDetectionEnabled: Bool = true,
+        confirmBrowserTakeoverDownloads: Bool = true,
         stopSeedingAtRatio: Double = 1.0
     ) {
         self.id = id
@@ -106,6 +112,7 @@ final class AppSettingsRecord {
         self.globalUploadLimitBytes = globalUploadLimitBytes
         self.completionNotificationsEnabled = completionNotificationsEnabled
         self.clipboardDetectionEnabled = clipboardDetectionEnabled
+        self.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
         self.stopSeedingAtRatio = stopSeedingAtRatio
     }
 }

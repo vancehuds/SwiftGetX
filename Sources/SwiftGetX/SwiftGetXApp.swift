@@ -26,7 +26,7 @@ struct SwiftGetXApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        Window("SwiftGetX", id: "main") {
             ContentView()
                 .environment(coordinator)
                 .environment(browserBridge)
@@ -36,13 +36,15 @@ struct SwiftGetXApp: App {
                 .task {
                     loadSettings()
                     coordinator.attach(modelContext: modelContainer.mainContext, settings: appSettings)
+                    appDelegate.attachMenuBar(coordinator: coordinator, settings: appSettings)
                     browserBridge.attach(coordinator: coordinator)
                     clipboardMonitor.attach(coordinator: coordinator, settings: appSettings)
                     coordinator.restoreIncompleteTasks()
                 }
                 .onOpenURL { url in
-                    if let source = DeepLinkParser.downloadSource(from: url) {
-                        coordinator.add(source: source)
+                    NSApp.activate(ignoringOtherApps: true)
+                    if let draft = DeepLinkParser.downloadDraft(from: url) {
+                        handleDownloadDraft(draft)
                     } else {
                         coordinator.add(source: url.absoluteString)
                     }
@@ -78,6 +80,15 @@ struct SwiftGetXApp: App {
     }
 
     @MainActor
+    private func handleDownloadDraft(_ draft: DownloadDraft) {
+        if draft.isBrowserTakeover, appSettings.confirmBrowserTakeoverDownloads {
+            NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
+        } else {
+            coordinator.add(source: draft.source, suggestedFilename: draft.suggestedFilename)
+        }
+    }
+
+    @MainActor
     private func loadSettings() {
         let context = modelContainer.mainContext
         let descriptor = FetchDescriptor<AppSettingsRecord>(
@@ -94,13 +105,29 @@ struct SwiftGetXApp: App {
 }
 
 enum DeepLinkParser {
-    static func downloadSource(from url: URL) -> String? {
+    static func downloadDraft(from url: URL) -> DownloadDraft? {
         guard url.scheme == "swiftgetx", url.host == "download",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         else {
             return nil
         }
-        return components.queryItems?.first(where: { $0.name == "url" })?.value
+
+        guard let source = queryValue("url", in: components), !source.isEmpty else {
+            return nil
+        }
+
+        return DownloadDraft(
+            source: source,
+            suggestedFilename: queryValue("filename", in: components),
+            browser: queryValue("browser", in: components),
+            handoffSource: queryValue("source", in: components),
+            sourcePageTitle: queryValue("sourcePageTitle", in: components),
+            sourcePageUrl: queryValue("sourcePageUrl", in: components)
+        )
+    }
+
+    private static func queryValue(_ name: String, in components: URLComponents) -> String? {
+        components.queryItems?.first(where: { $0.name == name })?.value
     }
 }
 
@@ -110,6 +137,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         UNUserNotificationCenter.current().delegate = self
         menuBarController = MenuBarController()
+    }
+
+    @MainActor
+    func attachMenuBar(coordinator: DownloadCoordinator, settings: AppSettings) {
+        if menuBarController == nil {
+            menuBarController = MenuBarController()
+        }
+        menuBarController?.attach(coordinator: coordinator, settings: settings)
     }
 
     func userNotificationCenter(

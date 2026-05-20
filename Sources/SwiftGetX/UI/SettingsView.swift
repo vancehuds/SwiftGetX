@@ -79,6 +79,7 @@ private struct SettingsSnapshot: Equatable {
     let globalUploadLimitBytes: Int64
     let completionNotificationsEnabled: Bool
     let clipboardDetectionEnabled: Bool
+    let confirmBrowserTakeoverDownloads: Bool
     let stopSeedingAtRatio: Double
 
     @MainActor
@@ -93,6 +94,7 @@ private struct SettingsSnapshot: Equatable {
         globalUploadLimitBytes = settings.globalUploadLimitBytes
         completionNotificationsEnabled = settings.completionNotificationsEnabled
         clipboardDetectionEnabled = settings.clipboardDetectionEnabled
+        confirmBrowserTakeoverDownloads = settings.confirmBrowserTakeoverDownloads
         stopSeedingAtRatio = settings.stopSeedingAtRatio
     }
 }
@@ -197,7 +199,7 @@ private struct SettingsForm: View {
             )
             TorrentSettingsSection(settings: settings)
             SystemSettingsSection(settings: settings)
-            BrowserIntegrationSection(diagnostics: diagnostics, layout: layout)
+            BrowserIntegrationSection(settings: settings, diagnostics: diagnostics, layout: layout)
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -275,11 +277,13 @@ private struct SystemSettingsSection: View {
 }
 
 private struct BrowserIntegrationSection: View {
+    @Bindable var settings: AppSettings
     let diagnostics: NativeHostDiagnostics
     let layout: ResponsiveLayout
 
     var body: some View {
         Section("浏览器集成") {
+            Toggle("接管下载后显示确认界面", isOn: $settings.confirmBrowserTakeoverDownloads)
             BrowserIntegrationRow(diagnostics: diagnostics, layout: layout)
         }
     }

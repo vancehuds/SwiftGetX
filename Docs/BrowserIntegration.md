@@ -14,14 +14,17 @@ SwiftGetX uses explicit browser handoff plus an opt-out Chrome download takeover
 - The extension uses `chrome.runtime.sendNativeMessage("com.swiftgetx.native", ...)`.
 - Context menus can send links, the current page, selected text, and media URLs to SwiftGetX.
 - The popup can send the current page, send the current selection, scan a page for likely download links, and toggle Chrome download takeover.
-- Chrome download takeover is enabled by default. When Chrome creates a supported HTTP, HTTPS, magnet, or `.torrent` download, the extension immediately cancels and erases the Chrome item, then sends the URL to SwiftGetX through the native host. If native handoff fails, the extension shows a failure badge because the original Chrome download has already been stopped.
+- Chrome download takeover is enabled by default. When Chrome creates a supported HTTP, HTTPS, magnet, or `.torrent` download, the extension sends the URL to SwiftGetX through the native host. After SwiftGetX accepts the handoff, the extension cancels and erases the Chrome item; if native handoff fails, Chrome continues the original download.
+- SwiftGetX shows a prefilled new-task confirmation sheet for browser takeover handoffs by default. This can be disabled in Settings under Browser Integration with `接管下载后显示确认界面`, which restores immediate task creation.
 - Build the native host with `swift build`.
 - Install the Native Messaging host manifest with:
 
 ```sh
-Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHost <chrome-extension-id>
+Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHost
 ```
 
+- The installer no longer requires manually copying the Chrome extension ID. It first reuses any valid SwiftGetX origin already present in `com.swiftgetx.native.json`, then scans Chrome profiles for an installed extension named `SwiftGetX` with the `nativeMessaging` permission.
+- To override auto-discovery, pass the ID as the second argument or set `SWIFTGETX_CHROME_EXTENSION_ID`. Multiple IDs can be separated with commas or whitespace. For non-default Chrome data directories, set `SWIFTGETX_CHROME_USER_DATA_DIR`.
 - If installing from an app bundle, the manifest path must point at `SwiftGetX.app/Contents/MacOS/SwiftGetXNativeHost`, not the main `SwiftGetX` app executable.
 - The native host opens `swiftgetx://download?url=...`, which the main app handles through `onOpenURL`.
 - Package a local ZIP and CRX with:
@@ -30,7 +33,7 @@ Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHo
 Scripts/package-chrome-extension.sh
 ```
 
-The CRX packager creates a temporary signing key when no key is provided, which changes the Chrome extension ID on each build. For a stable ID, set `SWIFTGETX_CHROME_EXTENSION_KEY_PATH` to a PEM key locally or set the GitHub Actions secret `CHROME_EXTENSION_KEY_BASE64` to a base64-encoded PEM private key. Use the printed CRX ID when installing the Native Messaging host manifest.
+The CRX packager creates a temporary signing key when no key is provided, which changes the Chrome extension ID on each build. For a stable ID, set `SWIFTGETX_CHROME_EXTENSION_KEY_PATH` to a PEM key locally or set the GitHub Actions secret `CHROME_EXTENSION_KEY_BASE64` to a base64-encoded PEM private key. The printed CRX ID is still useful for debugging, but the App settings repair flow and install script can discover installed SwiftGetX Chrome extensions automatically.
 
 ## Native Message Format
 

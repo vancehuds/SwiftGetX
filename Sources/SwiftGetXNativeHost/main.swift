@@ -23,7 +23,14 @@ do {
             throw NativeHostError.invalidDownloadSource
         }
 
-        guard let url = DeepLinkBuilder.downloadURL(for: source) else {
+        guard let url = DeepLinkBuilder.downloadURL(
+            for: source,
+            browser: message.browser,
+            suggestedFilename: message.suggestedFilename,
+            handoffSource: message.source,
+            sourcePageTitle: message.sourcePageTitle,
+            sourcePageUrl: message.sourcePageUrl
+        ) else {
             throw NativeHostError.invalidDownloadSource
         }
 
@@ -70,4 +77,3 @@ private enum NativeHostError: LocalizedError {
         }
     }
 }
-

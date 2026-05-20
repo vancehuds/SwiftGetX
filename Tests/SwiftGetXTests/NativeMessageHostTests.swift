@@ -58,6 +58,26 @@ struct NativeMessageHostTests {
         #expect(Int(payloadLength) == encoded.count - 4)
     }
 
+    @Test("builds download deep links with browser takeover metadata")
+    func buildsDownloadDeepLinksWithMetadata() throws {
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "https://example.com/file.dmg?token=a b",
+            browser: "Chrome",
+            suggestedFilename: "file.dmg",
+            handoffSource: "download-takeover",
+            sourcePageTitle: "Downloads",
+            sourcePageUrl: "https://example.com"
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.source == "https://example.com/file.dmg?token=a b")
+        #expect(draft.browser == "Chrome")
+        #expect(draft.suggestedFilename == "file.dmg")
+        #expect(draft.handoffSource == "download-takeover")
+        #expect(draft.isBrowserTakeover)
+    }
+
     private func encodeMessage(_ message: BrowserDownloadMessage) throws -> Data {
         let payload = try JSONEncoder().encode(message)
         var length = UInt32(payload.count).littleEndian

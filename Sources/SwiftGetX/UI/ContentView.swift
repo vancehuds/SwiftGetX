@@ -5,8 +5,10 @@ struct ContentView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(BrowserBridge.self) private var browserBridge
     @Environment(ClipboardMonitor.self) private var clipboardMonitor
+    @Environment(\.openSettings) private var openSettings
     @Query(sort: \DownloadTask.createdAt, order: .reverse) private var allTasks: [DownloadTask]
     @State private var showingNewTask = false
+    @State private var newTaskDraft: DownloadDraft?
 
     var body: some View {
         GeometryReader { proxy in
@@ -52,20 +54,27 @@ struct ContentView: View {
             }
             .environment(\.responsiveLayout, layout)
             .sheet(isPresented: $showingNewTask) {
-                NewTaskSheet()
-                    .environment(\.responsiveLayout, layout)
-                    .frame(minWidth: layout.value(420), idealWidth: layout.value(560), maxWidth: layout.value(720))
+                NewTaskSheet(draft: newTaskDraft)
             }
         }
         .frame(minWidth: 720, minHeight: 450)
-        .onReceive(NotificationCenter.default.publisher(for: .showNewTaskSheet)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .showNewTaskSheet)) { notification in
+            newTaskDraft = notification.object as? DownloadDraft
             showingNewTask = true
+        }
+        .onChange(of: showingNewTask) { _, isShowing in
+            if !isShowing {
+                newTaskDraft = nil
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pauseAllDownloads)) { _ in
             coordinator.pauseAll()
         }
         .onReceive(NotificationCenter.default.publisher(for: .resumeAllDownloads)) { _ in
             coordinator.resumeAll()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openSwiftGetXSettings)) { _ in
+            openSettings()
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusTaskFromNotification)) { notification in
             if let idString = notification.object as? String, let id = UUID(uuidString: idString) {

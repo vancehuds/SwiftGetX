@@ -23,7 +23,7 @@ final class BrowserBridge {
             return
         }
 
-        coordinator?.add(source: url)
+        coordinator?.add(source: url, suggestedFilename: message.suggestedFilename)
         lastMessage = "已从 \(message.browser ?? "浏览器") 接收下载任务"
     }
 }

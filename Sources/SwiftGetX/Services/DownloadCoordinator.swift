@@ -79,13 +79,7 @@ final class DownloadCoordinator {
     }
 
     func tasks(for filter: DownloadFilter = .all) -> [DownloadTask] {
-        guard let modelContext else { return [] }
-        var descriptor = FetchDescriptor<DownloadTask>(
-            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
-        )
-        descriptor.fetchLimit = 500
-
-        let allTasks = (try? modelContext.fetch(descriptor)) ?? []
+        let allTasks = allTasks()
         return allTasks.filter { task in
             let matchesFilter = filter.matches(task)
             let matchesSearch = searchText.isEmpty
@@ -95,19 +89,27 @@ final class DownloadCoordinator {
         }
     }
 
+    func allTasks() -> [DownloadTask] {
+        guard let modelContext else { return [] }
+        var descriptor = FetchDescriptor<DownloadTask>(
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 500
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
     @discardableResult
-    func add(source: String, saveDirectory: URL? = nil) -> [DownloadTask] {
+    func add(source: String, saveDirectory: URL? = nil, suggestedFilename: String? = nil) -> [DownloadTask] {
         let sources = SourceParser.extractSources(from: source)
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
         let tasks = sources.map { source in
             let kind = SourceParser.kind(for: source)
+            let displayName = displayName(for: source, kind: kind, suggestedFilename: suggestedFilename, sourceCount: sources.count)
             let task = DownloadTask(
-                name: SourceParser.displayName(for: source, kind: kind),
+                name: displayName,
                 source: source,
                 kind: kind,
-                savePath: saveDirectory.appendingPathComponent(
-                    SourceParser.displayName(for: source, kind: kind)
-                ).path
+                savePath: saveDirectory.appendingPathComponent(displayName).path
             )
             task.appendLog("任务已创建")
             return task
@@ -122,6 +124,27 @@ final class DownloadCoordinator {
         statusMessage = "已添加 \(tasks.count) 个任务"
         scheduleQueue()
         return tasks
+    }
+
+    private func displayName(
+        for source: String,
+        kind: DownloadKind,
+        suggestedFilename: String?,
+        sourceCount: Int
+    ) -> String {
+        guard sourceCount == 1,
+              let suggestedFilename = suggestedFilename?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !suggestedFilename.isEmpty
+        else {
+            return SourceParser.displayName(for: source, kind: kind)
+        }
+
+        let illegal = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+        let sanitizedFilename = suggestedFilename
+            .components(separatedBy: illegal)
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return sanitizedFilename.isEmpty ? SourceParser.displayName(for: source, kind: kind) : sanitizedFilename
     }
 
     func start(_ task: DownloadTask) {
