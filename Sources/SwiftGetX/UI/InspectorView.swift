@@ -342,10 +342,28 @@ private struct ConnectionsPanel: View {
 
     var body: some View {
         VStack(spacing: layout.value(8)) {
-            DetailRow(title: L10n.string("connection_dht_status"), value: L10n.string("connection_dht_ready"))
-            DetailRow(title: L10n.string("connection_pex"), value: L10n.string("connection_pex_enabled"))
-            DetailRow(title: L10n.string("connection_local_port"), value: L10n.string("connection_port_ready"))
-            DetailRow(title: L10n.string("detail_connection"), value: task.connectionSummary ?? L10n.string("connection_waiting_peers"))
+            if let connection = task.torrentConnection {
+                DetailRow(title: L10n.string("torrent_metadata_status"), value: connection.metadataStatus.title)
+                DetailRow(
+                    title: L10n.string("connection_dht_status"),
+                    value: connection.isDHTEnabled ? L10n.string("connection_dht_ready") : L10n.string("torrent_native_engine_unavailable")
+                )
+                DetailRow(
+                    title: L10n.string("connection_pex"),
+                    value: connection.isPEXEnabled ? L10n.string("connection_pex_enabled") : L10n.string("torrent_native_engine_unavailable")
+                )
+                DetailRow(title: L10n.string("connection_local_port"), value: connection.localPortDescription.isEmpty ? L10n.string("unknown") : connection.localPortDescription)
+                DetailRow(title: L10n.string("torrent_peer_count"), value: "\(connection.peerCount)")
+                DetailRow(title: L10n.string("torrent_upload_speed"), value: ByteCountFormatter.downloadFormatter.string(fromByteCount: connection.uploadRate) + "/s")
+                DetailRow(title: L10n.string("torrent_share_ratio"), value: String(format: "%.2f", connection.shareRatio))
+                DetailRow(title: L10n.string("detail_connection"), value: connection.summary)
+            } else {
+                DetailRow(title: L10n.string("torrent_metadata_status"), value: task.torrentMetadataStatus.title)
+                DetailRow(title: L10n.string("connection_dht_status"), value: task.kind == .http ? "--" : L10n.string("connection_waiting_peers"))
+                DetailRow(title: L10n.string("connection_pex"), value: task.kind == .http ? "--" : L10n.string("connection_waiting_peers"))
+                DetailRow(title: L10n.string("connection_local_port"), value: L10n.string("unknown"))
+                DetailRow(title: L10n.string("detail_connection"), value: task.connectionSummary ?? L10n.string("connection_waiting_peers"))
+            }
             DetailRow(title: L10n.string("connection_seed_limit"), value: L10n.string("connection_seed_limit_value"))
         }
     }

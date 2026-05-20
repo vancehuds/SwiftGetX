@@ -7,6 +7,7 @@ import UserNotifications
 @main
 struct SwiftGetXApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var softwareUpdater = SoftwareUpdater()
 
     private let modelContainer: ModelContainer
     private let chromeNativeHostRegistrar = ChromeNativeHostRegistrar()
@@ -58,6 +59,9 @@ struct SwiftGetXApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: softwareUpdater)
+            }
             CommandGroup(after: .newItem) {
                 Button(L10n.string("command_new_download")) {
                     NotificationCenter.default.post(name: .showNewTaskSheet, object: nil)

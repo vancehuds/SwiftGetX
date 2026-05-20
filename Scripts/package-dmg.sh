@@ -12,6 +12,15 @@ STAGED_APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
 INFO_PLIST="Sources/SwiftGetX/Resources/AppInfo.plist"
 ICON_FILE="Sources/SwiftGetX/Resources/Assets/AppIcon.icns"
 
+# Derive version from git tag (e.g. v1.2.3 → 1.2.3), fallback to 0.1.0-dev
+GIT_TAG="$(git describe --tags --exact-match 2>/dev/null || echo "")"
+if [[ -n "$GIT_TAG" ]]; then
+    APP_VERSION="${GIT_TAG#v}"
+else
+    APP_VERSION="${SWIFTGETX_VERSION:-0.1.0-dev}"
+fi
+printf 'App version: %s\n' "$APP_VERSION"
+
 cleanup() {
     rm -rf "$STAGING_DIR"
 }
@@ -60,10 +69,10 @@ cp "$INFO_PLIST" "$STAGED_APP_BUNDLE/Contents/Info.plist"
     || /usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string $APP_NAME" "$STAGED_APP_BUNDLE/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundlePackageType APPL" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" "$STAGED_APP_BUNDLE/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
-    || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
-    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 0.1.0" "$STAGED_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $APP_VERSION" "$STAGED_APP_BUNDLE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$STAGED_APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $APP_VERSION" "$STAGED_APP_BUNDLE/Contents/Info.plist"
 
 cp "$ICON_FILE" "$STAGED_APP_BUNDLE/Contents/Resources/AppIcon.icns"
 

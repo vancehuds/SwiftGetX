@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct NewTaskSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -8,6 +9,10 @@ struct NewTaskSheet: View {
     @State private var sourceText = ""
     @State private var saveDirectory = AppDefaults.downloadDirectory
     @State private var suggestedFilename: String?
+    @State private var previews = [TorrentMetadataPreview]()
+    @State private var previewSources = [String]()
+    @State private var selectedFileIndexesBySource = [String: Set<Int>]()
+    @State private var isLoadingPreviews = false
     let draft: DownloadDraft?
 
     init(draft: DownloadDraft? = nil) {
@@ -38,6 +43,9 @@ struct NewTaskSheet: View {
         }
         .onChange(of: draft) { _, newDraft in
             apply(newDraft)
+        }
+        .task(id: sourceText) {
+            await refreshPreviews()
         }
         .frame(
             minWidth: 520,
@@ -127,7 +135,31 @@ struct NewTaskSheet: View {
                 ContentSurfaceBackground(cornerRadius: 8)
             }
 
-            SourcePreviewView(sourceText: sourceText)
+            HStack(spacing: layout.value(10)) {
+                Button {
+                    chooseTorrentFile()
+                } label: {
+                    Label(L10n.string("action_choose_torrent_file"), systemImage: "doc.badge.plus")
+                }
+                .font(layout.font(11.5, weight: .semibold))
+                .buttonStyle(.bordered)
+
+                if isLoadingPreviews {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(L10n.string("torrent_preview_loading"))
+                        .font(layout.font(11))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+            SourcePreviewView(
+                sourceText: sourceText,
+                previews: previews,
+                selectedFileIndexesBySource: $selectedFileIndexesBySource
+            )
 
             HStack {
                 Button(L10n.string("action_cancel")) {
@@ -139,7 +171,15 @@ struct NewTaskSheet: View {
                 Spacer()
 
                 Button {
-                    coordinator.add(source: sourceText, saveDirectory: saveDirectory, suggestedFilename: suggestedFilename)
+                    if previews.contains(where: { $0.kind == .torrentMagnet || $0.kind == .torrentFile }) {
+                        coordinator.add(
+                            previews: previews,
+                            saveDirectory: saveDirectory,
+                            selectedFileIndexes: selectedFileIndexesForCoordinator
+                        )
+                    } else {
+                        coordinator.add(source: sourceText, saveDirectory: saveDirectory, suggestedFilename: suggestedFilename)
+                    }
                     dismiss()
                 } label: {
                     Label(L10n.string("add_task"), systemImage: "plus.circle.fill")
@@ -147,7 +187,7 @@ struct NewTaskSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(SourceParser.extractSources(from: sourceText).isEmpty)
+                .disabled(SourceParser.extractSources(from: sourceText).isEmpty || isLoadingPreviews)
             }
         }
     }
@@ -172,6 +212,63 @@ struct NewTaskSheet: View {
         panel.directoryURL = saveDirectory
         if panel.runModal() == .OK, let url = panel.url {
             saveDirectory = url
+        }
+    }
+
+    private func chooseTorrentFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "torrent") ?? .data]
+        if panel.runModal() == .OK {
+            let paths = panel.urls.map(\.path)
+            guard !paths.isEmpty else { return }
+            let separator = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n"
+            sourceText += separator + paths.joined(separator: "\n")
+        }
+    }
+
+    private var selectedFileIndexesForCoordinator: [String: [Int]] {
+        Dictionary(uniqueKeysWithValues: previews.map { preview in
+            let selected = selectedFileIndexesBySource[preview.source] ?? Set(preview.selectedFileIndexes)
+            return (preview.source, selected.sorted())
+        })
+    }
+
+    private func refreshPreviews() async {
+        let sources = SourceParser.extractSources(from: sourceText)
+        await MainActor.run {
+            previewSources = sources
+            isLoadingPreviews = !sources.isEmpty
+        }
+
+        guard !sources.isEmpty else {
+            await MainActor.run {
+                previews = []
+                selectedFileIndexesBySource = [:]
+                isLoadingPreviews = false
+            }
+            return
+        }
+
+        var nextPreviews = [TorrentMetadataPreview]()
+        for source in sources {
+            if Task.isCancelled { return }
+            let suggested = sources.count == 1 ? suggestedFilename : nil
+            let preview = await TorrentMetadataService.shared.preview(source: source, suggestedFilename: suggested)
+            nextPreviews.append(preview)
+        }
+
+        await MainActor.run {
+            guard previewSources == sources else { return }
+            previews = nextPreviews
+            for preview in nextPreviews where selectedFileIndexesBySource[preview.source] == nil {
+                selectedFileIndexesBySource[preview.source] = Set(preview.selectedFileIndexes)
+            }
+            let validSources = Set(nextPreviews.map(\.source))
+            selectedFileIndexesBySource = selectedFileIndexesBySource.filter { validSources.contains($0.key) }
+            isLoadingPreviews = false
         }
     }
 }
@@ -216,6 +313,8 @@ private struct BrowserTakeoverBanner: View {
 private struct SourcePreviewView: View {
     @Environment(\.responsiveLayout) private var layout
     let sourceText: String
+    let previews: [TorrentMetadataPreview]
+    @Binding var selectedFileIndexesBySource: [String: Set<Int>]
 
     var body: some View {
         let sources = SourceParser.extractSources(from: sourceText)
@@ -240,21 +339,28 @@ private struct SourcePreviewView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: layout.value(6)) {
                         ForEach(sources.prefix(4), id: \.self) { source in
-                            let kind = SourceParser.kind(for: source)
-                            
-                            HStack(spacing: layout.value(8)) {
-                                Image(systemName: kind.symbolName)
-                                    .font(layout.font(11))
-                                    .foregroundStyle(previewColor(for: kind))
-                                
-                                Text(SourceParser.displayName(for: source, kind: kind))
-                                    .font(layout.font(11, design: .monospaced))
-                                    .lineLimit(1)
-                                    .foregroundStyle(Color.primary)
+                            if let preview = previews.first(where: { $0.source == source }) {
+                                TorrentPreviewRow(
+                                    preview: preview,
+                                    selectedFileIndexes: selectionBinding(for: preview)
+                                )
+                            } else {
+                                let kind = SourceParser.kind(for: source)
+
+                                HStack(spacing: layout.value(8)) {
+                                    Image(systemName: kind.symbolName)
+                                        .font(layout.font(11))
+                                        .foregroundStyle(previewColor(for: kind))
+
+                                    Text(SourceParser.displayName(for: source, kind: kind))
+                                        .font(layout.font(11, design: .monospaced))
+                                        .lineLimit(1)
+                                        .foregroundStyle(Color.primary)
+                                }
+                                .padding(.horizontal, layout.value(8))
+                                .padding(.vertical, layout.value(4))
+                                .background(ContentSurfaceBackground(cornerRadius: 6))
                             }
-                            .padding(.horizontal, layout.value(8))
-                            .padding(.vertical, layout.value(4))
-                            .background(ContentSurfaceBackground(cornerRadius: 6))
                         }
                         
                         if sources.count > 4 {
@@ -275,6 +381,13 @@ private struct SourcePreviewView: View {
         }
     }
 
+    private func selectionBinding(for preview: TorrentMetadataPreview) -> Binding<Set<Int>> {
+        Binding(
+            get: { selectedFileIndexesBySource[preview.source] ?? Set(preview.selectedFileIndexes) },
+            set: { selectedFileIndexesBySource[preview.source] = $0 }
+        )
+    }
+
     private func previewColor(for kind: DownloadKind) -> Color {
         switch kind {
         case .http:
@@ -283,6 +396,115 @@ private struct SourcePreviewView: View {
             .teal
         case .torrentFile:
             .blue
+        }
+    }
+}
+
+private struct TorrentPreviewRow: View {
+    @Environment(\.responsiveLayout) private var layout
+    let preview: TorrentMetadataPreview
+    @Binding var selectedFileIndexes: Set<Int>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            HStack(spacing: layout.value(8)) {
+                Image(systemName: preview.kind.symbolName)
+                    .font(layout.font(11))
+                    .foregroundStyle(previewColor)
+
+                VStack(alignment: .leading, spacing: layout.value(2)) {
+                    Text(preview.displayName)
+                        .font(layout.font(11.5, weight: .semibold))
+                        .lineLimit(1)
+                    Text(subtitle)
+                        .font(layout.font(10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+            }
+
+            if !preview.files.isEmpty {
+                HStack {
+                    Button(L10n.string("action_select_all")) {
+                        selectedFileIndexes = Set(preview.files.map(\.index))
+                    }
+                    .font(layout.font(10.5, weight: .semibold))
+
+                    Button(L10n.string("action_clear")) {
+                        selectedFileIndexes = []
+                    }
+                    .font(layout.font(10.5, weight: .semibold))
+
+                    Spacer()
+
+                    Text(L10n.string("files_selected_count", selectedFileIndexes.count, preview.files.count))
+                        .font(layout.font(10.5, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(preview.files.prefix(8)) { file in
+                    Button {
+                        toggle(file)
+                    } label: {
+                        HStack(spacing: layout.value(8)) {
+                            Image(systemName: selectedFileIndexes.contains(file.index) ? "checkmark.circle.fill" : "circle")
+                                .font(layout.font(12, weight: .semibold))
+                                .foregroundStyle(selectedFileIndexes.contains(file.index) ? .green : .secondary)
+                            Text(file.path)
+                                .font(layout.font(10.8))
+                                .lineLimit(1)
+                                .foregroundStyle(Color.primary)
+                            Spacer()
+                            Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
+                                .font(layout.font(10.5, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if preview.files.count > 8 {
+                    Text(L10n.string("torrent_preview_more_files", preview.files.count - 8))
+                        .font(layout.font(10.5))
+                        .foregroundStyle(.secondary)
+                }
+            } else if let errorMessage = preview.errorMessage {
+                Text(errorMessage)
+                    .font(layout.font(10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.horizontal, layout.value(8))
+        .padding(.vertical, layout.value(8))
+        .background(ContentSurfaceBackground(cornerRadius: 6))
+    }
+
+    private var subtitle: String {
+        if preview.totalBytes > 0 {
+            return "\(preview.metadataStatus.title) · \(ByteCountFormatter.downloadFormatter.string(fromByteCount: preview.totalBytes))"
+        }
+        return preview.metadataStatus.title
+    }
+
+    private var previewColor: Color {
+        switch preview.kind {
+        case .http:
+            .indigo
+        case .torrentMagnet:
+            .teal
+        case .torrentFile:
+            .blue
+        }
+    }
+
+    private func toggle(_ file: TorrentFile) {
+        if selectedFileIndexes.contains(file.index) {
+            selectedFileIndexes.remove(file.index)
+        } else {
+            selectedFileIndexes.insert(file.index)
         }
     }
 }

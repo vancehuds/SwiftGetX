@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Show Swift version
         run: swift --version
@@ -36,6 +38,30 @@ jobs:
         env:
           SWIFTGETX_CHROME_EXTENSION_KEY_BASE64: ${{ secrets.CHROME_EXTENSION_KEY_BASE64 }}
         run: Scripts/package-chrome-extension.sh Sources/SwiftGetX/Resources/ChromeExtension dist/chrome
+
+      - name: Generate Sparkle appcast
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+        run: |
+          Scripts/generate-appcast.sh \
+            dist/SwiftGetX.dmg \
+            "${GITHUB_REF_NAME#v}" \
+            "https://github.com/vancehudson/SwiftGetX/releases/download/${GITHUB_REF_NAME}/SwiftGetX.dmg"
+
+      - name: Publish appcast to gh-pages branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create or update gh-pages branch with appcast.xml
+          git checkout --orphan gh-pages-tmp
+          git rm -rf . 2>/dev/null || true
+          cp dist/appcast/appcast.xml .
+          git add appcast.xml
+          git commit -m "Update appcast for ${GITHUB_REF_NAME}"
+
+          # Force push to gh-pages branch
+          git push origin HEAD:gh-pages --force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

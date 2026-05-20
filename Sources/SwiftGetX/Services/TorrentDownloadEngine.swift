@@ -23,8 +23,27 @@ final class TorrentDownloadEngine: DownloadEngine {
 
     func start(_ request: DownloadRequest) async {
         do {
+            let torrentRequest = try await resolvedRequest(from: request)
+            if let resolvedTorrentFilePath = torrentRequest.resolvedTorrentFilePath,
+               resolvedTorrentFilePath != request.resolvedTorrentFilePath {
+                onSnapshot?(
+                    DownloadSnapshot(
+                        taskID: request.id,
+                        status: .running,
+                        totalBytes: request.totalBytes,
+                        downloadedBytes: request.downloadedBytes,
+                        speedBytesPerSecond: 0,
+                        etaSeconds: nil,
+                        errorMessage: nil,
+                        supportsResume: true,
+                        eTag: nil,
+                        lastModified: nil,
+                        resolvedTorrentFilePath: resolvedTorrentFilePath
+                    )
+                )
+            }
             try await adapter.start(
-                torrentRequest(from: request)
+                torrentRequest
             ) { snapshot in
                 Task { @MainActor in
                     self.onSnapshot?(snapshot)
@@ -68,8 +87,9 @@ final class TorrentDownloadEngine: DownloadEngine {
 
     func resume(_ request: DownloadRequest) async {
         do {
+            let torrentRequest = try await resolvedRequest(from: request)
             try await adapter.resume(
-                torrentRequest(from: request),
+                torrentRequest,
                 onSnapshot: { snapshot in
                     Task { @MainActor in
                         self.onSnapshot?(snapshot)
@@ -140,14 +160,37 @@ final class TorrentDownloadEngine: DownloadEngine {
     private func torrentRequest(from request: DownloadRequest) -> TorrentStartRequest {
         TorrentStartRequest(
             id: request.id,
-            source: request.source,
+            displaySource: request.source,
+            resolvedTorrentFilePath: request.resolvedTorrentFilePath,
             savePath: request.savePath,
+            totalBytes: request.totalBytes,
+            downloadedBytes: request.downloadedBytes,
             selectedFileIndexes: request.selectedFileIndexes,
             hasExplicitFileSelection: request.hasExplicitFileSelection,
             downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
             uploadLimitBytesPerSecond: uploadLimitBytesPerSecond,
             stopSeedingAtRatio: stopSeedingAtRatio
         )
+    }
+
+    private func resolvedRequest(from request: DownloadRequest) async throws -> TorrentStartRequest {
+        if request.kind == .torrentFile, request.resolvedTorrentFilePath == nil {
+            let cachedURL = try await TorrentMetadataService.shared.cachedTorrentFile(for: request.source)
+            return TorrentStartRequest(
+                id: request.id,
+                displaySource: request.source,
+                resolvedTorrentFilePath: cachedURL.path,
+                savePath: request.savePath,
+                totalBytes: request.totalBytes,
+                downloadedBytes: request.downloadedBytes,
+                selectedFileIndexes: request.selectedFileIndexes,
+                hasExplicitFileSelection: request.hasExplicitFileSelection,
+                downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
+                uploadLimitBytesPerSecond: uploadLimitBytesPerSecond,
+                stopSeedingAtRatio: stopSeedingAtRatio
+            )
+        }
+        return torrentRequest(from: request)
     }
 }
 
@@ -170,8 +213,11 @@ protocol TorrentEngineAdapter: Sendable {
 
 struct TorrentStartRequest: Sendable {
     let id: UUID
-    let source: String
+    let displaySource: String
+    let resolvedTorrentFilePath: String?
     let savePath: String
+    let totalBytes: Int64
+    let downloadedBytes: Int64
     let selectedFileIndexes: [Int]
     let hasExplicitFileSelection: Bool
     let downloadLimitBytesPerSecond: Int64
@@ -188,14 +234,20 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
             DownloadSnapshot(
                 taskID: request.id,
                 status: .failed,
-                totalBytes: 0,
-                downloadedBytes: 0,
+                totalBytes: request.totalBytes,
+                downloadedBytes: request.downloadedBytes,
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
                 errorMessage: L10n.string("error_libtorrent_unavailable"),
                 supportsResume: true,
                 eTag: nil,
-                lastModified: nil
+                lastModified: nil,
+                torrentFiles: [],
+                torrentMetadataStatus: .unavailable,
+                torrentConnection: TorrentConnectionInfo(
+                    metadataStatus: .unavailable,
+                    nativeEngineAvailable: false
+                )
             )
         )
     }

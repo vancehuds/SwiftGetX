@@ -51,6 +51,24 @@ struct SourceParserTests {
         #expect(SourceParser.kind(for: "https://example.com/file.zip") == .http)
         #expect(SourceParser.kind(for: "magnet:?xt=urn:btih:abcdef") == .torrentMagnet)
         #expect(SourceParser.kind(for: "https://example.com/file.torrent") == .torrentFile)
+        #expect(SourceParser.kind(for: "file:///tmp/demo.torrent") == .torrentFile)
+        #expect(SourceParser.kind(for: "/tmp/demo.torrent") == .torrentFile)
+        #expect(SourceParser.kind(for: "https://example.com/file.torrent?token=abc") == .torrentFile)
+    }
+
+    @Test("extracts local torrent paths and file urls")
+    func extractsLocalTorrentSources() {
+        let sources = SourceParser.extractSources(
+            from: """
+            /tmp/SwiftGetX Demo.torrent
+            file:///tmp/Another.torrent
+            """
+        )
+
+        #expect(sources == [
+            "/tmp/SwiftGetX Demo.torrent",
+            "file:///tmp/Another.torrent"
+        ])
     }
 
     @Test("uses magnet display name")

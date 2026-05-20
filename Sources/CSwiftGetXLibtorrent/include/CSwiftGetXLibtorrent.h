@@ -61,6 +61,7 @@ void sgx_libtorrent_set_speed_limits(SGXLibtorrentSession *session, int32_t down
 void sgx_libtorrent_set_file_selection(SGXLibtorrentSession *session, int32_t handle_id, const int32_t *selected_file_indexes, int32_t selected_file_count);
 
 int32_t sgx_libtorrent_get_status(SGXLibtorrentSession *session, int32_t handle_id, SGXTorrentStatus *status);
+int32_t sgx_libtorrent_has_metadata(SGXLibtorrentSession *session, int32_t handle_id);
 int32_t sgx_libtorrent_copy_files(SGXLibtorrentSession *session, int32_t handle_id, SGXTorrentFile *files, int32_t max_files);
 void sgx_libtorrent_free_file_paths(SGXTorrentFile *files, int32_t file_count);
 const char *sgx_libtorrent_last_error(SGXLibtorrentSession *session);

@@ -11,6 +11,9 @@ enum SourceParser {
         if lowercasedSource.hasPrefix("magnet:") {
             return .torrentMagnet
         }
+        if localFileURL(for: source)?.pathExtension.lowercased() == "torrent" {
+            return .torrentFile
+        }
         if URL(string: source)?.path.lowercased().hasSuffix(".torrent") == true
             || lowercasedSource.hasSuffix(".torrent")
         {
@@ -27,10 +30,35 @@ enum SourceParser {
             }
             return L10n.string("default_magnet_task_filename", String(shortHash(source))) + ".torrent"
         case .torrentFile:
+            if let localURL = localFileURL(for: source) {
+                return sanitizeFilename(localURL.lastPathComponent)
+            }
             return urlFilename(source) ?? L10n.string("default_torrent_task_filename")
         case .http:
             return urlFilename(source) ?? L10n.string("default_unnamed_download_filename")
         }
+    }
+
+    static func localFileURL(for source: String) -> URL? {
+        if let url = URL(string: source), url.isFileURL {
+            return url
+        }
+
+        let expanded = (source as NSString).expandingTildeInPath
+        guard expanded.lowercased().hasSuffix(".torrent"),
+              expanded.hasPrefix("/")
+        else {
+            return nil
+        }
+        return URL(fileURLWithPath: expanded)
+    }
+
+    static func sanitizeFilename(_ filename: String) -> String {
+        let illegal = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+        return filename
+            .components(separatedBy: illegal)
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func urlFilename(_ source: String) -> String? {
@@ -53,20 +81,12 @@ enum SourceParser {
         return dn
     }
 
-    private static func sanitizeFilename(_ filename: String) -> String {
-        let illegal = CharacterSet(charactersIn: "/\\?%*|\"<>:")
-        return filename
-            .components(separatedBy: illegal)
-            .joined(separator: "-")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     private static func shortHash(_ source: String) -> String {
         String(abs(source.hashValue), radix: 16).prefix(8).description
     }
 
     private static func sourceCandidates(in text: String) -> [String] {
-        let pattern = #"(?i)(magnet:\?[^\s<>\]]+|https?://[^\s<>\]]+|[^\s<>\]]+\.torrent(?:\?[^\s<>\]]*)?)"#
+        let pattern = #"(?i)(magnet:\?[^\s<>\]]+|file://[^\s<>\]]+\.torrent|https?://[^\s<>\]]+|(?:~|/)[^\n<>\]]+?\.torrent(?:\?[^\s<>\]]*)?|[^\s<>\]]+\.torrent(?:\?[^\s<>\]]*)?)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let nsText = text as NSString
         let range = NSRange(location: 0, length: nsText.length)
@@ -90,7 +110,9 @@ enum SourceParser {
         guard lowercasedSource.hasPrefix("http://")
             || lowercasedSource.hasPrefix("https://")
             || lowercasedSource.hasPrefix("magnet:")
+            || lowercasedSource.hasPrefix("file://")
             || lowercasedSource.hasSuffix(".torrent")
+            || localFileURL(for: source) != nil
         else {
             return nil
         }

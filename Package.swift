@@ -73,10 +73,15 @@ let package = Package(
         .executable(name: "SwiftGetX", targets: ["SwiftGetX"]),
         .executable(name: "SwiftGetXNativeHost", targets: ["SwiftGetXNativeHost"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.0.0")
+    ],
     targets: targets + [
         .executableTarget(
             name: "SwiftGetX",
-            dependencies: swiftGetXDependencies,
+            dependencies: swiftGetXDependencies + [
+                .product(name: "Sparkle", package: "Sparkle")
+            ],
             exclude: [
                 "Resources/Assets/AppIcon.iconset"
             ],

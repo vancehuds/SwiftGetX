@@ -213,6 +213,13 @@ int32_t sgx_libtorrent_get_status(SGXLibtorrentSession *session, int32_t handle_
     return 1;
 }
 
+int32_t sgx_libtorrent_has_metadata(SGXLibtorrentSession *session, int32_t handle_id)
+{
+    auto *handle = session ? session->find(handle_id) : nullptr;
+    if (handle == nullptr) return 0;
+    return handle->torrent_file() ? 1 : 0;
+}
+
 int32_t sgx_libtorrent_copy_files(SGXLibtorrentSession *session, int32_t handle_id, SGXTorrentFile *files, int32_t max_files)
 {
     auto *handle = session ? session->find(handle_id) : nullptr;

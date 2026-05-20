@@ -16,6 +16,7 @@ struct DownloadRequest: Sendable {
     let id: UUID
     let name: String
     let source: String
+    let resolvedTorrentFilePath: String?
     let kind: DownloadKind
     let status: DownloadStatus
     let savePath: String
@@ -31,6 +32,7 @@ struct DownloadRequest: Sendable {
         id: UUID,
         name: String,
         source: String,
+        resolvedTorrentFilePath: String? = nil,
         kind: DownloadKind,
         status: DownloadStatus = .queued,
         savePath: String,
@@ -45,6 +47,7 @@ struct DownloadRequest: Sendable {
         self.id = id
         self.name = name
         self.source = source
+        self.resolvedTorrentFilePath = resolvedTorrentFilePath
         self.kind = kind
         self.status = status
         self.savePath = savePath
@@ -61,6 +64,7 @@ struct DownloadRequest: Sendable {
         id = task.id
         name = task.name
         source = task.source
+        resolvedTorrentFilePath = task.resolvedTorrentFilePath
         kind = task.kind
         status = task.status
         savePath = task.savePath

@@ -4,6 +4,7 @@
 "action_cancel" = "Cancel";
 "action_check" = "Check";
 "action_choose" = "Choose";
+"action_choose_torrent_file" = "Choose Torrent File";
 "action_clear" = "Clear";
 "action_delete_task" = "Delete Task";
 "action_ignore" = "Ignore";
@@ -34,6 +35,7 @@
 "choose_directory" = "Choose Directory";
 "clipboard_detected_link" = "Download link detected";
 "clipboard_link_detection" = "Clipboard link detection";
+"command_check_for_updates" = "Check for Updates…";
 "command_new_download" = "New Download";
 "command_pause_all" = "Pause All";
 "command_resume_all" = "Resume All";
@@ -84,6 +86,9 @@
 "error_file_size_mismatch" = "File size does not match the task record";
 "error_incomplete_segment" = "Download segment is incomplete";
 "error_invalid_server_response" = "Invalid server response";
+"error_invalid_bencode" = "Invalid torrent metadata";
+"error_invalid_torrent_file" = "Invalid torrent file";
+"error_invalid_torrent_source" = "Invalid torrent source";
 "error_invalid_url" = "Invalid link format";
 "error_libtorrent_unavailable" = "The BT engine bridge is reserved. Connect libtorrent to enable real magnet/torrent downloads.";
 "error_missing_content_range" = "Missing Content-Range";
@@ -94,6 +99,7 @@
 "error_server_did_not_return_range" = "Server did not return the requested Range segment";
 "error_server_status" = "Server returned HTTP %d";
 "error_task_cancelled" = "Task cancelled";
+"error_torrent_metadata_timeout" = "Timed out while fetching torrent metadata";
 "error_unknown" = "Unknown error";
 "error_validator_changed" = "Server file changed. Temporary files were kept to avoid merging incorrect data.";
 "eta_hours_minutes" = "%dh %dm";
@@ -211,5 +217,18 @@
 "task_failed_message" = "Failed: %@";
 "task_list_summary" = "%d tasks · %d downloading · %d completed";
 "task_ready" = "Ready";
+"torrent_connection_summary" = "%d peers · ↓ %@/s · ↑ %@/s · ratio %.2f";
+"torrent_metadata_available" = "Metadata ready";
+"torrent_metadata_failed" = "Metadata failed";
+"torrent_metadata_fetching" = "Fetching metadata";
+"torrent_metadata_status" = "Metadata";
+"torrent_metadata_unavailable" = "Metadata unavailable";
+"torrent_metadata_unknown" = "Metadata unknown";
+"torrent_native_engine_unavailable" = "Native BT engine is not enabled";
+"torrent_peer_count" = "Peers";
+"torrent_preview_loading" = "Fetching BT metadata...";
+"torrent_preview_more_files" = "... and %d more files";
+"torrent_share_ratio" = "Share Ratio";
+"torrent_upload_speed" = "Upload Speed";
 "unknown" = "Unknown";
 "upload_speed_limit" = "Upload Speed Limit";

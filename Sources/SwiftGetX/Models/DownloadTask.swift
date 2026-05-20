@@ -20,6 +20,9 @@ final class DownloadTask {
     var supportsResume: Bool
     var eTag: String?
     var lastModified: String?
+    var resolvedTorrentFilePath: String?
+    var torrentMetadataStatusRawValue: String?
+    var torrentConnectionJSON: String?
     var selectedFileIndexes: [Int]
     var torrentFilesJSON: String?
     var connectionSummary: String?
@@ -43,6 +46,9 @@ final class DownloadTask {
         supportsResume: Bool = false,
         eTag: String? = nil,
         lastModified: String? = nil,
+        resolvedTorrentFilePath: String? = nil,
+        torrentMetadataStatus: TorrentMetadataStatus = .unknown,
+        torrentConnectionJSON: String? = nil,
         selectedFileIndexes: [Int] = [],
         torrentFilesJSON: String? = nil,
         connectionSummary: String? = nil,
@@ -65,6 +71,9 @@ final class DownloadTask {
         self.supportsResume = supportsResume
         self.eTag = eTag
         self.lastModified = lastModified
+        self.resolvedTorrentFilePath = resolvedTorrentFilePath
+        self.torrentMetadataStatusRawValue = torrentMetadataStatus.rawValue
+        self.torrentConnectionJSON = torrentConnectionJSON
         self.selectedFileIndexes = selectedFileIndexes
         self.torrentFilesJSON = torrentFilesJSON
         self.connectionSummary = connectionSummary
@@ -88,6 +97,14 @@ final class DownloadTask {
 
     var isTerminal: Bool {
         status == .completed || status == .failed
+    }
+
+    var torrentMetadataStatus: TorrentMetadataStatus {
+        get {
+            guard let rawValue = torrentMetadataStatusRawValue else { return .unknown }
+            return TorrentMetadataStatus(rawValue: rawValue) ?? .unknown
+        }
+        set { torrentMetadataStatusRawValue = newValue.rawValue }
     }
 
     func appendLog(_ message: String) {
@@ -114,6 +131,26 @@ final class DownloadTask {
                 return
             }
             torrentFilesJSON = String(data: data, encoding: .utf8)
+        }
+    }
+
+    var torrentConnection: TorrentConnectionInfo? {
+        get {
+            guard let torrentConnectionJSON,
+                  let data = torrentConnectionJSON.data(using: .utf8)
+            else {
+                return nil
+            }
+            return try? JSONDecoder().decode(TorrentConnectionInfo.self, from: data)
+        }
+        set {
+            guard let newValue,
+                  let data = try? JSONEncoder().encode(newValue)
+            else {
+                torrentConnectionJSON = nil
+                return
+            }
+            torrentConnectionJSON = String(data: data, encoding: .utf8)
         }
     }
 }
@@ -197,6 +234,8 @@ struct DownloadSnapshot: Sendable {
     let taskID: UUID
     let status: DownloadStatus
     let savePath: String?
+    let resolvedTorrentFilePath: String?
+    let torrentMetadataStatus: TorrentMetadataStatus?
     let totalBytes: Int64
     let downloadedBytes: Int64
     let speedBytesPerSecond: Int64
@@ -206,6 +245,7 @@ struct DownloadSnapshot: Sendable {
     let eTag: String?
     let lastModified: String?
     let torrentFiles: [TorrentFile]
+    let torrentConnection: TorrentConnectionInfo?
     let connectionSummary: String?
     let retryCount: Int?
 
@@ -223,11 +263,16 @@ struct DownloadSnapshot: Sendable {
         lastModified: String?,
         torrentFiles: [TorrentFile] = [],
         connectionSummary: String? = nil,
-        retryCount: Int? = nil
+        retryCount: Int? = nil,
+        resolvedTorrentFilePath: String? = nil,
+        torrentMetadataStatus: TorrentMetadataStatus? = nil,
+        torrentConnection: TorrentConnectionInfo? = nil
     ) {
         self.taskID = taskID
         self.status = status
         self.savePath = savePath
+        self.resolvedTorrentFilePath = resolvedTorrentFilePath
+        self.torrentMetadataStatus = torrentMetadataStatus
         self.totalBytes = totalBytes
         self.downloadedBytes = downloadedBytes
         self.speedBytesPerSecond = speedBytesPerSecond
@@ -237,8 +282,32 @@ struct DownloadSnapshot: Sendable {
         self.eTag = eTag
         self.lastModified = lastModified
         self.torrentFiles = torrentFiles
+        self.torrentConnection = torrentConnection
         self.connectionSummary = connectionSummary
         self.retryCount = retryCount
+    }
+}
+
+enum TorrentMetadataStatus: String, Codable, Sendable, CaseIterable {
+    case unknown
+    case fetching
+    case available
+    case unavailable
+    case failed
+
+    var title: String {
+        switch self {
+        case .unknown:
+            L10n.string("torrent_metadata_unknown")
+        case .fetching:
+            L10n.string("torrent_metadata_fetching")
+        case .available:
+            L10n.string("torrent_metadata_available")
+        case .unavailable:
+            L10n.string("torrent_metadata_unavailable")
+        case .failed:
+            L10n.string("torrent_metadata_failed")
+        }
     }
 }
 
@@ -257,6 +326,70 @@ struct TorrentFile: Codable, Identifiable, Equatable, Sendable {
         self.size = size
         self.priority = priority
         self.progress = progress
+    }
+}
+
+struct TorrentConnectionInfo: Codable, Equatable, Sendable {
+    var metadataStatus: TorrentMetadataStatus
+    var peerCount: Int
+    var downloadRate: Int64
+    var uploadRate: Int64
+    var shareRatio: Double
+    var distributedCopies: Double
+    var isDHTEnabled: Bool
+    var isPEXEnabled: Bool
+    var localPortDescription: String
+    var nativeEngineAvailable: Bool
+
+    init(
+        metadataStatus: TorrentMetadataStatus = .unknown,
+        peerCount: Int = 0,
+        downloadRate: Int64 = 0,
+        uploadRate: Int64 = 0,
+        shareRatio: Double = 0,
+        distributedCopies: Double = 0,
+        isDHTEnabled: Bool = false,
+        isPEXEnabled: Bool = false,
+        localPortDescription: String = "",
+        nativeEngineAvailable: Bool = false
+    ) {
+        self.metadataStatus = metadataStatus
+        self.peerCount = peerCount
+        self.downloadRate = downloadRate
+        self.uploadRate = uploadRate
+        self.shareRatio = shareRatio
+        self.distributedCopies = distributedCopies
+        self.isDHTEnabled = isDHTEnabled
+        self.isPEXEnabled = isPEXEnabled
+        self.localPortDescription = localPortDescription
+        self.nativeEngineAvailable = nativeEngineAvailable
+    }
+
+    var summary: String {
+        guard nativeEngineAvailable else {
+            return L10n.string("torrent_native_engine_unavailable")
+        }
+        return L10n.string(
+            "torrent_connection_summary",
+            peerCount,
+            Self.speedLabel(downloadRate),
+            Self.speedLabel(uploadRate),
+            shareRatio
+        )
+    }
+
+    private static func speedLabel(_ bytesPerSecond: Int64) -> String {
+        let value = Double(max(bytesPerSecond, 0))
+        if value >= 1_000_000_000 {
+            return String(format: "%.1f GB/s", value / 1_000_000_000)
+        }
+        if value >= 1_000_000 {
+            return String(format: "%.1f MB/s", value / 1_000_000)
+        }
+        if value >= 1_000 {
+            return String(format: "%.0f KB/s", value / 1_000)
+        }
+        return "\(Int(value)) B/s"
     }
 }
 

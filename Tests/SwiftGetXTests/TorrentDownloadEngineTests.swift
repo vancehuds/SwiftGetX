@@ -18,6 +18,22 @@ struct TorrentDownloadEngineTests {
         #expect(startRequests.first?.stopSeedingAtRatio == 2.5)
     }
 
+    @Test("uses resolved torrent file path when present")
+    func usesResolvedTorrentFilePath() async throws {
+        let adapter = RecordingTorrentAdapter()
+        let engine = TorrentDownloadEngine(adapter: adapter)
+
+        await engine.start(Self.request(
+            source: "https://example.com/demo.torrent",
+            kind: .torrentFile,
+            resolvedTorrentFilePath: "/tmp/cache/demo.torrent"
+        ))
+
+        let startRequests = await adapter.startRequests
+        #expect(startRequests.first?.displaySource == "https://example.com/demo.torrent")
+        #expect(startRequests.first?.resolvedTorrentFilePath == "/tmp/cache/demo.torrent")
+    }
+
     @Test("resume uses adapter resume without adding a second handle")
     func resumeUsesAdapterResume() async throws {
         let adapter = RecordingTorrentAdapter()
@@ -63,14 +79,18 @@ struct TorrentDownloadEngineTests {
     }
 
     private static func request(
+        source: String = "magnet:?xt=urn:btih:abcdef",
+        kind: DownloadKind = .torrentMagnet,
+        resolvedTorrentFilePath: String? = nil,
         selectedFileIndexes: [Int] = [],
         hasExplicitFileSelection: Bool = false
     ) -> DownloadRequest {
         DownloadRequest(
             id: UUID(),
             name: "demo",
-            source: "magnet:?xt=urn:btih:abcdef",
-            kind: .torrentMagnet,
+            source: source,
+            resolvedTorrentFilePath: resolvedTorrentFilePath,
+            kind: kind,
             status: .queued,
             savePath: "/tmp/demo",
             totalBytes: 0,

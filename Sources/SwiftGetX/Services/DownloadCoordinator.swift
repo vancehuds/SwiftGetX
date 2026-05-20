@@ -128,6 +128,44 @@ final class DownloadCoordinator {
         return tasks
     }
 
+    @discardableResult
+    func add(
+        previews: [TorrentMetadataPreview],
+        saveDirectory: URL? = nil,
+        selectedFileIndexes: [String: [Int]] = [:]
+    ) -> [DownloadTask] {
+        let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
+        let tasks = previews.map { preview in
+            let task = DownloadTask(
+                name: preview.displayName,
+                source: preview.source,
+                kind: preview.kind,
+                savePath: saveDirectory.appendingPathComponent(preview.displayName).path,
+                totalBytes: preview.totalBytes,
+                supportsResume: preview.kind == .torrentMagnet || preview.kind == .torrentFile,
+                resolvedTorrentFilePath: preview.resolvedTorrentFilePath,
+                torrentMetadataStatus: preview.metadataStatus,
+                selectedFileIndexes: selectedFileIndexes[preview.source] ?? preview.selectedFileIndexes
+            )
+            task.torrentFiles = preview.files
+            task.appendLog(L10n.string("log_task_created"))
+            if let errorMessage = preview.errorMessage {
+                task.appendLog(errorMessage)
+            }
+            return task
+        }
+
+        guard let modelContext else { return tasks }
+        for task in tasks {
+            modelContext.insert(task)
+        }
+        selectedTaskID = tasks.first?.id ?? selectedTaskID
+        save()
+        statusMessage = L10n.string("status_added_tasks", tasks.count)
+        scheduleQueue()
+        return tasks
+    }
+
     private func displayName(
         for source: String,
         kind: DownloadKind,
@@ -281,6 +319,12 @@ final class DownloadCoordinator {
         if let savePath = snapshot.savePath {
             task.savePath = savePath
         }
+        if let resolvedTorrentFilePath = snapshot.resolvedTorrentFilePath {
+            task.resolvedTorrentFilePath = resolvedTorrentFilePath
+        }
+        if let torrentMetadataStatus = snapshot.torrentMetadataStatus {
+            task.torrentMetadataStatus = torrentMetadataStatus
+        }
         task.totalBytes = snapshot.totalBytes
         task.downloadedBytes = snapshot.downloadedBytes
         task.speedBytesPerSecond = snapshot.speedBytesPerSecond
@@ -300,6 +344,10 @@ final class DownloadCoordinator {
         }
         if let connectionSummary = snapshot.connectionSummary {
             task.connectionSummary = connectionSummary
+        }
+        if let torrentConnection = snapshot.torrentConnection {
+            task.torrentConnection = torrentConnection
+            task.connectionSummary = torrentConnection.summary
         }
 
         switch snapshot.status {

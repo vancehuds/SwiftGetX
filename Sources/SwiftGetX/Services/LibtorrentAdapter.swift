@@ -38,8 +38,8 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         let selected = request.selectedFileIndexes.map(Int32.init)
         let handleID: Int32
 
-        if request.source.hasPrefix("magnet:") {
-            handleID = request.source.withCString { magnet in
+        if request.displaySource.hasPrefix("magnet:") {
+            handleID = request.displaySource.withCString { magnet in
                 request.savePath.withCString { savePath in
                     selected.withUnsafeBufferPointer { buffer in
                         sgx_libtorrent_add_magnet(
@@ -53,7 +53,8 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                 }
             }
         } else {
-            handleID = request.source.withCString { torrentPath in
+            let torrentPath = request.resolvedTorrentFilePath ?? request.displaySource
+            handleID = torrentPath.withCString { torrentPath in
                 request.savePath.withCString { savePath in
                     selected.withUnsafeBufferPointer { buffer in
                         sgx_libtorrent_add_torrent_file(
@@ -189,7 +190,9 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                         eTag: nil,
                         lastModified: nil,
                         torrentFiles: files,
-                        connectionSummary: connectionSummary(from: nativeStatus)
+                        connectionSummary: connectionSummary(from: nativeStatus),
+                        torrentMetadataStatus: metadataStatus(from: nativeStatus),
+                        torrentConnection: connectionInfo(from: nativeStatus)
                     )
                 )
                 pollingTasks[request.id] = nil
@@ -215,7 +218,9 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                         eTag: nil,
                         lastModified: nil,
                         torrentFiles: files,
-                        connectionSummary: connectionSummary(from: nativeStatus)
+                        connectionSummary: connectionSummary(from: nativeStatus),
+                        torrentMetadataStatus: metadataStatus(from: nativeStatus),
+                        torrentConnection: connectionInfo(from: nativeStatus)
                     )
                 )
                 pollingTasks[request.id] = nil
@@ -241,7 +246,9 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                     eTag: nil,
                     lastModified: nil,
                     torrentFiles: files,
-                    connectionSummary: connectionSummary(from: nativeStatus)
+                    connectionSummary: connectionSummary(from: nativeStatus),
+                    torrentMetadataStatus: metadataStatus(from: nativeStatus),
+                    torrentConnection: connectionInfo(from: nativeStatus)
                 )
             )
 
@@ -265,6 +272,25 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             return .completed
         }
         return .running
+    }
+
+    private func metadataStatus(from nativeStatus: SGXTorrentStatus) -> TorrentMetadataStatus {
+        nativeStatus.has_metadata != 0 ? .available : .fetching
+    }
+
+    private func connectionInfo(from nativeStatus: SGXTorrentStatus) -> TorrentConnectionInfo {
+        TorrentConnectionInfo(
+            metadataStatus: metadataStatus(from: nativeStatus),
+            peerCount: Int(nativeStatus.num_peers),
+            downloadRate: nativeStatus.download_rate,
+            uploadRate: nativeStatus.upload_rate,
+            shareRatio: Double(nativeStatus.share_ratio),
+            distributedCopies: Double(nativeStatus.distributed_copies),
+            isDHTEnabled: true,
+            isPEXEnabled: true,
+            localPortDescription: L10n.string("connection_port_ready"),
+            nativeEngineAvailable: true
+        )
     }
 
     private func connectionSummary(from nativeStatus: SGXTorrentStatus) -> String {
@@ -344,6 +370,80 @@ enum LibtorrentAdapterError: LocalizedError {
         case .nativeError(let message):
             message
         }
+    }
+}
+
+struct LibtorrentMagnetPreview: Sendable {
+    var displayName: String?
+    var files: [TorrentFile]
+}
+
+actor LibtorrentMetadataPreviewer {
+    private let sessionBox: LibtorrentSessionBox
+
+    init?() {
+        guard let sessionBox = LibtorrentSessionBox() else { return nil }
+        self.sessionBox = sessionBox
+    }
+
+    func preview(magnet: String) async throws -> LibtorrentMagnetPreview {
+        let handleID = magnet.withCString { magnet in
+            NSTemporaryDirectory().withCString { savePath in
+                sgx_libtorrent_add_magnet(sessionBox.raw, magnet, savePath, nil, 0)
+            }
+        }
+
+        guard handleID >= 0 else {
+            throw LibtorrentAdapterError.nativeError(lastError())
+        }
+        defer {
+            sgx_libtorrent_remove(sessionBox.raw, handleID, 1)
+        }
+
+        while !Task.isCancelled {
+            if sgx_libtorrent_has_metadata(sessionBox.raw, handleID) != 0 {
+                let files = copyFiles(handleID: handleID)
+                return LibtorrentMagnetPreview(
+                    displayName: SourceParser.displayName(for: magnet, kind: .torrentMagnet),
+                    files: files
+                )
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+
+        throw CancellationError()
+    }
+
+    private func copyFiles(handleID: Int32) -> [TorrentFile] {
+        let capacity = 4096
+        let buffer = UnsafeMutablePointer<SGXTorrentFile>.allocate(capacity: capacity)
+        defer {
+            buffer.deallocate()
+        }
+
+        let count = Int(sgx_libtorrent_copy_files(sessionBox.raw, handleID, buffer, Int32(capacity)))
+        guard count > 0 else { return [] }
+        defer {
+            sgx_libtorrent_free_file_paths(buffer, Int32(count))
+        }
+
+        return (0..<count).map { index in
+            let file = buffer[index]
+            return TorrentFile(
+                index: Int(file.index),
+                path: file.path.map { String(cString: $0) } ?? "file-\(index)",
+                size: file.size,
+                priority: Int(file.priority),
+                progress: Double(file.progress)
+            )
+        }
+    }
+
+    private func lastError() -> String {
+        guard let message = sgx_libtorrent_last_error(sessionBox.raw) else {
+            return "Unknown libtorrent error"
+        }
+        return String(cString: message)
     }
 }
 #endif
