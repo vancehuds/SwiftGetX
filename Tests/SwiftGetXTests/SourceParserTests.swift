@@ -56,6 +56,21 @@ struct SourceParserTests {
         #expect(SourceParser.kind(for: "https://example.com/file.torrent?token=abc") == .torrentFile)
     }
 
+    @Test("keeps magnet and torrent sources from falling back")
+    func keepsTorrentSourcesFromFallingBack() {
+        let sources = SourceParser.extractSources(
+            from: """
+            magnet:?xt=urn:btih:abcdef&dn=Demo
+            https://example.com/download?id=1&file=demo.torrent
+            /tmp/local.torrent
+            """
+        )
+
+        #expect(SourceParser.kind(for: sources[0]) == .torrentMagnet)
+        #expect(SourceParser.kind(for: sources[1]) == .torrentFile)
+        #expect(SourceParser.kind(for: sources[2]) == .torrentFile)
+    }
+
     @Test("extracts local torrent paths and file urls")
     func extractsLocalTorrentSources() {
         let sources = SourceParser.extractSources(

@@ -36,6 +36,11 @@ protocol TorrentEngineAdapter: Sendable {
     func recheck(id: UUID) async
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async
+    func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async
+    func setSequentialDownload(id: UUID, enabled: Bool) async
+    func addTracker(id: UUID, url: String) async
+    func removeTracker(id: UUID, url: String) async
+    func forceReannounce(id: UUID) async
 }
 ```
 
@@ -44,16 +49,19 @@ The adapter should translate libtorrent state into `DownloadSnapshot` so SwiftUI
 ## Current Native Capabilities
 
 - Magnet and `.torrent` input.
-- DHT, PEX, tracker updates.
+- DHT, PEX, LSD, and tracker updates, with DHT/PEX/LSD applied to each torrent as runtime flags.
 - Metadata acquisition and file list reporting.
-- Selected-file priorities.
+- Selected-file priorities, per-file priority changes, and sequential download toggles.
+- Fast resume data save/load under Application Support.
+- Tracker list reporting, tracker add/remove, and forced reannounce.
+- Peer list reporting for the first 100 peers.
+- Health snapshots covering metadata, connection counts, upload slots, local port, DHT nodes, distributed copies, and resume-data dirtiness.
 - Recheck and completion verification.
 - Download/upload speed limits.
 - Pause/resume without adding duplicate handles.
-- Stop seeding when the configured ratio is reached.
+- Seeding modes: stop at ratio, stop when complete, or never stop automatically.
 
 ## Remaining Torrent Hardening
 
-- Persist libtorrent resume data for faster process-restart recovery.
 - Add real-world magnet and `.torrent` integration tests with controlled fixtures.
 - Package OpenSSL/libtorrent artifacts in a signed, deployment-target-aligned app bundle.

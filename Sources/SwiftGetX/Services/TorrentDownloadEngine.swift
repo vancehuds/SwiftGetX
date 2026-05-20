@@ -7,7 +7,7 @@ final class TorrentDownloadEngine: DownloadEngine {
     private let adapter: TorrentEngineAdapter
     private var downloadLimitBytesPerSecond: Int64 = 0
     private var uploadLimitBytesPerSecond: Int64 = 0
-    private var stopSeedingAtRatio: Double = 1.0
+    private var runtimeOptions = TorrentRuntimeOptions()
 
     init(adapter: TorrentEngineAdapter? = nil) {
         if let adapter {
@@ -153,8 +153,22 @@ final class TorrentDownloadEngine: DownloadEngine {
         )
     }
 
-    func configure(stopSeedingAtRatio: Double) {
-        self.stopSeedingAtRatio = stopSeedingAtRatio
+    @discardableResult
+    func configure(stopSeedingAtRatio: Double) -> Task<Void, Never> {
+        runtimeOptions.stopSeedingAtRatio = stopSeedingAtRatio
+        let task = Task {
+            await adapter.configure(runtimeOptions: runtimeOptions)
+        }
+        return task
+    }
+
+    @discardableResult
+    func configure(runtimeOptions: TorrentRuntimeOptions) -> Task<Void, Never> {
+        self.runtimeOptions = runtimeOptions
+        let task = Task {
+            await adapter.configure(runtimeOptions: runtimeOptions)
+        }
+        return task
     }
 
     private func torrentRequest(from request: DownloadRequest) -> TorrentStartRequest {
@@ -167,9 +181,12 @@ final class TorrentDownloadEngine: DownloadEngine {
             downloadedBytes: request.downloadedBytes,
             selectedFileIndexes: request.selectedFileIndexes,
             hasExplicitFileSelection: request.hasExplicitFileSelection,
+            filePriorities: Dictionary(uniqueKeysWithValues: request.torrentFiles.map { ($0.index, $0.priority) }),
+            resumeDataPath: request.torrentResumeState?.resumeDataPath
+                ?? TorrentResumeStore.resumeDataPath(for: request.id),
+            runtimeOptions: request.torrentRuntimeOptions ?? runtimeOptions,
             downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
-            uploadLimitBytesPerSecond: uploadLimitBytesPerSecond,
-            stopSeedingAtRatio: stopSeedingAtRatio
+            uploadLimitBytesPerSecond: uploadLimitBytesPerSecond
         )
     }
 
@@ -185,12 +202,35 @@ final class TorrentDownloadEngine: DownloadEngine {
                 downloadedBytes: request.downloadedBytes,
                 selectedFileIndexes: request.selectedFileIndexes,
                 hasExplicitFileSelection: request.hasExplicitFileSelection,
+                filePriorities: Dictionary(uniqueKeysWithValues: request.torrentFiles.map { ($0.index, $0.priority) }),
+                resumeDataPath: request.torrentResumeState?.resumeDataPath
+                    ?? TorrentResumeStore.resumeDataPath(for: request.id),
+                runtimeOptions: request.torrentRuntimeOptions ?? runtimeOptions,
                 downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
-                uploadLimitBytesPerSecond: uploadLimitBytesPerSecond,
-                stopSeedingAtRatio: stopSeedingAtRatio
+                uploadLimitBytesPerSecond: uploadLimitBytesPerSecond
             )
         }
         return torrentRequest(from: request)
+    }
+
+    func setTorrentFilePriority(_ request: DownloadRequest, fileIndex: Int, priority: Int) async {
+        await adapter.setFilePriority(id: request.id, fileIndex: fileIndex, priority: priority)
+    }
+
+    func setTorrentSequentialDownload(_ request: DownloadRequest, enabled: Bool) async {
+        await adapter.setSequentialDownload(id: request.id, enabled: enabled)
+    }
+
+    func addTorrentTracker(_ request: DownloadRequest, url: String) async {
+        await adapter.addTracker(id: request.id, url: url)
+    }
+
+    func removeTorrentTracker(_ request: DownloadRequest, url: String) async {
+        await adapter.removeTracker(id: request.id, url: url)
+    }
+
+    func forceTorrentReannounce(_ request: DownloadRequest) async {
+        await adapter.forceReannounce(id: request.id)
     }
 }
 
@@ -209,6 +249,12 @@ protocol TorrentEngineAdapter: Sendable {
     func recheck(id: UUID) async
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async
+    func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async
+    func setSequentialDownload(id: UUID, enabled: Bool) async
+    func addTracker(id: UUID, url: String) async
+    func removeTracker(id: UUID, url: String) async
+    func forceReannounce(id: UUID) async
+    func configure(runtimeOptions: TorrentRuntimeOptions) async
 }
 
 struct TorrentStartRequest: Sendable {
@@ -220,9 +266,11 @@ struct TorrentStartRequest: Sendable {
     let downloadedBytes: Int64
     let selectedFileIndexes: [Int]
     let hasExplicitFileSelection: Bool
+    let filePriorities: [Int: Int]
+    let resumeDataPath: String?
+    let runtimeOptions: TorrentRuntimeOptions
     let downloadLimitBytesPerSecond: Int64
     let uploadLimitBytesPerSecond: Int64
-    let stopSeedingAtRatio: Double
 }
 
 struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
@@ -247,7 +295,14 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
                 torrentConnection: TorrentConnectionInfo(
                     metadataStatus: .unavailable,
                     nativeEngineAvailable: false
-                )
+                ),
+                torrentResumeState: request.resumeDataPath.map {
+                    TorrentResumeState(resumeDataPath: $0, status: .missing)
+                },
+                torrentTrackers: [],
+                torrentPeers: [],
+                torrentRuntimeOptions: request.runtimeOptions,
+                torrentHealth: TorrentHealthInfo(nativeEngineAvailable: false)
             )
         )
     }
@@ -265,4 +320,10 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
     func recheck(id: UUID) async {}
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async {}
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {}
+    func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {}
+    func setSequentialDownload(id: UUID, enabled: Bool) async {}
+    func addTracker(id: UUID, url: String) async {}
+    func removeTracker(id: UUID, url: String) async {}
+    func forceReannounce(id: UUID) async {}
+    func configure(runtimeOptions: TorrentRuntimeOptions) async {}
 }

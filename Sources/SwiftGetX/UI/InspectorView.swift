@@ -267,7 +267,7 @@ private struct FilesPanel: View {
                     .foregroundStyle(.secondary)
                     .padding(layout.value(12))
             } else {
-                HStack {
+                HStack(spacing: layout.value(8)) {
                     Button(L10n.string("action_select_all")) {
                         coordinator.setTorrentFileSelection(
                             task,
@@ -282,6 +282,16 @@ private struct FilesPanel: View {
                     }
                     .font(layout.font(11, weight: .semibold))
                     .buttonStyle(.bordered)
+
+                    Toggle(
+                        L10n.string("torrent_sequential_download"),
+                        isOn: Binding(
+                            get: { task.torrentRuntimeOptions?.isSequentialDownloadEnabled ?? false },
+                            set: { coordinator.setTorrentSequentialDownload(task, enabled: $0) }
+                        )
+                    )
+                    .font(layout.font(11, weight: .semibold))
+                    .toggleStyle(.checkbox)
                     
                     Spacer()
                     
@@ -291,35 +301,47 @@ private struct FilesPanel: View {
                 }
 
                 ForEach(task.torrentFiles) { file in
-                    Button {
-                        toggle(file)
-                    } label: {
-                        HStack(spacing: layout.value(12)) {
+                    HStack(spacing: layout.value(12)) {
+                        Button {
+                            toggle(file)
+                        } label: {
                             Image(systemName: task.selectedFileIndexes.contains(file.index) ? "checkmark.circle.fill" : "circle")
                                 .font(layout.font(14, weight: .semibold))
                                 .foregroundStyle(task.selectedFileIndexes.contains(file.index) ? .green : .secondary)
-                            
-                            VStack(alignment: .leading, spacing: layout.value(4)) {
-                                Text(file.path)
-                                    .font(layout.font(12, weight: .medium))
-                                    .lineLimit(1)
-                                    .foregroundStyle(Color.primary)
-                                
-                                LiquidProgressBar(progress: file.progress, tint: .blue)
+                        }
+                        .buttonStyle(.plain)
+
+                        VStack(alignment: .leading, spacing: layout.value(4)) {
+                            Text(file.path)
+                                .font(layout.font(12, weight: .medium))
+                                .lineLimit(1)
+                                .foregroundStyle(Color.primary)
+
+                            LiquidProgressBar(progress: file.progress, tint: .blue)
+                        }
+
+                        Spacer()
+
+                        Picker("", selection: Binding(
+                            get: { TorrentFilePriority(rawValue: file.priority) ?? .normal },
+                            set: { coordinator.setTorrentFilePriority(task, fileIndex: file.index, priority: $0) }
+                        )) {
+                            ForEach(TorrentFilePriority.allCases) { priority in
+                                Text(priority.title).tag(priority)
                             }
-                            
-                            Spacer()
-                            
-                            Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
-                                .font(layout.font(11, design: .monospaced))
-                                .foregroundStyle(.secondary)
                         }
-                        .padding(layout.value(10))
-                        .background {
-                            ContentSurfaceBackground(cornerRadius: 8)
-                        }
+                        .labelsHidden()
+                        .frame(width: layout.value(112))
+
+                        Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
+                            .font(layout.font(11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: layout.value(74), alignment: .trailing)
                     }
-                    .buttonStyle(.plain)
+                    .padding(layout.value(10))
+                    .background {
+                        ContentSurfaceBackground(cornerRadius: 8)
+                    }
                 }
             }
         }
@@ -337,20 +359,32 @@ private struct FilesPanel: View {
 }
 
 private struct ConnectionsPanel: View {
+    @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var layout
+    @State private var trackerURL = ""
     let task: DownloadTask
 
     var body: some View {
-        VStack(spacing: layout.value(8)) {
+        VStack(spacing: layout.value(10)) {
             if let connection = task.torrentConnection {
                 DetailRow(title: L10n.string("torrent_metadata_status"), value: connection.metadataStatus.title)
                 DetailRow(
                     title: L10n.string("connection_dht_status"),
-                    value: connection.isDHTEnabled ? L10n.string("connection_dht_ready") : L10n.string("torrent_native_engine_unavailable")
+                    value: connection.nativeEngineAvailable
+                        ? enabledLabel(connection.isDHTEnabled)
+                        : L10n.string("torrent_native_engine_unavailable")
                 )
                 DetailRow(
                     title: L10n.string("connection_pex"),
-                    value: connection.isPEXEnabled ? L10n.string("connection_pex_enabled") : L10n.string("torrent_native_engine_unavailable")
+                    value: connection.nativeEngineAvailable
+                        ? enabledLabel(connection.isPEXEnabled)
+                        : L10n.string("torrent_native_engine_unavailable")
+                )
+                DetailRow(
+                    title: L10n.string("connection_lsd"),
+                    value: connection.nativeEngineAvailable
+                        ? enabledLabel(connection.isLSDEnabled)
+                        : L10n.string("torrent_native_engine_unavailable")
                 )
                 DetailRow(title: L10n.string("connection_local_port"), value: connection.localPortDescription.isEmpty ? L10n.string("unknown") : connection.localPortDescription)
                 DetailRow(title: L10n.string("torrent_peer_count"), value: "\(connection.peerCount)")
@@ -361,11 +395,144 @@ private struct ConnectionsPanel: View {
                 DetailRow(title: L10n.string("torrent_metadata_status"), value: task.torrentMetadataStatus.title)
                 DetailRow(title: L10n.string("connection_dht_status"), value: task.kind == .http ? "--" : L10n.string("connection_waiting_peers"))
                 DetailRow(title: L10n.string("connection_pex"), value: task.kind == .http ? "--" : L10n.string("connection_waiting_peers"))
+                DetailRow(title: L10n.string("connection_lsd"), value: task.kind == .http ? "--" : L10n.string("connection_waiting_peers"))
                 DetailRow(title: L10n.string("connection_local_port"), value: L10n.string("unknown"))
                 DetailRow(title: L10n.string("detail_connection"), value: task.connectionSummary ?? L10n.string("connection_waiting_peers"))
             }
             DetailRow(title: L10n.string("connection_seed_limit"), value: L10n.string("connection_seed_limit_value"))
+            if let health = task.torrentHealth {
+                healthPanel(health)
+            }
+            trackerPanel
+            peerPanel
         }
+    }
+
+    private func healthPanel(_ health: TorrentHealthInfo) -> some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            Text(L10n.string("torrent_health"))
+                .font(layout.font(10, weight: .semibold))
+                .foregroundStyle(.secondary)
+            DetailRow(title: L10n.string("torrent_connections"), value: "\(health.connectionCount)")
+            DetailRow(title: L10n.string("torrent_upload_slots"), value: "\(health.uploadSlotCount)")
+            DetailRow(title: L10n.string("torrent_distributed_copies"), value: String(format: "%.2f", health.distributedCopies))
+            DetailRow(title: L10n.string("torrent_resume_data"), value: health.needsResumeDataSave ? L10n.string("torrent_resume_data_dirty") : L10n.string("torrent_resume_data_clean"))
+            if let lastError = health.lastError {
+                DetailRow(title: L10n.string("detail_error"), value: lastError, color: .red)
+            }
+        }
+    }
+
+    private var trackerPanel: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            HStack {
+                Text(L10n.string("torrent_trackers"))
+                    .font(layout.font(10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    coordinator.forceTorrentReannounce(task)
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help(L10n.string("torrent_force_reannounce"))
+            }
+
+            HStack(spacing: layout.value(6)) {
+                TextField(L10n.string("torrent_tracker_url"), text: $trackerURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(layout.font(11))
+                Button {
+                    coordinator.addTorrentTracker(task, url: trackerURL)
+                    trackerURL = ""
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .disabled(trackerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if task.torrentTrackers.isEmpty {
+                Text(L10n.string("torrent_trackers_empty"))
+                    .font(layout.font(11))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(task.torrentTrackers.prefix(20)) { tracker in
+                    HStack(alignment: .top, spacing: layout.value(8)) {
+                        VStack(alignment: .leading, spacing: layout.value(3)) {
+                            Text(tracker.url)
+                                .font(layout.font(11, weight: .medium, design: .monospaced))
+                                .lineLimit(1)
+                            Text(trackerSubtitle(tracker))
+                                .font(layout.font(10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        Button {
+                            coordinator.removeTorrentTracker(task, url: tracker.url)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .padding(layout.value(10))
+                    .background(ContentSurfaceBackground(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
+    private var peerPanel: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            Text(L10n.string("torrent_peers"))
+                .font(layout.font(10, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            if task.torrentPeers.isEmpty {
+                Text(L10n.string("torrent_peers_empty"))
+                    .font(layout.font(11))
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(task.torrentPeers.prefix(100)) { peer in
+                    HStack(spacing: layout.value(8)) {
+                        VStack(alignment: .leading, spacing: layout.value(3)) {
+                            Text(peer.address)
+                                .font(layout.font(11, weight: .medium, design: .monospaced))
+                                .lineLimit(1)
+                            Text(peer.client.isEmpty ? peer.flags : "\(peer.client) · \(peer.flags)")
+                                .font(layout.font(10))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: layout.value(2)) {
+                            Text(peer.progress.formatted(.percent.precision(.fractionLength(0))))
+                            Text("↓ \(speed(peer.downloadRate)) ↑ \(speed(peer.uploadRate))")
+                        }
+                        .font(layout.font(10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    }
+                    .padding(layout.value(10))
+                    .background(ContentSurfaceBackground(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
+    private func trackerSubtitle(_ tracker: TorrentTrackerInfo) -> String {
+        let seeds = tracker.seedCount >= 0 ? "\(tracker.seedCount)" : "--"
+        let peers = tracker.leecherCount >= 0 ? "\(tracker.leecherCount)" : "--"
+        let error = tracker.errorMessage.map { " · \($0)" } ?? ""
+        return "\(tracker.status) · tier \(tracker.tier) · seeds \(seeds) · peers \(peers)\(error)"
+    }
+
+    private func speed(_ bytesPerSecond: Int64) -> String {
+        ByteCountFormatter.downloadFormatter.string(fromByteCount: bytesPerSecond) + "/s"
+    }
+
+    private func enabledLabel(_ enabled: Bool) -> String {
+        enabled ? L10n.string("connection_enabled") : L10n.string("connection_disabled")
     }
 }
 

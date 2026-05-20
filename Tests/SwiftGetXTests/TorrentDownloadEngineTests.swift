@@ -15,7 +15,7 @@ struct TorrentDownloadEngineTests {
 
         let startRequests = await adapter.startRequests
         #expect(startRequests.count == 1)
-        #expect(startRequests.first?.stopSeedingAtRatio == 2.5)
+        #expect(startRequests.first?.runtimeOptions.stopSeedingAtRatio == 2.5)
     }
 
     @Test("uses resolved torrent file path when present")
@@ -53,7 +53,14 @@ struct TorrentDownloadEngineTests {
     func forwardsSelectedFileIndexes() async throws {
         let adapter = RecordingTorrentAdapter()
         let engine = TorrentDownloadEngine(adapter: adapter)
-        let request = Self.request(selectedFileIndexes: [2, 0], hasExplicitFileSelection: true)
+        let request = Self.request(
+            selectedFileIndexes: [2, 0],
+            torrentFiles: [
+                TorrentFile(index: 0, path: "a", size: 1, priority: 7),
+                TorrentFile(index: 2, path: "b", size: 1, priority: 2)
+            ],
+            hasExplicitFileSelection: true
+        )
 
         await engine.start(request)
         await engine.setFileSelection(request, selectedFileIndexes: [1])
@@ -61,7 +68,78 @@ struct TorrentDownloadEngineTests {
         let startRequests = await adapter.startRequests
         let selections = await adapter.fileSelections
         #expect(startRequests.first?.selectedFileIndexes == [2, 0])
+        #expect(startRequests.first?.filePriorities == [0: 7, 2: 2])
         #expect(selections == [[1]])
+    }
+
+    @Test("forwards runtime options and resume data path")
+    func forwardsRuntimeOptionsAndResumeDataPath() async throws {
+        let adapter = RecordingTorrentAdapter()
+        let engine = TorrentDownloadEngine(adapter: adapter)
+        let options = TorrentRuntimeOptions(
+            isDHTEnabled: false,
+            isPEXEnabled: false,
+            isLSDEnabled: false,
+            isSequentialDownloadEnabled: true,
+            magnetMetadataTimeoutSeconds: 45,
+            maxConnections: 50,
+            maxUploadSlots: 3,
+            seedingLimitMode: .neverStop,
+            stopSeedingAtRatio: 4
+        )
+
+        await engine.start(Self.request(
+            torrentResumeState: TorrentResumeState(resumeDataPath: "/tmp/demo.fastresume", status: .saved),
+            torrentRuntimeOptions: options
+        ))
+
+        let startRequests = await adapter.startRequests
+        #expect(startRequests.first?.resumeDataPath == "/tmp/demo.fastresume")
+        #expect(startRequests.first?.runtimeOptions == options)
+    }
+
+    @Test("configuration is forwarded to adapter")
+    func configurationIsForwardedToAdapter() async throws {
+        let adapter = RecordingTorrentAdapter()
+        let engine = TorrentDownloadEngine(adapter: adapter)
+        let options = TorrentRuntimeOptions(
+            isDHTEnabled: false,
+            isPEXEnabled: false,
+            isLSDEnabled: false,
+            maxConnections: 32,
+            maxUploadSlots: 2,
+            seedingLimitMode: .neverStop
+        )
+
+        await engine.configure(runtimeOptions: options).value
+
+        let configurations = await adapter.runtimeConfigurations
+        #expect(configurations.last == options)
+    }
+
+    @Test("forwards torrent control commands")
+    func forwardsTorrentControlCommands() async throws {
+        let adapter = RecordingTorrentAdapter()
+        let engine = TorrentDownloadEngine(adapter: adapter)
+        let request = Self.request()
+
+        await engine.setTorrentFilePriority(request, fileIndex: 2, priority: 7)
+        await engine.setTorrentSequentialDownload(request, enabled: true)
+        await engine.addTorrentTracker(request, url: "udp://tracker.example:80")
+        await engine.removeTorrentTracker(request, url: "udp://tracker.example:80")
+        await engine.forceTorrentReannounce(request)
+
+        let priorities = await adapter.filePriorities
+        let sequential = await adapter.sequentialChanges
+        let added = await adapter.addedTrackers
+        let removed = await adapter.removedTrackers
+        let reannounceCount = await adapter.reannounceCount
+        #expect(priorities.first?.fileIndex == 2)
+        #expect(priorities.first?.priority == 7)
+        #expect(sequential == [true])
+        #expect(added == ["udp://tracker.example:80"])
+        #expect(removed == ["udp://tracker.example:80"])
+        #expect(reannounceCount == 1)
     }
 
     @Test("keeps implicit empty selection distinct from explicit cleared selection")
@@ -83,6 +161,9 @@ struct TorrentDownloadEngineTests {
         kind: DownloadKind = .torrentMagnet,
         resolvedTorrentFilePath: String? = nil,
         selectedFileIndexes: [Int] = [],
+        torrentFiles: [TorrentFile] = [],
+        torrentResumeState: TorrentResumeState? = nil,
+        torrentRuntimeOptions: TorrentRuntimeOptions? = nil,
         hasExplicitFileSelection: Bool = false
     ) -> DownloadRequest {
         DownloadRequest(
@@ -99,6 +180,9 @@ struct TorrentDownloadEngineTests {
             eTag: nil,
             lastModified: nil,
             selectedFileIndexes: selectedFileIndexes,
+            torrentFiles: torrentFiles,
+            torrentResumeState: torrentResumeState,
+            torrentRuntimeOptions: torrentRuntimeOptions,
             hasExplicitFileSelection: hasExplicitFileSelection
         )
     }
@@ -108,6 +192,12 @@ private actor RecordingTorrentAdapter: TorrentEngineAdapter {
     private(set) var startRequests = [TorrentStartRequest]()
     private(set) var resumeRequests = [TorrentStartRequest]()
     private(set) var fileSelections = [[Int]]()
+    private(set) var filePriorities = [(fileIndex: Int, priority: Int)]()
+    private(set) var sequentialChanges = [Bool]()
+    private(set) var addedTrackers = [String]()
+    private(set) var removedTrackers = [String]()
+    private(set) var reannounceCount = 0
+    private(set) var runtimeConfigurations = [TorrentRuntimeOptions]()
 
     func start(
         _ request: TorrentStartRequest,
@@ -131,5 +221,29 @@ private actor RecordingTorrentAdapter: TorrentEngineAdapter {
 
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {
         fileSelections.append(selectedFileIndexes)
+    }
+
+    func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {
+        filePriorities.append((fileIndex, priority))
+    }
+
+    func setSequentialDownload(id: UUID, enabled: Bool) async {
+        sequentialChanges.append(enabled)
+    }
+
+    func addTracker(id: UUID, url: String) async {
+        addedTrackers.append(url)
+    }
+
+    func removeTracker(id: UUID, url: String) async {
+        removedTrackers.append(url)
+    }
+
+    func forceReannounce(id: UUID) async {
+        reannounceCount += 1
+    }
+
+    func configure(runtimeOptions: TorrentRuntimeOptions) async {
+        runtimeConfigurations.append(runtimeOptions)
     }
 }

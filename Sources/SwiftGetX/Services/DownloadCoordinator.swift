@@ -41,7 +41,7 @@ final class DownloadCoordinator {
             hidesTemporaryFiles: settings.hideHTTPTemporaryFiles,
             retryLimit: settings.retryLimit
         )
-        torrentEngine.configure(stopSeedingAtRatio: settings.stopSeedingAtRatio)
+        torrentEngine.configure(runtimeOptions: settings.torrentRuntimeOptions)
         setSpeedLimit(
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
@@ -56,7 +56,7 @@ final class DownloadCoordinator {
             hidesTemporaryFiles: settings.hideHTTPTemporaryFiles,
             retryLimit: settings.retryLimit
         )
-        torrentEngine.configure(stopSeedingAtRatio: settings.stopSeedingAtRatio)
+        torrentEngine.configure(runtimeOptions: settings.torrentRuntimeOptions)
         setSpeedLimit(
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
@@ -113,6 +113,7 @@ final class DownloadCoordinator {
                 kind: kind,
                 savePath: saveDirectory.appendingPathComponent(displayName).path
             )
+            configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
             return task
         }
@@ -132,7 +133,8 @@ final class DownloadCoordinator {
     func add(
         previews: [TorrentMetadataPreview],
         saveDirectory: URL? = nil,
-        selectedFileIndexes: [String: [Int]] = [:]
+        selectedFileIndexes: [String: [Int]] = [:],
+        filePriorities: [String: [Int: Int]] = [:]
     ) -> [DownloadTask] {
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
         let tasks = previews.map { preview in
@@ -147,7 +149,14 @@ final class DownloadCoordinator {
                 torrentMetadataStatus: preview.metadataStatus,
                 selectedFileIndexes: selectedFileIndexes[preview.source] ?? preview.selectedFileIndexes
             )
-            task.torrentFiles = preview.files
+            var files = preview.files
+            if let priorities = filePriorities[preview.source] {
+                for index in files.indices {
+                    files[index].priority = priorities[files[index].index] ?? files[index].priority
+                }
+            }
+            task.torrentFiles = files
+            configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
             if let errorMessage = preview.errorMessage {
                 task.appendLog(errorMessage)
@@ -200,6 +209,18 @@ final class DownloadCoordinator {
         }
     }
 
+    private func configureTorrentDefaults(for task: DownloadTask) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        let options = settings?.torrentRuntimeOptions ?? TorrentRuntimeOptions()
+        task.torrentRuntimeOptions = options
+        if let resumeDataPath = TorrentResumeStore.resumeDataPath(for: task.id) {
+            task.torrentResumeState = TorrentResumeState(
+                resumeDataPath: resumeDataPath,
+                status: FileManager.default.fileExists(atPath: resumeDataPath) ? .loaded : .missing
+            )
+        }
+    }
+
     func pause(_ task: DownloadTask) {
         task.status = .paused
         task.speedBytesPerSecond = 0
@@ -240,6 +261,9 @@ final class DownloadCoordinator {
         if shouldDeleteLocalData {
             try? FileManager.default.removeItem(atPath: task.savePath)
         }
+        if task.kind == .torrentMagnet || task.kind == .torrentFile {
+            TorrentResumeStore.removeResumeData(for: task.id)
+        }
         modelContext.delete(task)
         if selectedTaskID == task.id {
             selectedTaskID = tasks().first?.id
@@ -261,12 +285,93 @@ final class DownloadCoordinator {
     func setTorrentFileSelection(_ task: DownloadTask, selectedFileIndexes: [Int]) {
         guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
         task.selectedFileIndexes = selectedFileIndexes.sorted()
+        var files = task.torrentFiles
+        let selected = Set(selectedFileIndexes)
+        for index in files.indices {
+            files[index].priority = selected.contains(files[index].index)
+                ? max(files[index].priority, TorrentFilePriority.normal.rawValue)
+                : TorrentFilePriority.skip.rawValue
+        }
+        task.torrentFiles = files
         task.appendLog(L10n.string("log_updated_bt_file_selection", selectedFileIndexes.count))
         let request = DownloadRequest(task: task)
         save()
 
         Task {
             await engine(for: request.kind).setFileSelection(request, selectedFileIndexes: selectedFileIndexes)
+        }
+    }
+
+    func setTorrentFilePriority(_ task: DownloadTask, fileIndex: Int, priority: TorrentFilePriority) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        var files = task.torrentFiles
+        guard let index = files.firstIndex(where: { $0.index == fileIndex }) else { return }
+        files[index].priority = priority.rawValue
+        task.torrentFiles = files
+        task.selectedFileIndexes = files
+            .filter { $0.priority > TorrentFilePriority.skip.rawValue }
+            .map(\.index)
+            .sorted()
+        task.appendLog(L10n.string("log_updated_bt_file_priority", files[index].path, priority.title))
+        let request = DownloadRequest(task: task)
+        save()
+
+        Task {
+            await engine(for: request.kind).setTorrentFilePriority(
+                request,
+                fileIndex: fileIndex,
+                priority: priority.rawValue
+            )
+        }
+    }
+
+    func setTorrentSequentialDownload(_ task: DownloadTask, enabled: Bool) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        var options = task.torrentRuntimeOptions ?? settings?.torrentRuntimeOptions ?? TorrentRuntimeOptions()
+        options.isSequentialDownloadEnabled = enabled
+        task.torrentRuntimeOptions = options
+        task.appendLog(enabled ? L10n.string("log_enabled_sequential_download") : L10n.string("log_disabled_sequential_download"))
+        let request = DownloadRequest(task: task)
+        save()
+
+        Task {
+            await engine(for: request.kind).setTorrentSequentialDownload(request, enabled: enabled)
+        }
+    }
+
+    func addTorrentTracker(_ task: DownloadTask, url: String) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        task.appendLog(L10n.string("log_added_tracker", trimmed))
+        let request = DownloadRequest(task: task)
+        save()
+
+        Task {
+            await engine(for: request.kind).addTorrentTracker(request, url: trimmed)
+        }
+    }
+
+    func removeTorrentTracker(_ task: DownloadTask, url: String) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        task.torrentTrackers = task.torrentTrackers.filter { $0.url != url }
+        task.appendLog(L10n.string("log_removed_tracker", url))
+        let request = DownloadRequest(task: task)
+        save()
+
+        Task {
+            await engine(for: request.kind).removeTorrentTracker(request, url: url)
+        }
+    }
+
+    func forceTorrentReannounce(_ task: DownloadTask) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        task.appendLog(L10n.string("log_forced_tracker_announce"))
+        let request = DownloadRequest(task: task)
+        save()
+
+        Task {
+            await engine(for: request.kind).forceTorrentReannounce(request)
         }
     }
 
@@ -348,6 +453,21 @@ final class DownloadCoordinator {
         if let torrentConnection = snapshot.torrentConnection {
             task.torrentConnection = torrentConnection
             task.connectionSummary = torrentConnection.summary
+        }
+        if let torrentResumeState = snapshot.torrentResumeState {
+            task.torrentResumeState = torrentResumeState
+        }
+        if let torrentTrackers = snapshot.torrentTrackers {
+            task.torrentTrackers = torrentTrackers
+        }
+        if let torrentPeers = snapshot.torrentPeers {
+            task.torrentPeers = torrentPeers
+        }
+        if let torrentRuntimeOptions = snapshot.torrentRuntimeOptions {
+            task.torrentRuntimeOptions = torrentRuntimeOptions
+        }
+        if let torrentHealth = snapshot.torrentHealth {
+            task.torrentHealth = torrentHealth
         }
 
         switch snapshot.status {

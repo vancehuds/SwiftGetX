@@ -81,6 +81,14 @@ private struct SettingsSnapshot: Equatable {
     let clipboardDetectionEnabled: Bool
     let confirmBrowserTakeoverDownloads: Bool
     let stopSeedingAtRatio: Double
+    let torrentDHTEnabled: Bool
+    let torrentPEXEnabled: Bool
+    let torrentLSDEnabled: Bool
+    let torrentSequentialDownloadEnabled: Bool
+    let torrentMagnetMetadataTimeoutSeconds: Int
+    let torrentMaxConnections: Int
+    let torrentMaxUploadSlots: Int
+    let torrentSeedingLimitMode: TorrentSeedingLimitMode
 
     @MainActor
     init(_ settings: AppSettings) {
@@ -96,6 +104,14 @@ private struct SettingsSnapshot: Equatable {
         clipboardDetectionEnabled = settings.clipboardDetectionEnabled
         confirmBrowserTakeoverDownloads = settings.confirmBrowserTakeoverDownloads
         stopSeedingAtRatio = settings.stopSeedingAtRatio
+        torrentDHTEnabled = settings.torrentDHTEnabled
+        torrentPEXEnabled = settings.torrentPEXEnabled
+        torrentLSDEnabled = settings.torrentLSDEnabled
+        torrentSequentialDownloadEnabled = settings.torrentSequentialDownloadEnabled
+        torrentMagnetMetadataTimeoutSeconds = settings.torrentMagnetMetadataTimeoutSeconds
+        torrentMaxConnections = settings.torrentMaxConnections
+        torrentMaxUploadSlots = settings.torrentMaxUploadSlots
+        torrentSeedingLimitMode = settings.torrentSeedingLimitMode
     }
 }
 
@@ -267,16 +283,42 @@ private struct TorrentSettingsSection: View {
 
     var body: some View {
         Section("BT") {
+            Toggle(L10n.string("torrent_enable_dht"), isOn: $settings.torrentDHTEnabled)
+            Toggle(L10n.string("torrent_enable_pex"), isOn: $settings.torrentPEXEnabled)
+            Toggle(L10n.string("torrent_enable_lsd"), isOn: $settings.torrentLSDEnabled)
+            Toggle(L10n.string("torrent_enable_sequential_default"), isOn: $settings.torrentSequentialDownloadEnabled)
+            Stepper(
+                L10n.string("torrent_magnet_timeout_seconds", settings.torrentMagnetMetadataTimeoutSeconds),
+                value: $settings.torrentMagnetMetadataTimeoutSeconds,
+                in: 3...120
+            )
+            Stepper(
+                L10n.string("torrent_max_connections", settings.torrentMaxConnections),
+                value: $settings.torrentMaxConnections,
+                in: 2...1000
+            )
+            Stepper(
+                L10n.string("torrent_max_upload_slots", settings.torrentMaxUploadSlots),
+                value: $settings.torrentMaxUploadSlots,
+                in: -1...128
+            )
             SpeedLimitSettingsRow(
                 title: L10n.string("upload_speed_limit"),
                 value: $settings.globalUploadLimitBytes,
                 values: [0, 256_000, 512_000, 1_000_000, 5_000_000]
             )
+            Picker(L10n.string("torrent_seeding_mode"), selection: $settings.torrentSeedingLimitMode) {
+                ForEach(TorrentSeedingLimitMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
             Slider(value: $settings.stopSeedingAtRatio, in: 0...5, step: 0.1) {
                 Text(L10n.string("share_ratio_limit"))
             }
+            .disabled(settings.torrentSeedingLimitMode != .stopAtRatio)
             Text(L10n.string("stop_seeding_ratio_message", settings.stopSeedingAtRatio))
                 .foregroundStyle(.secondary)
+                .opacity(settings.torrentSeedingLimitMode == .stopAtRatio ? 1 : 0.55)
         }
     }
 }

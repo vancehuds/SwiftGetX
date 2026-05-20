@@ -9,6 +9,11 @@ protocol DownloadEngine: AnyObject {
     func remove(_ request: DownloadRequest, deletingFiles: Bool) async
     func recheck(_ request: DownloadRequest) async
     func setFileSelection(_ request: DownloadRequest, selectedFileIndexes: [Int]) async
+    func setTorrentFilePriority(_ request: DownloadRequest, fileIndex: Int, priority: Int) async
+    func setTorrentSequentialDownload(_ request: DownloadRequest, enabled: Bool) async
+    func addTorrentTracker(_ request: DownloadRequest, url: String) async
+    func removeTorrentTracker(_ request: DownloadRequest, url: String) async
+    func forceTorrentReannounce(_ request: DownloadRequest) async
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async
 }
 
@@ -26,6 +31,9 @@ struct DownloadRequest: Sendable {
     let eTag: String?
     let lastModified: String?
     let selectedFileIndexes: [Int]
+    let torrentFiles: [TorrentFile]
+    let torrentResumeState: TorrentResumeState?
+    let torrentRuntimeOptions: TorrentRuntimeOptions?
     let hasExplicitFileSelection: Bool
 
     init(
@@ -42,6 +50,9 @@ struct DownloadRequest: Sendable {
         eTag: String?,
         lastModified: String?,
         selectedFileIndexes: [Int],
+        torrentFiles: [TorrentFile] = [],
+        torrentResumeState: TorrentResumeState? = nil,
+        torrentRuntimeOptions: TorrentRuntimeOptions? = nil,
         hasExplicitFileSelection: Bool = false
     ) {
         self.id = id
@@ -57,6 +68,9 @@ struct DownloadRequest: Sendable {
         self.eTag = eTag
         self.lastModified = lastModified
         self.selectedFileIndexes = selectedFileIndexes
+        self.torrentFiles = torrentFiles
+        self.torrentResumeState = torrentResumeState
+        self.torrentRuntimeOptions = torrentRuntimeOptions
         self.hasExplicitFileSelection = hasExplicitFileSelection
     }
 
@@ -74,8 +88,19 @@ struct DownloadRequest: Sendable {
         eTag = task.eTag
         lastModified = task.lastModified
         selectedFileIndexes = task.selectedFileIndexes
+        torrentFiles = task.torrentFiles
+        torrentResumeState = task.torrentResumeState
+        torrentRuntimeOptions = task.torrentRuntimeOptions
         hasExplicitFileSelection = task.kind == .torrentMagnet || task.kind == .torrentFile
             ? !task.torrentFiles.isEmpty
             : false
     }
+}
+
+extension DownloadEngine {
+    func setTorrentFilePriority(_ request: DownloadRequest, fileIndex: Int, priority: Int) async {}
+    func setTorrentSequentialDownload(_ request: DownloadRequest, enabled: Bool) async {}
+    func addTorrentTracker(_ request: DownloadRequest, url: String) async {}
+    func removeTorrentTracker(_ request: DownloadRequest, url: String) async {}
+    func forceTorrentReannounce(_ request: DownloadRequest) async {}
 }

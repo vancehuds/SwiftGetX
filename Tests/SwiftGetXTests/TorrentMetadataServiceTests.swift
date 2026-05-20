@@ -62,6 +62,16 @@ struct TorrentMetadataServiceTests {
         #expect(preview.files.isEmpty)
     }
 
+    @Test("magnet preview honors timeout configuration")
+    func magnetPreviewHonorsTimeoutConfiguration() async {
+        let service = TorrentMetadataService(magnetTimeout: .milliseconds(1))
+
+        let preview = await service.preview(source: "magnet:?xt=urn:btih:abcdef&dn=Timeout")
+
+        #expect(preview.displayName == "Timeout")
+        #expect(preview.metadataStatus == .unavailable)
+    }
+
     private static func singleFileTorrentData(name: String, length: Int) -> Data {
         Data("d4:infod6:lengthi\(length)e4:name\(name.count):\(name)ee".utf8)
     }

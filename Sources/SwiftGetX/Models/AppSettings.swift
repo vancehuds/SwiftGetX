@@ -21,6 +21,14 @@ final class AppSettings {
     var clipboardDetectionEnabled = true
     var confirmBrowserTakeoverDownloads = true
     var stopSeedingAtRatio: Double = 1.0
+    var torrentDHTEnabled = true
+    var torrentPEXEnabled = true
+    var torrentLSDEnabled = true
+    var torrentSequentialDownloadEnabled = false
+    var torrentMagnetMetadataTimeoutSeconds = 12
+    var torrentMaxConnections = 200
+    var torrentMaxUploadSlots = 8
+    var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
 
     func apply(_ record: AppSettingsRecord) {
         defaultDownloadDirectory = URL(fileURLWithPath: record.defaultDownloadDirectoryPath)
@@ -35,6 +43,14 @@ final class AppSettings {
         clipboardDetectionEnabled = record.clipboardDetectionEnabled
         confirmBrowserTakeoverDownloads = record.confirmBrowserTakeoverDownloads
         stopSeedingAtRatio = record.stopSeedingAtRatio
+        torrentDHTEnabled = record.torrentDHTEnabled
+        torrentPEXEnabled = record.torrentPEXEnabled
+        torrentLSDEnabled = record.torrentLSDEnabled
+        torrentSequentialDownloadEnabled = record.torrentSequentialDownloadEnabled
+        torrentMagnetMetadataTimeoutSeconds = record.torrentMagnetMetadataTimeoutSeconds
+        torrentMaxConnections = record.torrentMaxConnections
+        torrentMaxUploadSlots = record.torrentMaxUploadSlots
+        torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
     }
 
     func makeRecord() -> AppSettingsRecord {
@@ -50,7 +66,15 @@ final class AppSettings {
             completionNotificationsEnabled: completionNotificationsEnabled,
             clipboardDetectionEnabled: clipboardDetectionEnabled,
             confirmBrowserTakeoverDownloads: confirmBrowserTakeoverDownloads,
-            stopSeedingAtRatio: stopSeedingAtRatio
+            stopSeedingAtRatio: stopSeedingAtRatio,
+            torrentDHTEnabled: torrentDHTEnabled,
+            torrentPEXEnabled: torrentPEXEnabled,
+            torrentLSDEnabled: torrentLSDEnabled,
+            torrentSequentialDownloadEnabled: torrentSequentialDownloadEnabled,
+            torrentMagnetMetadataTimeoutSeconds: torrentMagnetMetadataTimeoutSeconds,
+            torrentMaxConnections: torrentMaxConnections,
+            torrentMaxUploadSlots: torrentMaxUploadSlots,
+            torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue
         )
     }
 
@@ -67,6 +91,28 @@ final class AppSettings {
         record.clipboardDetectionEnabled = clipboardDetectionEnabled
         record.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
         record.stopSeedingAtRatio = stopSeedingAtRatio
+        record.torrentDHTEnabled = torrentDHTEnabled
+        record.torrentPEXEnabled = torrentPEXEnabled
+        record.torrentLSDEnabled = torrentLSDEnabled
+        record.torrentSequentialDownloadEnabled = torrentSequentialDownloadEnabled
+        record.torrentMagnetMetadataTimeoutSeconds = torrentMagnetMetadataTimeoutSeconds
+        record.torrentMaxConnections = torrentMaxConnections
+        record.torrentMaxUploadSlots = torrentMaxUploadSlots
+        record.torrentSeedingLimitModeRawValue = torrentSeedingLimitMode.rawValue
+    }
+
+    var torrentRuntimeOptions: TorrentRuntimeOptions {
+        TorrentRuntimeOptions(
+            isDHTEnabled: torrentDHTEnabled,
+            isPEXEnabled: torrentPEXEnabled,
+            isLSDEnabled: torrentLSDEnabled,
+            isSequentialDownloadEnabled: torrentSequentialDownloadEnabled,
+            magnetMetadataTimeoutSeconds: torrentMagnetMetadataTimeoutSeconds,
+            maxConnections: torrentMaxConnections,
+            maxUploadSlots: torrentMaxUploadSlots,
+            seedingLimitMode: torrentSeedingLimitMode,
+            stopSeedingAtRatio: stopSeedingAtRatio
+        )
     }
 }
 
@@ -85,6 +131,14 @@ final class AppSettingsRecord {
     var clipboardDetectionEnabled: Bool
     var confirmBrowserTakeoverDownloads: Bool = true
     var stopSeedingAtRatio: Double
+    var torrentDHTEnabled: Bool = true
+    var torrentPEXEnabled: Bool = true
+    var torrentLSDEnabled: Bool = true
+    var torrentSequentialDownloadEnabled: Bool = false
+    var torrentMagnetMetadataTimeoutSeconds: Int = 12
+    var torrentMaxConnections: Int = 200
+    var torrentMaxUploadSlots: Int = 8
+    var torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
 
     init(
         id: String = "default",
@@ -99,7 +153,15 @@ final class AppSettingsRecord {
         completionNotificationsEnabled: Bool = true,
         clipboardDetectionEnabled: Bool = true,
         confirmBrowserTakeoverDownloads: Bool = true,
-        stopSeedingAtRatio: Double = 1.0
+        stopSeedingAtRatio: Double = 1.0,
+        torrentDHTEnabled: Bool = true,
+        torrentPEXEnabled: Bool = true,
+        torrentLSDEnabled: Bool = true,
+        torrentSequentialDownloadEnabled: Bool = false,
+        torrentMagnetMetadataTimeoutSeconds: Int = 12,
+        torrentMaxConnections: Int = 200,
+        torrentMaxUploadSlots: Int = 8,
+        torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
     ) {
         self.id = id
         self.defaultDownloadDirectoryPath = defaultDownloadDirectoryPath
@@ -114,5 +176,13 @@ final class AppSettingsRecord {
         self.clipboardDetectionEnabled = clipboardDetectionEnabled
         self.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
         self.stopSeedingAtRatio = stopSeedingAtRatio
+        self.torrentDHTEnabled = torrentDHTEnabled
+        self.torrentPEXEnabled = torrentPEXEnabled
+        self.torrentLSDEnabled = torrentLSDEnabled
+        self.torrentSequentialDownloadEnabled = torrentSequentialDownloadEnabled
+        self.torrentMagnetMetadataTimeoutSeconds = torrentMagnetMetadataTimeoutSeconds
+        self.torrentMaxConnections = torrentMaxConnections
+        self.torrentMaxUploadSlots = torrentMaxUploadSlots
+        self.torrentSeedingLimitModeRawValue = torrentSeedingLimitModeRawValue
     }
 }

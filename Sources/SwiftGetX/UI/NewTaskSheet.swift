@@ -12,6 +12,7 @@ struct NewTaskSheet: View {
     @State private var previews = [TorrentMetadataPreview]()
     @State private var previewSources = [String]()
     @State private var selectedFileIndexesBySource = [String: Set<Int>]()
+    @State private var filePrioritiesBySource = [String: [Int: TorrentFilePriority]]()
     @State private var isLoadingPreviews = false
     let draft: DownloadDraft?
 
@@ -158,7 +159,8 @@ struct NewTaskSheet: View {
             SourcePreviewView(
                 sourceText: sourceText,
                 previews: previews,
-                selectedFileIndexesBySource: $selectedFileIndexesBySource
+                selectedFileIndexesBySource: $selectedFileIndexesBySource,
+                filePrioritiesBySource: $filePrioritiesBySource
             )
 
             HStack {
@@ -175,7 +177,8 @@ struct NewTaskSheet: View {
                         coordinator.add(
                             previews: previews,
                             saveDirectory: saveDirectory,
-                            selectedFileIndexes: selectedFileIndexesForCoordinator
+                            selectedFileIndexes: selectedFileIndexesForCoordinator,
+                            filePriorities: filePrioritiesForCoordinator
                         )
                     } else {
                         coordinator.add(source: sourceText, saveDirectory: saveDirectory, suggestedFilename: suggestedFilename)
@@ -247,16 +250,20 @@ struct NewTaskSheet: View {
             await MainActor.run {
                 previews = []
                 selectedFileIndexesBySource = [:]
+                filePrioritiesBySource = [:]
                 isLoadingPreviews = false
             }
             return
         }
 
         var nextPreviews = [TorrentMetadataPreview]()
+        let previewService = TorrentMetadataService(
+            magnetTimeout: .seconds(settings.torrentMagnetMetadataTimeoutSeconds)
+        )
         for source in sources {
             if Task.isCancelled { return }
             let suggested = sources.count == 1 ? suggestedFilename : nil
-            let preview = await TorrentMetadataService.shared.preview(source: source, suggestedFilename: suggested)
+            let preview = await previewService.preview(source: source, suggestedFilename: suggested)
             nextPreviews.append(preview)
         }
 
@@ -268,8 +275,27 @@ struct NewTaskSheet: View {
             }
             let validSources = Set(nextPreviews.map(\.source))
             selectedFileIndexesBySource = selectedFileIndexesBySource.filter { validSources.contains($0.key) }
+            filePrioritiesBySource = filePrioritiesBySource.filter { validSources.contains($0.key) }
             isLoadingPreviews = false
         }
+    }
+
+    private var filePrioritiesForCoordinator: [String: [Int: Int]] {
+        Dictionary(uniqueKeysWithValues: previews.map { preview -> (String, [Int: Int]) in
+            let selected = selectedFileIndexesBySource[preview.source] ?? Set(preview.selectedFileIndexes)
+            let priorities = filePrioritiesBySource[preview.source] ?? defaultPriorities(for: preview, selected: selected)
+            var rawPriorities = [Int: Int]()
+            for (fileIndex, priority) in priorities {
+                rawPriorities[fileIndex] = priority.rawValue
+            }
+            return (preview.source, rawPriorities)
+        })
+    }
+
+    private func defaultPriorities(for preview: TorrentMetadataPreview, selected: Set<Int>) -> [Int: TorrentFilePriority] {
+        Dictionary(uniqueKeysWithValues: preview.files.map { file in
+            (file.index, selected.contains(file.index) ? file.priorityLevel : .skip)
+        })
     }
 }
 
@@ -315,6 +341,7 @@ private struct SourcePreviewView: View {
     let sourceText: String
     let previews: [TorrentMetadataPreview]
     @Binding var selectedFileIndexesBySource: [String: Set<Int>]
+    @Binding var filePrioritiesBySource: [String: [Int: TorrentFilePriority]]
 
     var body: some View {
         let sources = SourceParser.extractSources(from: sourceText)
@@ -342,7 +369,8 @@ private struct SourcePreviewView: View {
                             if let preview = previews.first(where: { $0.source == source }) {
                                 TorrentPreviewRow(
                                     preview: preview,
-                                    selectedFileIndexes: selectionBinding(for: preview)
+                                    selectedFileIndexes: selectionBinding(for: preview),
+                                    filePriorities: priorityBinding(for: preview)
                                 )
                             } else {
                                 let kind = SourceParser.kind(for: source)
@@ -384,8 +412,34 @@ private struct SourcePreviewView: View {
     private func selectionBinding(for preview: TorrentMetadataPreview) -> Binding<Set<Int>> {
         Binding(
             get: { selectedFileIndexesBySource[preview.source] ?? Set(preview.selectedFileIndexes) },
-            set: { selectedFileIndexesBySource[preview.source] = $0 }
+            set: { selection in
+                selectedFileIndexesBySource[preview.source] = selection
+                var priorities = filePrioritiesBySource[preview.source] ?? [:]
+                for file in preview.files {
+                    priorities[file.index] = selection.contains(file.index) ? .normal : .skip
+                }
+                filePrioritiesBySource[preview.source] = priorities
+            }
         )
+    }
+
+    private func priorityBinding(for preview: TorrentMetadataPreview) -> Binding<[Int: TorrentFilePriority]> {
+        Binding(
+            get: { filePrioritiesBySource[preview.source] ?? defaultPriorities(for: preview) },
+            set: { priorities in
+                filePrioritiesBySource[preview.source] = priorities
+                selectedFileIndexesBySource[preview.source] = Set(priorities.compactMap { fileIndex, priority in
+                    priority == .skip ? nil : fileIndex
+                })
+            }
+        )
+    }
+
+    private func defaultPriorities(for preview: TorrentMetadataPreview) -> [Int: TorrentFilePriority] {
+        Dictionary(uniqueKeysWithValues: preview.files.map { file in
+            let selected = selectedFileIndexesBySource[preview.source] ?? Set(preview.selectedFileIndexes)
+            return (file.index, selected.contains(file.index) ? file.priorityLevel : .skip)
+        })
     }
 
     private func previewColor(for kind: DownloadKind) -> Color {
@@ -404,6 +458,7 @@ private struct TorrentPreviewRow: View {
     @Environment(\.responsiveLayout) private var layout
     let preview: TorrentMetadataPreview
     @Binding var selectedFileIndexes: Set<Int>
+    @Binding var filePriorities: [Int: TorrentFilePriority]
 
     var body: some View {
         VStack(alignment: .leading, spacing: layout.value(8)) {
@@ -429,11 +484,13 @@ private struct TorrentPreviewRow: View {
                 HStack {
                     Button(L10n.string("action_select_all")) {
                         selectedFileIndexes = Set(preview.files.map(\.index))
+                        filePriorities = Dictionary(uniqueKeysWithValues: preview.files.map { ($0.index, .normal) })
                     }
                     .font(layout.font(10.5, weight: .semibold))
 
                     Button(L10n.string("action_clear")) {
                         selectedFileIndexes = []
+                        filePriorities = Dictionary(uniqueKeysWithValues: preview.files.map { ($0.index, .skip) })
                     }
                     .font(layout.font(10.5, weight: .semibold))
 
@@ -445,24 +502,35 @@ private struct TorrentPreviewRow: View {
                 }
 
                 ForEach(preview.files.prefix(8)) { file in
-                    Button {
-                        toggle(file)
-                    } label: {
-                        HStack(spacing: layout.value(8)) {
+                    HStack(spacing: layout.value(8)) {
+                        Button {
+                            toggle(file)
+                        } label: {
                             Image(systemName: selectedFileIndexes.contains(file.index) ? "checkmark.circle.fill" : "circle")
                                 .font(layout.font(12, weight: .semibold))
                                 .foregroundStyle(selectedFileIndexes.contains(file.index) ? .green : .secondary)
-                            Text(file.path)
-                                .font(layout.font(10.8))
-                                .lineLimit(1)
-                                .foregroundStyle(Color.primary)
-                            Spacer()
-                            Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
-                                .font(layout.font(10.5, design: .monospaced))
-                                .foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.plain)
+
+                        Text(file.path)
+                            .font(layout.font(10.8))
+                            .lineLimit(1)
+                            .foregroundStyle(Color.primary)
+
+                        Spacer()
+
+                        Picker("", selection: priorityBinding(for: file)) {
+                            ForEach(TorrentFilePriority.allCases) { priority in
+                                Text(priority.title).tag(priority)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: layout.value(100))
+
+                        Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
+                            .font(layout.font(10.5, design: .monospaced))
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
                 }
 
                 if preview.files.count > 8 {
@@ -503,8 +571,24 @@ private struct TorrentPreviewRow: View {
     private func toggle(_ file: TorrentFile) {
         if selectedFileIndexes.contains(file.index) {
             selectedFileIndexes.remove(file.index)
+            filePriorities[file.index] = .skip
         } else {
             selectedFileIndexes.insert(file.index)
+            filePriorities[file.index] = .normal
         }
+    }
+
+    private func priorityBinding(for file: TorrentFile) -> Binding<TorrentFilePriority> {
+        Binding(
+            get: { filePriorities[file.index] ?? (selectedFileIndexes.contains(file.index) ? file.priorityLevel : .skip) },
+            set: { priority in
+                filePriorities[file.index] = priority
+                if priority == .skip {
+                    selectedFileIndexes.remove(file.index)
+                } else {
+                    selectedFileIndexes.insert(file.index)
+                }
+            }
+        )
     }
 }
