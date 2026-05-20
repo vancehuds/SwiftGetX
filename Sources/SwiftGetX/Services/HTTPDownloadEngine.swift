@@ -38,11 +38,16 @@ final class HTTPDownloadEngine: DownloadEngine {
             return
         }
 
+        let requestSegmentCount = request.httpOptions?.effectiveSegmentCount(
+            defaultSegmentCount: segmentCount,
+            multithreadingEnabled: multithreadingEnabled
+        ) ?? (multithreadingEnabled ? segmentCount : 1)
+        let requestRetryLimit = request.httpOptions?.effectiveRetryLimit(defaultRetryLimit: retryLimit) ?? retryLimit
         await runState.activate(request.id)
         let worker = HTTPDownloadWorker(
-            segmentCount: multithreadingEnabled ? segmentCount : 1,
+            segmentCount: min(max(1, requestSegmentCount), segmentScanLimit),
             hidesTemporaryFiles: hidesTemporaryFiles,
-            retryLimit: retryLimit,
+            retryLimit: max(0, requestRetryLimit),
             runState: runState,
             onSnapshot: onSnapshot
         )
@@ -119,6 +124,7 @@ private actor HTTPDownloadRunState {
     private var activeTaskIDs = Set<UUID>()
     private var speedLimitBytesPerSecond: Int64 = 0
     private var nextDownloadSlot = Date()
+    private var nextPerTaskDownloadSlots = [UUID: Date]()
 
     func activate(_ id: UUID) {
         activeTaskIDs.insert(id)
@@ -126,6 +132,7 @@ private actor HTTPDownloadRunState {
 
     func deactivate(_ id: UUID) {
         activeTaskIDs.remove(id)
+        nextPerTaskDownloadSlots[id] = nil
     }
 
     func isActive(_ id: UUID) -> Bool {
@@ -137,18 +144,41 @@ private actor HTTPDownloadRunState {
         nextDownloadSlot = Date()
     }
 
-    func waitForDownloadCapacity(bytes: Int64) async {
-        guard speedLimitBytesPerSecond > 0, bytes > 0 else { return }
-
-        let now = Date()
-        if nextDownloadSlot < now {
-            nextDownloadSlot = now
+    func waitForDownloadCapacity(
+        taskID: UUID,
+        bytes: Int64,
+        perTaskLimitBytesPerSecond: Int64?
+    ) async {
+        let taskLimitBytesPerSecond = max(0, perTaskLimitBytesPerSecond ?? 0)
+        guard bytes > 0,
+              speedLimitBytesPerSecond > 0 || taskLimitBytesPerSecond > 0
+        else {
+            return
         }
 
-        let delay = nextDownloadSlot.timeIntervalSince(now)
-        nextDownloadSlot = nextDownloadSlot.addingTimeInterval(
-            Double(bytes) / Double(speedLimitBytesPerSecond)
-        )
+        let now = Date()
+        var delay: TimeInterval = 0
+
+        if speedLimitBytesPerSecond > 0 {
+            if nextDownloadSlot < now {
+                nextDownloadSlot = now
+            }
+            delay = max(delay, nextDownloadSlot.timeIntervalSince(now))
+            nextDownloadSlot = nextDownloadSlot.addingTimeInterval(
+                Double(bytes) / Double(speedLimitBytesPerSecond)
+            )
+        }
+
+        if taskLimitBytesPerSecond > 0 {
+            var nextTaskSlot = nextPerTaskDownloadSlots[taskID] ?? now
+            if nextTaskSlot < now {
+                nextTaskSlot = now
+            }
+            delay = max(delay, nextTaskSlot.timeIntervalSince(now))
+            nextPerTaskDownloadSlots[taskID] = nextTaskSlot.addingTimeInterval(
+                Double(bytes) / Double(taskLimitBytesPerSecond)
+            )
+        }
 
         guard delay > 0 else { return }
         try? await Task.sleep(for: .seconds(delay))
@@ -222,7 +252,8 @@ struct HTTPMetadataProbe: Sendable {
             ).merging(
                 response: httpResponse,
                 resumedFrom: 0,
-                redirects: redirectRecorder.redirects
+                redirects: redirectRecorder.redirects,
+                filenameOverride: request.httpOptions?.filenameOverride
             )
         } catch {
             metadata = .unknown
@@ -275,7 +306,8 @@ struct HTTPMetadataProbe: Sendable {
                 ).merging(
                     response: httpResponse,
                     resumedFrom: 0,
-                    redirects: redirectRecorder.redirects
+                    redirects: redirectRecorder.redirects,
+                    filenameOverride: request.httpOptions?.filenameOverride
                 )
             case 200...299:
                 let responseLength = httpResponse.expectedContentLength > 0
@@ -289,7 +321,8 @@ struct HTTPMetadataProbe: Sendable {
                 ).merging(
                     response: httpResponse,
                     resumedFrom: 0,
-                    redirects: redirectRecorder.redirects
+                    redirects: redirectRecorder.redirects,
+                    filenameOverride: request.httpOptions?.filenameOverride
                 )
             default:
                 return .unknown
@@ -321,6 +354,7 @@ private enum HTTPRequestFactory {
             request.setValue("2026-03-10", forHTTPHeaderField: "X-GitHub-Api-Version")
         }
         applyBrowserContext(downloadRequest.browserContext, to: &request)
+        applyHTTPOptions(downloadRequest.httpOptions, to: &request)
         return request
     }
 
@@ -338,6 +372,13 @@ private enum HTTPRequestFactory {
             request.setValue(value, forHTTPHeaderField: name)
         }
     }
+
+    private static func applyHTTPOptions(_ options: HTTPDownloadOptions?, to request: inout URLRequest) {
+        guard let options else { return }
+        for (name, value) in options.httpHeaders() {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+    }
 }
 
 private struct HTTPDownloadWorker: Sendable {
@@ -352,6 +393,14 @@ private struct HTTPDownloadWorker: Sendable {
     let retryLimit: Int
     let runState: HTTPDownloadRunState
     let onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
+
+    private func waitForDownloadCapacity(request: DownloadRequest, bytes: Int64) async {
+        await runState.waitForDownloadCapacity(
+            taskID: request.id,
+            bytes: bytes,
+            perTaskLimitBytesPerSecond: request.httpOptions?.perTaskDownloadLimitBytes
+        )
+    }
 
     private static func sessionConfiguration() -> URLSessionConfiguration {
         HTTPRequestFactory.sessionConfiguration()
@@ -667,7 +716,8 @@ private struct HTTPDownloadWorker: Sendable {
             metadata = metadata.merging(
                 response: httpResponse,
                 resumedFrom: existingBytes,
-                redirects: redirectRecorder.redirects
+                redirects: redirectRecorder.redirects,
+                filenameOverride: request.httpOptions?.filenameOverride
             )
         case 200...299:
             if shouldResume {
@@ -678,7 +728,8 @@ private struct HTTPDownloadWorker: Sendable {
             metadata = metadata.merging(
                 response: httpResponse,
                 resumedFrom: 0,
-                redirects: redirectRecorder.redirects
+                redirects: redirectRecorder.redirects,
+                filenameOverride: request.httpOptions?.filenameOverride
             )
         case 416 where shouldResume:
             if let totalBytes = Self.unsatisfiedRangeTotal(from: httpResponse),
@@ -700,7 +751,8 @@ private struct HTTPDownloadWorker: Sendable {
             var restartMetadata = metadata.merging(
                 response: httpResponse,
                 resumedFrom: 0,
-                redirects: redirectRecorder.redirects
+                redirects: redirectRecorder.redirects,
+                filenameOverride: request.httpOptions?.filenameOverride
             )
             restartMetadata.supportsResume = false
             try await downloadSingle(
@@ -742,7 +794,7 @@ private struct HTTPDownloadWorker: Sendable {
             bytesSinceLastEmit += bytes
             buffer.removeAll(keepingCapacity: true)
 
-            await runState.waitForDownloadCapacity(bytes: bytes)
+            await waitForDownloadCapacity(request: request, bytes: bytes)
 
             let now = Date()
             guard now.timeIntervalSince(lastEmit) >= 0.35 else { return }
@@ -1114,7 +1166,7 @@ private struct HTTPDownloadWorker: Sendable {
             try fileHandle.write(contentsOf: Data(buffer))
             await progress.add(bytes)
             buffer.removeAll(keepingCapacity: true)
-            await runState.waitForDownloadCapacity(bytes: bytes)
+            await waitForDownloadCapacity(request: request, bytes: bytes)
         }
 
         for try await byte in stream {
@@ -1551,15 +1603,18 @@ struct HTTPMetadata: Sendable {
     )
 
     func filled(from request: DownloadRequest) -> HTTPMetadata {
-        let requestMetadata = request.httpResponseMetadata
-            ?? HTTPResponseMetadata.fromCreationContext(
+        let requestMetadata = (
+            request.httpResponseMetadata
+                ?? HTTPResponseMetadata.fromCreationContext(
                 source: request.source,
                 browserContext: request.browserContext,
+                suggestedFilename: request.httpOptions?.filenameOverride,
                 totalBytes: request.totalBytes,
                 supportsResume: request.supportsResume,
                 eTag: request.eTag,
                 lastModified: request.lastModified
             )
+        ).replacingSuggestedFilename(request.httpOptions?.filenameOverride)
         return HTTPMetadata(
             contentLength: contentLength > 0 ? contentLength : request.totalBytes,
             supportsResume: supportsResume || request.supportsResume,
@@ -1597,7 +1652,8 @@ struct HTTPMetadata: Sendable {
     func merging(
         response: HTTPURLResponse,
         resumedFrom offset: Int64,
-        redirects: [HTTPRedirectMetadata] = []
+        redirects: [HTTPRedirectMetadata] = [],
+        filenameOverride: String? = nil
     ) -> HTTPMetadata {
         let responseLength = response.expectedContentLength > 0 ? response.expectedContentLength : 0
         let contentRange = response
@@ -1614,7 +1670,7 @@ struct HTTPMetadata: Sendable {
             sourcePageURL: responseMetadata?.sourcePageURL,
             mimeType: response.mimeType ?? contentType(from: response),
             contentDisposition: response.value(forHTTPHeaderField: "Content-Disposition"),
-            suggestedFilename: HTTPContentDisposition.suggestedFilename(
+            suggestedFilename: filenameOverride ?? HTTPContentDisposition.suggestedFilename(
                 from: response.value(forHTTPHeaderField: "Content-Disposition")
             ) ?? responseMetadata?.suggestedFilename,
             server: response.value(forHTTPHeaderField: "Server"),

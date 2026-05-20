@@ -34,6 +34,7 @@ final class DownloadTask {
     var connectionSummary: String?
     var browserContextJSON: String?
     var httpResponseMetadataJSON: String?
+    var httpOptionsJSON: String?
     var logEntries: [String]
 
     init(
@@ -67,6 +68,7 @@ final class DownloadTask {
         connectionSummary: String? = nil,
         browserContext: BrowserDownloadContext? = nil,
         httpResponseMetadata: HTTPResponseMetadata? = nil,
+        httpOptions: HTTPDownloadOptions? = nil,
         logEntries: [String] = []
     ) {
         self.id = id
@@ -99,6 +101,7 @@ final class DownloadTask {
         self.connectionSummary = connectionSummary
         self.browserContextJSON = Self.encode(browserContext)
         self.httpResponseMetadataJSON = Self.encode(httpResponseMetadata)
+        self.httpOptionsJSON = Self.encodeHTTPOptions(httpOptions)
         self.logEntries = logEntries
     }
 
@@ -222,6 +225,11 @@ final class DownloadTask {
         set { httpResponseMetadataJSON = Self.encode(newValue) }
     }
 
+    var httpOptions: HTTPDownloadOptions? {
+        get { Self.decode(HTTPDownloadOptions.self, from: httpOptionsJSON) }
+        set { httpOptionsJSON = Self.encodeHTTPOptions(newValue) }
+    }
+
     private static func decode<Value: Decodable>(_ type: Value.Type, from json: String?) -> Value? {
         guard let json,
               let data = json.data(using: .utf8)
@@ -238,6 +246,13 @@ final class DownloadTask {
             return nil
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    private static func encodeHTTPOptions(_ options: HTTPDownloadOptions?) -> String? {
+        guard let persistable = options?.persistable, !persistable.isEmpty else {
+            return nil
+        }
+        return encode(persistable)
     }
 }
 

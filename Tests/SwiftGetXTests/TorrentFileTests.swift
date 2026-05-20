@@ -175,4 +175,45 @@ struct TorrentFileTests {
         #expect(bidiMetadata.suggestedFilename == "photo-gpj.zip")
         #expect(emptyMetadata.suggestedFilename == nil)
     }
+
+    @Test("task persists HTTP download options safely")
+    func persistsHTTPDownloadOptionsSafely() {
+        let options = HTTPDownloadOptions(
+            segmentCountOverride: 4,
+            retryLimitOverride: 2,
+            perTaskDownloadLimitBytes: 1_000_000,
+            filenameOverride: "../safe name.zip",
+            additionalHeaders: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
+                BrowserDownloadHeader(name: "Accept-Language", value: "en-US"),
+                BrowserDownloadHeader(name: "Range", value: "bytes=1-2")
+            ]
+        )
+        let task = DownloadTask(
+            name: "file.zip",
+            source: "https://example.com/file.zip",
+            kind: .http,
+            savePath: "/tmp/file.zip",
+            httpOptions: options
+        )
+
+        #expect(task.httpOptions?.segmentCountOverride == 4)
+        #expect(task.httpOptions?.retryLimitOverride == 2)
+        #expect(task.httpOptions?.perTaskDownloadLimitBytes == 1_000_000)
+        #expect(task.httpOptions?.filenameOverride == "safe name.zip")
+        #expect(task.httpOptions?.additionalHeaders == [
+            BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
+        ])
+        #expect(task.httpOptionsJSON?.contains("Bearer secret") == false)
+        #expect(task.httpOptionsJSON?.contains("bytes=1-2") == false)
+
+        let emptyTask = DownloadTask(
+            name: "empty.zip",
+            source: "https://example.com/empty.zip",
+            kind: .http,
+            savePath: "/tmp/empty.zip",
+            httpOptions: HTTPDownloadOptions()
+        )
+        #expect(emptyTask.httpOptionsJSON == nil)
+    }
 }

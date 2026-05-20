@@ -10,6 +10,11 @@ struct NewTaskSheet: View {
     @State private var sourceText = ""
     @State private var saveDirectory = AppDefaults.downloadDirectory
     @State private var suggestedFilename: String?
+    @State private var filenameOverride = ""
+    @State private var httpSegmentCount = 8
+    @State private var httpRetryLimit = 3
+    @State private var httpDownloadLimitBytes: Int64 = 0
+    @State private var httpHeaderText = ""
     @State private var previews = [TorrentMetadataPreview]()
     @State private var previewSources = [String]()
     @State private var selectedFileIndexesBySource = [String: Set<Int>]()
@@ -43,6 +48,9 @@ struct NewTaskSheet: View {
         .environment(\.responsiveLayout, layout)
         .onAppear {
             saveDirectory = settings.defaultDownloadDirectory
+            httpSegmentCount = settings.httpMultithreadingEnabled ? settings.httpSegmentCount : 1
+            httpRetryLimit = settings.retryLimit
+            httpDownloadLimitBytes = 0
         }
         .onChange(of: draft) { _, newDraft in
             apply(newDraft)
@@ -141,6 +149,17 @@ struct NewTaskSheet: View {
                 ContentSurfaceBackground(cornerRadius: 8)
             }
 
+            if hasHTTPSources {
+                HTTPDownloadOptionsEditor(
+                    showsFilenameOverride: hasSingleHTTPSource,
+                    filenameOverride: $filenameOverride,
+                    segmentCount: $httpSegmentCount,
+                    retryLimit: $httpRetryLimit,
+                    speedLimitBytes: $httpDownloadLimitBytes,
+                    headerText: $httpHeaderText
+                )
+            }
+
             HStack(spacing: layout.value(10)) {
                 Button {
                     chooseTorrentFile()
@@ -191,14 +210,16 @@ struct NewTaskSheet: View {
                             previews: previews,
                             saveDirectory: saveDirectory,
                             selectedFileIndexes: selectedFileIndexesForCoordinator,
-                            filePriorities: filePrioritiesForCoordinator
+                            filePriorities: filePrioritiesForCoordinator,
+                            httpOptions: httpDownloadOptions
                         )
                     } else {
                         tasks = coordinator.add(
                             source: sourceText,
                             saveDirectory: saveDirectory,
-                            suggestedFilename: suggestedFilename,
-                            browserContext: draft?.browserContext
+                            suggestedFilename: effectiveSuggestedFilename,
+                            browserContext: draft?.browserContext,
+                            httpOptions: httpDownloadOptions
                         )
                     }
                     acknowledgeNativeHandoffIfNeeded(
@@ -232,6 +253,11 @@ struct NewTaskSheet: View {
             sourceText,
             saveDirectory.path,
             suggestedFilename ?? "",
+            filenameOverride,
+            "\(httpSegmentCount)",
+            "\(httpRetryLimit)",
+            "\(httpDownloadLimitBytes)",
+            httpHeaderText,
             draft?.browserContext?.finalURL ?? "",
             draft?.browserContext?.originalURL ?? ""
         ].joined(separator: "\u{1F}")
@@ -240,7 +266,40 @@ struct NewTaskSheet: View {
     private func apply(_ draft: DownloadDraft?) {
         sourceText = draft?.source ?? ""
         suggestedFilename = draft?.suggestedFilename
+        filenameOverride = ""
         didResolveNativeHandoff = false
+    }
+
+    private var currentSources: [String] {
+        SourceParser.extractSources(from: sourceText)
+    }
+
+    private var hasHTTPSources: Bool {
+        currentSources.contains { SourceParser.kind(for: $0) == .http }
+    }
+
+    private var hasSingleHTTPSource: Bool {
+        currentSources.count == 1
+            && currentSources.first.map { SourceParser.kind(for: $0) == .http } == true
+    }
+
+    private var effectiveFilenameOverride: String? {
+        HTTPResponseMetadata(suggestedFilename: filenameOverride).suggestedFilename
+    }
+
+    private var effectiveSuggestedFilename: String? {
+        effectiveFilenameOverride ?? suggestedFilename
+    }
+
+    private var httpDownloadOptions: HTTPDownloadOptions? {
+        guard hasHTTPSources else { return nil }
+        return HTTPDownloadOptions(
+            segmentCountOverride: httpSegmentCount,
+            retryLimitOverride: httpRetryLimit,
+            perTaskDownloadLimitBytes: httpDownloadLimitBytes,
+            filenameOverride: hasSingleHTTPSource ? effectiveFilenameOverride : nil,
+            additionalHeaders: HTTPDownloadOptions.headers(from: httpHeaderText)
+        )
     }
 
     private func rejectExpiredNativeHandoffIfNeeded() -> Bool {
@@ -287,6 +346,8 @@ struct NewTaskSheet: View {
 
     private func refreshPreviews() async {
         let sources = SourceParser.extractSources(from: sourceText)
+        let httpOptions = httpDownloadOptions
+        let filenameOverride = sources.count == 1 ? effectiveFilenameOverride : nil
         await MainActor.run {
             previewSources = sources
             isLoadingPreviews = !sources.isEmpty
@@ -319,8 +380,10 @@ struct NewTaskSheet: View {
                         preview = await httpPreviewService.preview(
                             source: source,
                             suggestedFilename: suggested,
+                            filenameOverride: filenameOverride,
                             saveDirectory: saveDirectory,
-                            browserContext: sources.count == 1 ? draft?.browserContext : nil
+                            browserContext: sources.count == 1 ? draft?.browserContext : nil,
+                            httpOptions: httpOptions
                         )
                     } else {
                         preview = await previewService.preview(source: source, suggestedFilename: suggested)
@@ -440,6 +503,97 @@ private struct BrowserTakeoverBanner: View {
             return L10n.string("browser_takeover_prefilled_filename", suggestedFilename)
         }
         return L10n.string("browser_takeover_prefilled_link")
+    }
+}
+
+private struct HTTPDownloadOptionsEditor: View {
+    @Environment(\.responsiveLayout) private var layout
+    let showsFilenameOverride: Bool
+    @Binding var filenameOverride: String
+    @Binding var segmentCount: Int
+    @Binding var retryLimit: Int
+    @Binding var speedLimitBytes: Int64
+    @Binding var headerText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(10)) {
+            HStack {
+                Label(L10n.string("http_options_title"), systemImage: "slider.horizontal.3")
+                    .font(layout.font(10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(speedLabel(for: speedLimitBytes))
+                    .font(layout.font(10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            if showsFilenameOverride {
+                VStack(alignment: .leading, spacing: layout.value(4)) {
+                    Text(L10n.string("http_options_filename"))
+                        .font(layout.font(10.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    TextField(L10n.string("http_options_filename_placeholder"), text: $filenameOverride)
+                        .textFieldStyle(.roundedBorder)
+                        .font(layout.font(11.5))
+                }
+            }
+
+            HStack(spacing: layout.value(12)) {
+                Stepper(
+                    L10n.string("http_options_segments", segmentCount),
+                    value: $segmentCount,
+                    in: 1...HTTPDownloadOptions.maximumSegmentCount
+                )
+                Stepper(
+                    L10n.string("http_options_retries", retryLimit),
+                    value: $retryLimit,
+                    in: 0...HTTPDownloadOptions.maximumRetryLimit
+                )
+            }
+            .font(layout.font(11.2))
+
+            HStack(spacing: layout.value(10)) {
+                Text(L10n.string("http_options_speed_limit"))
+                    .font(layout.font(11.2))
+                Picker("", selection: $speedLimitBytes) {
+                    ForEach(speedLimitChoices, id: \.self) { value in
+                        Text(speedLabel(for: value)).tag(value)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: layout.value(180))
+            }
+
+            TextEditor(text: $headerText)
+                .font(layout.font(11, design: .monospaced))
+                .frame(minHeight: layout.value(54), maxHeight: layout.value(76))
+                .scrollContentBackground(.hidden)
+                .padding(layout.value(6))
+                .background(ContentSurfaceBackground(cornerRadius: 6))
+                .overlay(alignment: .topLeading) {
+                    if headerText.isEmpty {
+                        Text(L10n.string("http_options_headers_placeholder"))
+                            .font(layout.font(11, design: .monospaced))
+                            .foregroundStyle(.secondary.opacity(0.75))
+                            .padding(.horizontal, layout.value(10))
+                            .padding(.vertical, layout.value(12))
+                            .allowsHitTesting(false)
+                    }
+                }
+        }
+        .padding(layout.value(12))
+        .background {
+            ContentSurfaceBackground(cornerRadius: 8)
+        }
+    }
+
+    private var speedLimitChoices: [Int64] {
+        [0, 500_000, 1_000_000, 5_000_000, 10_000_000, 20_000_000]
+    }
+
+    private func speedLabel(for value: Int64) -> String {
+        guard value > 0 else { return L10n.string("speed_unlimited") }
+        return ByteCountFormatter.downloadFormatter.string(fromByteCount: value) + "/s"
     }
 }
 

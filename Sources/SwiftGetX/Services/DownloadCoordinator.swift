@@ -11,6 +11,7 @@ final class DownloadCoordinator {
     private let httpEngine = HTTPDownloadEngine()
     private let torrentEngine = TorrentDownloadEngine()
     private var runtimeBrowserContexts: [UUID: BrowserDownloadContext] = [:]
+    private var runtimeHTTPOptions: [UUID: HTTPDownloadOptions] = [:]
 
     var selectedTaskID: UUID?
     var activeFilter: DownloadFilter = .all
@@ -107,7 +108,8 @@ final class DownloadCoordinator {
         source: String,
         saveDirectory: URL? = nil,
         suggestedFilename: String? = nil,
-        browserContext: BrowserDownloadContext? = nil
+        browserContext: BrowserDownloadContext? = nil,
+        httpOptions: HTTPDownloadOptions? = nil
     ) -> [DownloadTask] {
         let sources = SourceParser.extractSources(from: source)
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
@@ -132,7 +134,8 @@ final class DownloadCoordinator {
                         browserContext: browserContext,
                         suggestedFilename: creationSuggestedFilename
                     )
-                    : nil
+                    : nil,
+                httpOptions: kind == .http ? httpOptions : nil
             )
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
@@ -144,6 +147,9 @@ final class DownloadCoordinator {
             modelContext.insert(task)
             if let browserContext {
                 runtimeBrowserContexts[task.id] = browserContext
+            }
+            if task.kind == .http, let httpOptions {
+                runtimeHTTPOptions[task.id] = httpOptions
             }
         }
         selectedTaskID = tasks.first?.id ?? selectedTaskID
@@ -158,7 +164,8 @@ final class DownloadCoordinator {
         previews: [TorrentMetadataPreview],
         saveDirectory: URL? = nil,
         selectedFileIndexes: [String: [Int]] = [:],
-        filePriorities: [String: [Int: Int]] = [:]
+        filePriorities: [String: [Int: Int]] = [:],
+        httpOptions: HTTPDownloadOptions? = nil
     ) -> [DownloadTask] {
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
         let tasks = previews.map { preview in
@@ -179,7 +186,8 @@ final class DownloadCoordinator {
                 browserContext: preview.browserContext?.persistable,
                 httpResponseMetadata: preview.kind == .http
                     ? preview.httpResponseMetadata
-                    : nil
+                    : nil,
+                httpOptions: preview.kind == .http ? httpOptions : nil
             )
             var files = preview.files
             if let priorities = filePriorities[preview.source] {
@@ -203,6 +211,9 @@ final class DownloadCoordinator {
                let browserContext = preview.browserContext
             {
                 runtimeBrowserContexts[task.id] = browserContext
+            }
+            if task.kind == .http, let httpOptions {
+                runtimeHTTPOptions[task.id] = httpOptions
             }
         }
         selectedTaskID = tasks.first?.id ?? selectedTaskID
@@ -236,7 +247,8 @@ final class DownloadCoordinator {
         task.appendLog(L10n.string("log_start_download"))
         let request = DownloadRequest(
             task: task,
-            browserContext: runtimeBrowserContexts[task.id] ?? task.browserContext
+            browserContext: runtimeBrowserContexts[task.id] ?? task.browserContext,
+            httpOptions: runtimeHTTPOptions[task.id] ?? task.httpOptions
         )
         save()
 
@@ -301,6 +313,7 @@ final class DownloadCoordinator {
             TorrentResumeStore.removeResumeData(for: task.id)
         }
         runtimeBrowserContexts[task.id] = nil
+        runtimeHTTPOptions[task.id] = nil
         modelContext.delete(task)
         if selectedTaskID == task.id {
             selectedTaskID = tasks().first?.id
@@ -424,9 +437,18 @@ final class DownloadCoordinator {
         }
     }
 
-    func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) {
+    func setSpeedLimit(
+        downloadBytesPerSecond: Int64,
+        uploadBytesPerSecond: Int64,
+        persistsToSettings: Bool = false
+    ) {
         downloadLimitBytes = downloadBytesPerSecond
         uploadLimitBytes = uploadBytesPerSecond
+        if persistsToSettings, let settings {
+            settings.globalDownloadLimitBytes = downloadBytesPerSecond
+            settings.globalUploadLimitBytes = uploadBytesPerSecond
+            persistSettings(settings)
+        }
         Task {
             await httpEngine.setSpeedLimit(
                 downloadBytesPerSecond: downloadBytesPerSecond,
@@ -436,6 +458,24 @@ final class DownloadCoordinator {
                 downloadBytesPerSecond: downloadBytesPerSecond,
                 uploadBytesPerSecond: uploadBytesPerSecond
             )
+        }
+    }
+
+    private func persistSettings(_ settings: AppSettings) {
+        guard let modelContext else { return }
+        let descriptor = FetchDescriptor<AppSettingsRecord>(
+            predicate: #Predicate { $0.id == "default" }
+        )
+
+        do {
+            if let record = try modelContext.fetch(descriptor).first {
+                settings.update(record)
+            } else {
+                modelContext.insert(settings.makeRecord())
+            }
+            try modelContext.save()
+        } catch {
+            statusMessage = L10n.string("status_save_failed", error.localizedDescription)
         }
     }
 
@@ -524,6 +564,7 @@ final class DownloadCoordinator {
                 scheduleQueue()
             }
             runtimeBrowserContexts[task.id] = nil
+            runtimeHTTPOptions[task.id] = nil
         case .completed:
             task.speedBytesPerSecond = 0
             if task.completedAt == nil {
@@ -535,11 +576,13 @@ final class DownloadCoordinator {
                 scheduleQueue()
             }
             runtimeBrowserContexts[task.id] = nil
+            runtimeHTTPOptions[task.id] = nil
         case .failed:
             task.speedBytesPerSecond = 0
             task.appendLog(snapshot.errorMessage ?? L10n.string("error_download_failed"))
             scheduleQueue()
             runtimeBrowserContexts[task.id] = nil
+            runtimeHTTPOptions[task.id] = nil
         default:
             break
         }

@@ -306,17 +306,38 @@ Next step:
 
 ## Task 8: Per-Task Download Options and Persistent Speed Settings
 
-Status: [ ]
+Status: [x]
 
 Add per-task overrides for segment count, retry limit, speed limit, save path, filename, and headers. Ensure toolbar speed-limit changes persist through `AppSettings` or are explicitly modeled as temporary limits.
 
 Work performed:
 
+- Added `HTTPDownloadOptions` with bounded segment/retry overrides, per-task download limit, sanitized filename override, additional HTTP headers, controlled-header filtering, and persistable redaction for sensitive headers.
+- Persisted safe HTTP options on `DownloadTask` while keeping full runtime HTTP options in `DownloadCoordinator` memory for active authenticated/header-bearing tasks.
+- Updated new-task HTTP flows so the sheet exposes filename, segment count, retry count, per-task speed, and headers; preview refreshes use those options; and created HTTP tasks preserve preview save paths plus selected options.
+- Updated HTTP probing and downloading so per-task segment/retry overrides, per-task speed limiting, filename override, and additional headers apply consistently to preview, HEAD/range probes, single-stream downloads, and segmented downloads.
+- Connected toolbar speed-limit choices to `AppSettings` persistence through `DownloadCoordinator.setSpeedLimit(..., persistsToSettings: true)`.
+- Added English and Simplified Chinese localization for the HTTP options editor and removed duplicate localization keys during verification cleanup.
+- Added tests for safe HTTP option persistence, per-task segment/retry/header behavior, filename override/header application, and toolbar speed persistence.
+
 Verification evidence:
+
+- `swift build` passed.
+- `swift test` passed with 127 tests across 13 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static search confirmed each `http_options_*` localization key appears once per localization file after cleanup.
 
 Remaining risk:
 
+- Per-task segment/retry/speed options are applied when a download starts; changing those options for an already-running task is not yet a live runtime adjustment path.
+- Sensitive per-task headers are intentionally memory-only and are not available after app restart unless the user re-enters them or a later secure storage design is added.
+- The UI supports one filename override for a single HTTP source; multi-link batches share common HTTP transfer options and keep per-item names from metadata/source parsing.
+- SwiftUI behavior was build-verified and covered through model/engine/coordinator tests, but not screenshot-tested in this session.
+
 Next step:
+
+- Task 9: Queue Scheduling and Restart Policy.
 
 ## Task 9: Queue Scheduling and Restart Policy
 

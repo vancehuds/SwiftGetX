@@ -81,6 +81,23 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
         )
     }
 
+    func replacingSuggestedFilename(_ suggestedFilename: String?) -> HTTPResponseMetadata {
+        HTTPResponseMetadata(
+            originalURL: originalURL,
+            finalURL: finalURL,
+            sourcePageURL: sourcePageURL,
+            mimeType: mimeType,
+            contentDisposition: contentDisposition,
+            suggestedFilename: suggestedFilename ?? self.suggestedFilename,
+            server: server,
+            supportsResume: supportsResume,
+            contentLength: contentLength,
+            eTag: eTag,
+            lastModified: lastModified,
+            redirects: redirects
+        )
+    }
+
     static func fromCreationContext(
         source: String,
         browserContext: BrowserDownloadContext?,

@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SwiftData
 import Testing
 @testable import SwiftGetX
 @testable import SwiftGetXCore
@@ -235,6 +236,98 @@ struct HTTPDownloadEngineTests {
         let downloaded = try Data(contentsOf: destination)
         #expect(downloaded == payload)
         #expect(recorder.snapshots.contains { $0.retryCount == 1 })
+    }
+
+    @Test("honors per-task segment override")
+    func honorsPerTaskSegmentOverride() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            httpOptions: HTTPDownloadOptions(segmentCountOverride: 4)
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(recorder.snapshots.contains {
+            $0.connectionSummary == L10n.string(
+                "http_connection_summary",
+                L10n.string("http_connection_segments", 4),
+                L10n.string("http_connection_resumable")
+            )
+        })
+    }
+
+    @Test("honors per-task retry override")
+    func honorsPerTaskRetryOverride() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .failFirstGET(status: 500))
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            httpOptions: HTTPDownloadOptions(retryLimitOverride: 1)
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(recorder.snapshots.contains { $0.retryCount == 1 })
+    }
+
+    @Test("applies per-task HTTP headers without controlled headers")
+    func appliesPerTaskHTTPHeadersWithoutControlledHeaders() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let engine = HTTPDownloadEngine()
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            httpOptions: HTTPDownloadOptions(additionalHeaders: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer task-secret", sensitive: true),
+                BrowserDownloadHeader(name: "X-Task-Token", value: "alpha"),
+                BrowserDownloadHeader(name: "Range", value: "bytes=10-20")
+            ])
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(server.requests.contains { $0.contains("Authorization: Bearer task-secret") })
+        #expect(server.requests.contains { $0.contains("X-Task-Token: alpha") })
+        #expect(!server.requests.contains { $0.contains("Range: bytes=10-20") })
     }
 
     @Test("resumes legacy segment files without manifest")
@@ -616,6 +709,92 @@ struct HTTPDownloadEngineTests {
         })
     }
 
+    @Test("applies per-task HTTP headers and filename override")
+    func appliesPerTaskHTTPHeadersAndFilenameOverride() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .contentDispositionMetadata)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("download")
+        let finalDestination = directory.appendingPathComponent("client override.zip")
+        let options = HTTPDownloadOptions(
+            filenameOverride: "client override.zip",
+            additionalHeaders: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
+                BrowserDownloadHeader(name: "X-Task-Token", value: "abc"),
+                BrowserDownloadHeader(name: "Range", value: "bytes=100-200")
+            ]
+        )
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            httpOptions: options
+        ))
+
+        let completed = try #require(recorder.snapshots.last(where: { $0.status == .completed }))
+
+        #expect(try Data(contentsOf: finalDestination) == payload)
+        #expect(completed.savePath == finalDestination.path)
+        #expect(completed.name == nil || completed.name == "client override.zip")
+        #expect(completed.httpResponseMetadata?.suggestedFilename == "client override.zip")
+        #expect(server.requests.contains { request in
+            request.hasPrefix("HEAD")
+                && request.contains("Authorization: Bearer secret")
+                && request.contains("X-Task-Token: abc")
+                && !request.contains("Range: bytes=100-200")
+        })
+        #expect(server.requests.contains { request in
+            request.hasPrefix("GET")
+                && request.contains("Authorization: Bearer secret")
+                && request.contains("X-Task-Token: abc")
+                && !request.contains("Range: bytes=100-200")
+        })
+    }
+
+    @Test("per-task segment override can force single stream")
+    func perTaskSegmentOverrideCanForceSingleStream() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 4, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            httpOptions: HTTPDownloadOptions(segmentCountOverride: 1)
+        ))
+
+        #expect(try Data(contentsOf: destination) == payload)
+        #expect(!FileManager.default.fileExists(atPath: destination.path + ".segments"))
+        #expect(recorder.snapshots.contains {
+            $0.connectionSummary == L10n.string(
+                "http_connection_summary",
+                L10n.string("http_connection_single_stream"),
+                L10n.string("http_connection_resumable")
+            )
+        })
+    }
+
     @Test("uses Content-Disposition filename and records HTTP metadata")
     func usesContentDispositionFilenameAndRecordsHTTPMetadata() async throws {
         let payload = Self.payload()
@@ -729,6 +908,41 @@ struct HTTPDownloadEngineTests {
         #expect(metadata.supportsResume == true)
         #expect(metadata.eTag == "\"test\"")
         #expect(metadata.lastModified == RangeTestServer.lastModified)
+    }
+
+    @Test("HTTP preview applies per-task options")
+    func httpPreviewAppliesPerTaskOptions() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload, behavior: .contentDispositionMetadata)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let service = HTTPMetadataPreviewService()
+        let preview = await service.preview(
+            source: server.url.absoluteString,
+            filenameOverride: "preview override.zip",
+            saveDirectory: directory,
+            httpOptions: HTTPDownloadOptions(additionalHeaders: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer preview-secret", sensitive: true),
+                BrowserDownloadHeader(name: "X-Preview", value: "1"),
+                BrowserDownloadHeader(name: "Range", value: "bytes=10-20")
+            ])
+        )
+
+        #expect(preview.metadataStatus == .available)
+        #expect(preview.displayName == "preview override.zip")
+        #expect(preview.savePath == directory.appendingPathComponent("preview override.zip").path)
+        #expect(preview.httpResponseMetadata?.suggestedFilename == "preview override.zip")
+        #expect(preview.httpResponseMetadata?.contentLength == Int64(payload.count))
+        #expect(server.requests.contains { request in
+            request.hasPrefix("HEAD")
+                && request.contains("Authorization: Bearer preview-secret")
+                && request.contains("X-Preview: 1")
+                && !request.contains("Range: bytes=10-20")
+        })
     }
 
     @Test("HTTP preview falls back to range probe for incomplete HEAD metadata")
@@ -864,6 +1078,40 @@ struct HTTPDownloadEngineTests {
         #expect(task?.browserContextJSON?.contains("Bearer secret") == false)
     }
 
+    @Test("coordinator persists speed limit settings")
+    func coordinatorPersistsSpeedLimitSettings() throws {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: DownloadTask.self,
+            AppSettingsRecord.self,
+            configurations: configuration
+        )
+        let modelContext = container.mainContext
+        let settings = AppSettings()
+        modelContext.insert(settings.makeRecord())
+        try modelContext.save()
+
+        let coordinator = DownloadCoordinator()
+        coordinator.attach(modelContext: modelContext, settings: settings)
+        coordinator.setSpeedLimit(
+            downloadBytesPerSecond: 5_000_000,
+            uploadBytesPerSecond: 512_000,
+            persistsToSettings: true
+        )
+
+        let descriptor = FetchDescriptor<AppSettingsRecord>(
+            predicate: #Predicate { $0.id == "default" }
+        )
+        let savedSettings = try #require(try modelContext.fetch(descriptor).first)
+
+        #expect(coordinator.downloadLimitBytes == 5_000_000)
+        #expect(coordinator.uploadLimitBytes == 512_000)
+        #expect(settings.globalDownloadLimitBytes == 5_000_000)
+        #expect(settings.globalUploadLimitBytes == 512_000)
+        #expect(savedSettings.globalDownloadLimitBytes == 5_000_000)
+        #expect(savedSettings.globalUploadLimitBytes == 512_000)
+    }
+
     @Test("parses Content-Disposition filenames safely")
     func parsesContentDispositionFilenamesSafely() {
         #expect(HTTPContentDisposition.suggestedFilename(
@@ -901,7 +1149,8 @@ struct HTTPDownloadEngineTests {
         supportsResume: Bool = false,
         eTag: String? = nil,
         lastModified: String? = nil,
-        browserContext: BrowserDownloadContext? = nil
+        browserContext: BrowserDownloadContext? = nil,
+        httpOptions: HTTPDownloadOptions? = nil
     ) -> DownloadRequest {
         DownloadRequest(
             id: UUID(),
@@ -915,6 +1164,7 @@ struct HTTPDownloadEngineTests {
             supportsResume: supportsResume,
             eTag: eTag,
             lastModified: lastModified,
+            httpOptions: httpOptions,
             selectedFileIndexes: [],
             browserContext: browserContext
         )

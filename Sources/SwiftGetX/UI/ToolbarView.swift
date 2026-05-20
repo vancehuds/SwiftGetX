@@ -165,16 +165,28 @@ private struct SpeedLimitMenu: View {
     var body: some View {
         Menu {
             Button(L10n.string("speed_unlimited")) {
-                coordinator.setSpeedLimit(downloadBytesPerSecond: 0, uploadBytesPerSecond: 0)
+                coordinator.setSpeedLimit(downloadBytesPerSecond: 0, uploadBytesPerSecond: 0, persistsToSettings: true)
             }
             Button("1 MB/s") {
-                coordinator.setSpeedLimit(downloadBytesPerSecond: 1_000_000, uploadBytesPerSecond: 256_000)
+                coordinator.setSpeedLimit(
+                    downloadBytesPerSecond: 1_000_000,
+                    uploadBytesPerSecond: 256_000,
+                    persistsToSettings: true
+                )
             }
             Button("5 MB/s") {
-                coordinator.setSpeedLimit(downloadBytesPerSecond: 5_000_000, uploadBytesPerSecond: 512_000)
+                coordinator.setSpeedLimit(
+                    downloadBytesPerSecond: 5_000_000,
+                    uploadBytesPerSecond: 512_000,
+                    persistsToSettings: true
+                )
             }
             Button("10 MB/s") {
-                coordinator.setSpeedLimit(downloadBytesPerSecond: 10_000_000, uploadBytesPerSecond: 1_000_000)
+                coordinator.setSpeedLimit(
+                    downloadBytesPerSecond: 10_000_000,
+                    uploadBytesPerSecond: 1_000_000,
+                    persistsToSettings: true
+                )
             }
         } label: {
             Label(L10n.string("speed_limit"), systemImage: "speedometer")

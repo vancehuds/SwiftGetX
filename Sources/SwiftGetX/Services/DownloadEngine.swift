@@ -32,6 +32,7 @@ struct DownloadRequest: Sendable {
     let eTag: String?
     let lastModified: String?
     let httpResponseMetadata: HTTPResponseMetadata?
+    let httpOptions: HTTPDownloadOptions?
     let selectedFileIndexes: [Int]
     let torrentFiles: [TorrentFile]
     let torrentResumeState: TorrentResumeState?
@@ -53,6 +54,7 @@ struct DownloadRequest: Sendable {
         eTag: String?,
         lastModified: String?,
         httpResponseMetadata: HTTPResponseMetadata? = nil,
+        httpOptions: HTTPDownloadOptions? = nil,
         selectedFileIndexes: [Int],
         torrentFiles: [TorrentFile] = [],
         torrentResumeState: TorrentResumeState? = nil,
@@ -73,6 +75,7 @@ struct DownloadRequest: Sendable {
         self.eTag = eTag
         self.lastModified = lastModified
         self.httpResponseMetadata = httpResponseMetadata
+        self.httpOptions = httpOptions
         self.selectedFileIndexes = selectedFileIndexes
         self.torrentFiles = torrentFiles
         self.torrentResumeState = torrentResumeState
@@ -81,7 +84,11 @@ struct DownloadRequest: Sendable {
         self.browserContext = browserContext
     }
 
-    init(task: DownloadTask, browserContext: BrowserDownloadContext? = nil) {
+    init(
+        task: DownloadTask,
+        browserContext: BrowserDownloadContext? = nil,
+        httpOptions: HTTPDownloadOptions? = nil
+    ) {
         id = task.id
         name = task.name
         source = task.source
@@ -95,6 +102,7 @@ struct DownloadRequest: Sendable {
         eTag = task.eTag
         lastModified = task.lastModified
         httpResponseMetadata = task.httpResponseMetadata
+        self.httpOptions = httpOptions ?? task.httpOptions
         selectedFileIndexes = task.selectedFileIndexes
         torrentFiles = task.torrentFiles
         torrentResumeState = task.torrentResumeState

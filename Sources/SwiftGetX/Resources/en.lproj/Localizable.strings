@@ -141,6 +141,13 @@
 "http_connection_segments" = "%d segments";
 "http_connection_single_stream" = "Single stream";
 "http_connection_summary" = "HTTP · %@ · %@";
+"http_options_filename" = "Filename";
+"http_options_filename_placeholder" = "Filename override";
+"http_options_headers_placeholder" = "Header-Name: value";
+"http_options_retries" = "Retries: %d";
+"http_options_segments" = "Segments: %d";
+"http_options_speed_limit" = "Task speed";
+"http_options_title" = "HTTP Options";
 "http_preview_duplicate_available" = "Available";
 "http_preview_duplicate_renamed" = "Auto-rename to %@";
 "http_preview_duplicate_strategy" = "Duplicate";

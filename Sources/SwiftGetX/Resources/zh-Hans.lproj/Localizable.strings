@@ -141,6 +141,13 @@
 "http_connection_segments" = "%d 分片";
 "http_connection_single_stream" = "单流";
 "http_connection_summary" = "HTTP · %@ · %@";
+"http_options_filename" = "文件名";
+"http_options_filename_placeholder" = "覆盖文件名";
+"http_options_headers_placeholder" = "Header-Name: value";
+"http_options_retries" = "重试：%d";
+"http_options_segments" = "分片：%d";
+"http_options_speed_limit" = "任务限速";
+"http_options_title" = "HTTP 选项";
 "http_preview_duplicate_available" = "可直接保存";
 "http_preview_duplicate_renamed" = "自动重命名为 %@";
 "http_preview_duplicate_strategy" = "重复文件";

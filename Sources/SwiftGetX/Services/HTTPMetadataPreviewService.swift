@@ -16,8 +16,10 @@ actor HTTPMetadataPreviewService {
     func preview(
         source: String,
         suggestedFilename: String? = nil,
+        filenameOverride: String? = nil,
         saveDirectory: URL,
-        browserContext: BrowserDownloadContext? = nil
+        browserContext: BrowserDownloadContext? = nil,
+        httpOptions: HTTPDownloadOptions? = nil
     ) async -> TorrentMetadataPreview {
         guard let url = URL(string: source),
               url.scheme?.localizedCaseInsensitiveCompare("http") == .orderedSame
@@ -26,13 +28,20 @@ actor HTTPMetadataPreviewService {
             return fallbackPreview(
                 source: source,
                 suggestedFilename: suggestedFilename,
+                filenameOverride: filenameOverride,
                 saveDirectory: saveDirectory,
                 browserContext: browserContext,
+                httpOptions: httpOptions,
                 error: L10n.string("error_invalid_url")
             )
         }
 
-        let request = previewRequest(source: source, url: url, browserContext: browserContext)
+        let request = previewRequest(
+            source: source,
+            url: url,
+            browserContext: browserContext,
+            httpOptions: httpOptions
+        )
         let metadata = await HTTPMetadataProbe(
             segmentCount: 1,
             probesRangeForIncompleteMetadata: true,
@@ -42,8 +51,10 @@ actor HTTPMetadataPreviewService {
             return fallbackPreview(
                 source: source,
                 suggestedFilename: suggestedFilename,
+                filenameOverride: filenameOverride,
                 saveDirectory: saveDirectory,
                 browserContext: browserContext,
+                httpOptions: httpOptions,
                 error: nil
             )
         }
@@ -60,18 +71,20 @@ actor HTTPMetadataPreviewService {
             source: source,
             finalURL: serverMetadata.finalURL,
             metadata: serverMetadata,
-            suggestedFilename: suggestedFilename
+            suggestedFilename: suggestedFilename,
+            filenameOverride: filenameOverride
         )
+        let overrideFilename = sanitizedSuggestedFilename(filenameOverride)
         let savePlan = savePlan(displayName: displayName, saveDirectory: saveDirectory)
         let responseMetadata = serverMetadata.merged(over: HTTPResponseMetadata.fromCreationContext(
             source: source,
             browserContext: browserContext,
-            suggestedFilename: displayName,
+            suggestedFilename: overrideFilename ?? displayName,
             totalBytes: metadata.contentLength,
             supportsResume: metadata.supportsResume,
             eTag: metadata.eTag,
             lastModified: metadata.lastModified
-        ))
+        )).replacingSuggestedFilename(overrideFilename ?? serverMetadata.suggestedFilename ?? displayName)
 
         return TorrentMetadataPreview(
             source: source,
@@ -93,7 +106,8 @@ actor HTTPMetadataPreviewService {
     private func previewRequest(
         source: String,
         url: URL,
-        browserContext: BrowserDownloadContext?
+        browserContext: BrowserDownloadContext?,
+        httpOptions: HTTPDownloadOptions?
     ) -> DownloadRequest {
         DownloadRequest(
             id: UUID(),
@@ -106,6 +120,7 @@ actor HTTPMetadataPreviewService {
             supportsResume: false,
             eTag: nil,
             lastModified: nil,
+            httpOptions: httpOptions,
             selectedFileIndexes: [],
             browserContext: browserContext
         )
@@ -114,11 +129,14 @@ actor HTTPMetadataPreviewService {
     private func fallbackPreview(
         source: String,
         suggestedFilename: String?,
+        filenameOverride: String?,
         saveDirectory: URL,
         browserContext: BrowserDownloadContext?,
+        httpOptions: HTTPDownloadOptions?,
         error: String?
     ) -> TorrentMetadataPreview {
-        let displayName = sanitizedSuggestedFilename(suggestedFilename)
+        let displayName = sanitizedSuggestedFilename(filenameOverride)
+            ?? sanitizedSuggestedFilename(suggestedFilename)
             ?? SourceParser.displayName(for: source, kind: .http)
         let savePlan = savePlan(displayName: displayName, saveDirectory: saveDirectory)
         return TorrentMetadataPreview(
@@ -157,9 +175,11 @@ actor HTTPMetadataPreviewService {
         source: String,
         finalURL: String?,
         metadata: HTTPResponseMetadata,
-        suggestedFilename: String?
+        suggestedFilename: String?,
+        filenameOverride: String?
     ) -> String {
-        metadata.suggestedFilename
+        sanitizedSuggestedFilename(filenameOverride)
+            ?? metadata.suggestedFilename
             ?? sanitizedSuggestedFilename(suggestedFilename)
             ?? finalURL.map { SourceParser.displayName(for: $0, kind: .http) }
             ?? SourceParser.displayName(for: source, kind: .http)
