@@ -21,6 +21,24 @@ struct GlassSurface<Content: View>: View {
             .overlay {
                 shape.strokeBorder(borderColor, lineWidth: borderWidth)
             }
+            .overlay(alignment: .top) {
+                if level != .background {
+                    shape
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(colorScheme == .dark ? 0.22 : 0.58),
+                                    Color.white.opacity(0)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                        .blendMode(.plusLighter)
+                        .allowsHitTesting(false)
+                }
+            }
             .shadow(color: shadowColor, radius: shadowRadius, x: 0, y: shadowY)
     }
 
@@ -45,11 +63,11 @@ struct GlassSurface<Content: View>: View {
     private var material: Material {
         switch level {
         case .background:
-            .thinMaterial
+            .ultraThinMaterial
         case .panel:
-            .thinMaterial
+            .ultraThinMaterial
         case .floating:
-            .regularMaterial
+            .thinMaterial
         }
     }
 
@@ -61,19 +79,19 @@ struct GlassSurface<Content: View>: View {
 
     private var surfaceTint: Color {
         switch (level, colorScheme) {
-        case (.background, .dark): Color.white.opacity(0.02)
-        case (.background, _): Color.white.opacity(0.10)
-        case (.panel, .dark): Color.white.opacity(0.035)
-        case (.panel, _): Color.white.opacity(0.18)
-        case (.floating, .dark): Color.white.opacity(0.07)
-        case (.floating, _): Color.white.opacity(0.30)
+        case (.background, .dark): Color.white.opacity(0.012)
+        case (.background, _): Color.white.opacity(0.05)
+        case (.panel, .dark): Color.white.opacity(0.018)
+        case (.panel, _): Color.white.opacity(0.08)
+        case (.floating, .dark): Color.white.opacity(0.035)
+        case (.floating, _): Color.white.opacity(0.14)
         }
     }
 
     private var borderColor: Color {
         colorScheme == .dark
-            ? Color.white.opacity(0.12)
-            : Color.black.opacity(0.08)
+            ? Color.white.opacity(level == .floating ? 0.18 : 0.13)
+            : Color.black.opacity(level == .floating ? 0.09 : 0.07)
     }
 
     private var borderWidth: CGFloat {
@@ -135,8 +153,8 @@ struct ContentSurfaceBackground: View {
         }
 
         return colorScheme == .dark
-            ? Color(nsColor: .controlBackgroundColor).opacity(0.72)
-            : Color(nsColor: .controlBackgroundColor).opacity(0.82)
+            ? Color(nsColor: .controlBackgroundColor).opacity(0.58)
+            : Color(nsColor: .controlBackgroundColor).opacity(0.64)
     }
 
     private var selectionFill: Color {

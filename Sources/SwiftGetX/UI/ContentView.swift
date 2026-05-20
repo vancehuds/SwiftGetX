@@ -15,12 +15,12 @@ struct ContentView: View {
         ZStack {
             AppBackground()
 
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 ToolbarView(
                     showingNewTask: $showingNewTask
                 )
 
-                HStack(spacing: 12) {
+                HStack(spacing: 14) {
                     SidebarView(tasks: allTasks)
                         .frame(width: 210)
 
@@ -32,16 +32,16 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 14)
+            .padding(.horizontal, 22)
+            .padding(.top, 14)
+            .padding(.bottom, 18)
 
             VStack {
                 ClipboardSuggestionBar()
-                    .padding(.top, 58)
+                    .padding(.top, 64)
                 Spacer()
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 22)
             .allowsHitTesting(clipboardMonitor.suggestedSource != nil)
         }
         .frame(minWidth: 1080, minHeight: 680)
@@ -118,11 +118,22 @@ private struct AppBackground: View {
 
             LinearGradient(
                 colors: [
-                    Color.accentColor.opacity(colorScheme == .dark ? 0.10 : 0.08),
+                    Color.accentColor.opacity(colorScheme == .dark ? 0.16 : 0.12),
                     Color.clear
                 ],
                 startPoint: .topLeading,
                 endPoint: .center
+            )
+            .blendMode(colorScheme == .dark ? .screen : .normal)
+
+            LinearGradient(
+                colors: [
+                    Color(nsColor: .systemTeal).opacity(colorScheme == .dark ? 0.08 : 0.07),
+                    Color.clear,
+                    Color(nsColor: .systemOrange).opacity(colorScheme == .dark ? 0.05 : 0.04)
+                ],
+                startPoint: .bottomLeading,
+                endPoint: .topTrailing
             )
             .blendMode(colorScheme == .dark ? .screen : .normal)
         }
