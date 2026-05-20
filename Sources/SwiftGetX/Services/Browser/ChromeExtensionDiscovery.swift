@@ -68,6 +68,42 @@ struct ChromeExtensionDiscovery {
         homeDirectory.appendingPathComponent("Library/Application Support/Google/Chrome")
     }
 
+    static func defaultChromeCanaryUserDataDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/Google/Chrome Canary")
+    }
+
+    static func defaultChromiumUserDataDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/Chromium")
+    }
+
+    static func defaultMicrosoftEdgeUserDataDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/Microsoft Edge")
+    }
+
+    static func defaultBraveUserDataDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/BraveSoftware/Brave-Browser")
+    }
+
+    static func defaultVivaldiUserDataDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/Vivaldi")
+    }
+
+    static func defaultArcUserDataDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent("Library/Application Support/Arc/User Data")
+    }
+
     static func defaultAtlasUserDataDirectory(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
     ) -> URL {
@@ -87,6 +123,30 @@ struct ChromeExtensionDiscovery {
             ChromiumBrowserConfiguration(
                 name: "Chrome",
                 userDataDirectory: defaultChromeUserDataDirectory(homeDirectory: homeDirectory)
+            ),
+            ChromiumBrowserConfiguration(
+                name: "Chrome Canary",
+                userDataDirectory: defaultChromeCanaryUserDataDirectory(homeDirectory: homeDirectory)
+            ),
+            ChromiumBrowserConfiguration(
+                name: "Microsoft Edge",
+                userDataDirectory: defaultMicrosoftEdgeUserDataDirectory(homeDirectory: homeDirectory)
+            ),
+            ChromiumBrowserConfiguration(
+                name: "Brave",
+                userDataDirectory: defaultBraveUserDataDirectory(homeDirectory: homeDirectory)
+            ),
+            ChromiumBrowserConfiguration(
+                name: "Vivaldi",
+                userDataDirectory: defaultVivaldiUserDataDirectory(homeDirectory: homeDirectory)
+            ),
+            ChromiumBrowserConfiguration(
+                name: "Arc",
+                userDataDirectory: defaultArcUserDataDirectory(homeDirectory: homeDirectory)
+            ),
+            ChromiumBrowserConfiguration(
+                name: "Chromium",
+                userDataDirectory: defaultChromiumUserDataDirectory(homeDirectory: homeDirectory)
             ),
             ChromiumBrowserConfiguration(
                 name: "Atlas",

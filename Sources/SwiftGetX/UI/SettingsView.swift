@@ -372,17 +372,7 @@ private struct BrowserIntegrationRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: layout.value(8)) {
-            HStack(spacing: layout.value(8)) {
-                statusDot
-                VStack(alignment: .leading, spacing: layout.value(2)) {
-                    Text("Chrome Native Host")
-                    Text(diagnostics.statusMessage)
-                        .font(layout.font(12))
-                        .foregroundStyle(statusColor)
-                }
-                Spacer()
-                actionButtons
-            }
+            summaryRow
 
             if !diagnostics.detailMessage.isEmpty {
                 Text(diagnostics.detailMessage)
@@ -390,6 +380,40 @@ private struct BrowserIntegrationRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
+
+            Text(
+                L10n.string(
+                    "browser_diagnostics_supported_summary",
+                    diagnostics.detectedBrowserCount,
+                    diagnostics.supportedBrowserCount,
+                    diagnostics.configuredBrowserCount
+                )
+            )
+            .font(layout.font(11))
+            .foregroundStyle(.secondary)
+
+            if !diagnostics.browserDiagnostics.isEmpty {
+                Divider()
+                    .padding(.vertical, layout.value(2))
+
+                ForEach(diagnostics.browserDiagnostics) { browserDiagnostic in
+                    BrowserDiagnosticRow(diagnostic: browserDiagnostic, layout: layout)
+                }
+            }
+        }
+    }
+
+    private var summaryRow: some View {
+        HStack(spacing: layout.value(8)) {
+            statusDot
+            VStack(alignment: .leading, spacing: layout.value(2)) {
+                Text(L10n.string("browser_native_host"))
+                Text(diagnostics.statusMessage)
+                    .font(layout.font(12))
+                    .foregroundStyle(statusColor)
+            }
+            Spacer()
+            actionButtons
         }
     }
 
@@ -429,7 +453,85 @@ private struct BrowserIntegrationRow: View {
     }
 
     private var statusColor: Color {
-        switch diagnostics.status {
+        diagnostics.status.statusColor
+    }
+}
+
+private struct BrowserDiagnosticRow: View {
+    let diagnostic: ChromeNativeHostBrowserDiagnostic
+    let layout: ResponsiveLayout
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(5)) {
+            HStack(alignment: .firstTextBaseline, spacing: layout.value(7)) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: layout.value(6), height: layout.value(6))
+                    .offset(y: layout.value(-1))
+
+                VStack(alignment: .leading, spacing: layout.value(2)) {
+                    Text(diagnostic.browserName)
+                        .font(layout.font(12, weight: .semibold))
+                    Text(diagnostic.statusMessage)
+                        .font(layout.font(11))
+                        .foregroundStyle(statusColor)
+                }
+                Spacer()
+            }
+
+            if !diagnostic.detailMessage.isEmpty {
+                diagnosticText(diagnostic.detailMessage)
+            }
+
+            diagnosticText(
+                L10n.string(
+                    "browser_diagnostics_extension_ids",
+                    extensionIDSummary(diagnostic.discoveredExtensionIDs)
+                )
+            )
+            diagnosticText(L10n.string("browser_diagnostics_manifest_path", diagnostic.manifestURL.path))
+
+            if let nativeHostPath = diagnostic.nativeHostPath {
+                diagnosticText(L10n.string("browser_diagnostics_native_host_path", nativeHostPath))
+            }
+
+            if let allowedOriginCount = diagnostic.allowedOriginCount {
+                diagnosticText(L10n.string("browser_diagnostics_allowed_origins", allowedOriginCount))
+            }
+        }
+        .padding(.vertical, layout.value(3))
+    }
+
+    private func diagnosticText(_ value: String) -> some View {
+        Text(value)
+            .font(layout.font(10.5))
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+    }
+
+    private func extensionIDSummary(_ extensionIDs: [String]) -> String {
+        extensionIDs.isEmpty
+            ? L10n.string("browser_diagnostics_no_extension_ids")
+            : extensionIDs.joined(separator: ", ")
+    }
+
+    private var statusColor: Color {
+        switch diagnostic.status {
+        case .ok:
+            .green
+        case .warning:
+            diagnostic.isConfigured ? .orange : .secondary
+        case .error:
+            .red
+        }
+    }
+}
+
+extension NativeHostDiagnostics.DiagnosticStatus {
+    var statusColor: Color {
+        switch self {
         case .unchecked, .checking:
             .secondary
         case .ok:

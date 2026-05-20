@@ -67,17 +67,37 @@ Next step:
 
 ## Task 3: Browser Diagnostics and Multi-Browser State
 
-Status: [ ]
+Status: [x]
 
 Replace static browser readiness UI with live diagnostics for native host, extension IDs, manifest paths, supported Chromium variants, and app/native-host compatibility. Extend registrar/discovery for Edge, Brave, Vivaldi, Arc, Chromium, and Chrome Canary where local path conventions are known.
 
 Work performed:
 
+- Extended Chromium discovery defaults to include Chrome Canary, Microsoft Edge, Brave, Vivaldi, Arc, Chromium, and Atlas alongside Chrome, with known macOS user-data and NativeMessagingHosts path conventions.
+- Added `ChromeNativeHostBrowserDiagnostic` and registrar-level per-browser diagnostics for browser profile presence, discovered extension IDs, paired extension IDs, manifest paths, Native Host executable paths, allowed origin counts, repairability, and supported browser-name checks.
+- Updated native host registration diagnostics to preserve per-browser manifest targets and support multiple Chromium-family manifest directories in one register/repair pass.
+- Updated `NativeHostDiagnostics` to carry browser diagnostic snapshots, configured/detected/supported counts, sidebar summaries, and smarter manifest reveal target selection.
+- Replaced the settings page’s hardcoded “Chrome Native Host” row with live browser diagnostics listing each supported browser, extension IDs, manifest path, native host path, allowed origin count, and status.
+- Replaced the sidebar’s static browser-readiness copy with a live Native Host diagnostic status panel.
+- Updated browser setup handling so supported Chromium-family setup requests are accepted instead of being gated to exactly “Chrome”, and localized the pairing/rejection messages generically.
+- Added English and Simplified Chinese localization for browser diagnostics and generic browser pairing.
+- Added focused tests for default Chromium variant paths, per-browser diagnostics, supported browser checks, and writing manifests to multiple browser-specific NativeMessagingHosts directories.
+
 Verification evidence:
+
+- `swift test --filter ChromeExtensionDiscovery --filter ChromeNativeHostRegistrar` passed with 21 tests across 2 suites.
+- `swift test` passed with 88 tests across 12 suites.
+- `git diff --check` passed.
+- Static search confirmed the old static sidebar readiness key is no longer used by app UI code, and the new browser diagnostics keys are present in both localizations.
 
 Remaining risk:
 
+- Safari remains a resource/template path and Firefox requires a separate Native Messaging registrar with different manifest fields and install locations; both are explicitly later-plan work rather than this Chromium-family diagnostics task.
+- Browser display rows are SwiftUI/static-inspected and covered by app compilation, but not screenshot-tested in this session.
+
 Next step:
+
+- Large Check 1: Browser Takeover Foundation.
 
 ## Large Check 1: Browser Takeover Foundation
 

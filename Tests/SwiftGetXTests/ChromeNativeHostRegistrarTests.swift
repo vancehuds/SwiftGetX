@@ -210,6 +210,185 @@ struct ChromeNativeHostRegistrarTests {
         #expect(fixture.registrar.readManifest() == nil)
     }
 
+    @Test("reports browser diagnostics for each configured browser")
+    func reportsBrowserDiagnosticsForEachConfiguredBrowser() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let chromeProfile = root.appendingPathComponent("Chrome")
+        let edgeProfile = root.appendingPathComponent("Edge")
+        let braveProfile = root.appendingPathComponent("Brave")
+        let chromeManifestDirectory = root.appendingPathComponent("Chrome/NativeMessagingHosts")
+        let edgeManifestDirectory = root.appendingPathComponent("Edge/NativeMessagingHosts")
+        let braveManifestDirectory = root.appendingPathComponent("Brave/NativeMessagingHosts")
+        let nativeHost = root.appendingPathComponent("SwiftGetXNativeHost")
+
+        try writePreferences(
+            to: chromeProfile.appendingPathComponent("Default/Secure Preferences"),
+            extensions: [
+                "bcdefghijklmnopabcdefghijklmnopa": manifest(name: "SwiftGetX", permissions: ["nativeMessaging"])
+            ]
+        )
+        try writePreferences(
+            to: edgeProfile.appendingPathComponent("Default/Secure Preferences"),
+            extensions: [
+                "cdefghijklmnopabcdefghijklmnopab": manifest(name: "SwiftGetX", permissions: ["nativeMessaging"])
+            ]
+        )
+        try Data("#!/bin/sh\n".utf8).write(to: nativeHost)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o755))],
+            ofItemAtPath: nativeHost.path
+        )
+
+        let discovery = ChromeExtensionDiscovery(
+            browserConfigurations: [
+                ChromiumBrowserConfiguration(
+                    name: "Chrome",
+                    userDataDirectory: chromeProfile,
+                    nativeMessagingHostDirectory: chromeManifestDirectory
+                ),
+                ChromiumBrowserConfiguration(
+                    name: "Microsoft Edge",
+                    userDataDirectory: edgeProfile,
+                    nativeMessagingHostDirectory: edgeManifestDirectory
+                ),
+                ChromiumBrowserConfiguration(
+                    name: "Brave",
+                    userDataDirectory: braveProfile,
+                    nativeMessagingHostDirectory: braveManifestDirectory
+                )
+            ]
+        )
+        let registrar = ChromeNativeHostRegistrar(
+            manifestDirectory: ChromeNativeHostRegistrar.defaultManifestDirectory(),
+            extensionDiscovery: discovery,
+            pairingStore: ChromeNativeHostPairingStore(
+                pairedExtensionIDs: [
+                    "bcdefghijklmnopabcdefghijklmnopa",
+                    "cdefghijklmnopabcdefghijklmnopab"
+                ]
+            ),
+            nativeHostSearchPaths: [nativeHost]
+        )
+
+        let result = registrar.register()
+        let diagnostics = registrar.browserDiagnostics()
+        let byBrowser = Dictionary(uniqueKeysWithValues: diagnostics.map { ($0.browserName, $0) })
+        let chrome = try #require(byBrowser["Chrome"])
+        let edge = try #require(byBrowser["Microsoft Edge"])
+        let brave = try #require(byBrowser["Brave"])
+
+        #expect(result.status == .ok)
+        #expect(diagnostics.count == 3)
+        #expect(chrome.status == .ok)
+        #expect(chrome.isConfigured)
+        #expect(chrome.discoveredExtensionIDs == ["bcdefghijklmnopabcdefghijklmnopa"])
+        #expect(chrome.pairedExtensionIDs == ["bcdefghijklmnopabcdefghijklmnopa"])
+        #expect(chrome.manifestURL.path == chromeManifestDirectory
+            .appendingPathComponent("com.swiftgetx.native.json")
+            .path)
+        #expect(chrome.nativeHostPath == nativeHost.path)
+        #expect(chrome.allowedOriginCount == 1)
+        #expect(chrome.hasBrowserProfile)
+
+        #expect(edge.status == .ok)
+        #expect(edge.isConfigured)
+        #expect(edge.discoveredExtensionIDs == ["cdefghijklmnopabcdefghijklmnopab"])
+        #expect(edge.pairedExtensionIDs == ["cdefghijklmnopabcdefghijklmnopab"])
+        #expect(edge.manifestURL.path == edgeManifestDirectory
+            .appendingPathComponent("com.swiftgetx.native.json")
+            .path)
+        #expect(edge.nativeHostPath == nativeHost.path)
+        #expect(edge.allowedOriginCount == 1)
+
+        #expect(brave.status == .warning)
+        #expect(!brave.isConfigured)
+        #expect(!brave.hasBrowserProfile)
+        #expect(brave.discoveredExtensionIDs.isEmpty)
+        #expect(brave.pairedExtensionIDs.isEmpty)
+        #expect(brave.manifestURL.path == braveManifestDirectory
+            .appendingPathComponent("com.swiftgetx.native.json")
+            .path)
+        #expect(registrar.isSupportedBrowserName("Microsoft Edge"))
+        #expect(registrar.isSupportedBrowserName("brave"))
+        #expect(!registrar.isSupportedBrowserName("Firefox"))
+    }
+
+    @Test("writes manifests for multiple Chromium browser configurations")
+    func writesManifestsForMultipleChromiumBrowserConfigurations() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let chromeProfile = root.appendingPathComponent("Chrome")
+        let vivaldiProfile = root.appendingPathComponent("Vivaldi")
+        let chromeManifestDirectory = root.appendingPathComponent("Chrome/NativeMessagingHosts")
+        let vivaldiManifestDirectory = root.appendingPathComponent("Vivaldi/NativeMessagingHosts")
+        let nativeHost = root.appendingPathComponent("SwiftGetXNativeHost")
+
+        try writePreferences(
+            to: chromeProfile.appendingPathComponent("Default/Secure Preferences"),
+            extensions: [
+                "bcdefghijklmnopabcdefghijklmnopa": manifest(name: "SwiftGetX", permissions: ["nativeMessaging"])
+            ]
+        )
+        try writePreferences(
+            to: vivaldiProfile.appendingPathComponent("Default/Preferences"),
+            extensions: [
+                "cdefghijklmnopabcdefghijklmnopab": manifest(name: "SwiftGetX", permissions: ["nativeMessaging"])
+            ]
+        )
+        try Data("#!/bin/sh\n".utf8).write(to: nativeHost)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o755))],
+            ofItemAtPath: nativeHost.path
+        )
+
+        let discovery = ChromeExtensionDiscovery(
+            browserConfigurations: [
+                ChromiumBrowserConfiguration(
+                    name: "Chrome",
+                    userDataDirectory: chromeProfile,
+                    nativeMessagingHostDirectory: chromeManifestDirectory
+                ),
+                ChromiumBrowserConfiguration(
+                    name: "Vivaldi",
+                    userDataDirectory: vivaldiProfile,
+                    nativeMessagingHostDirectory: vivaldiManifestDirectory
+                )
+            ]
+        )
+        let registrar = ChromeNativeHostRegistrar(
+            manifestDirectory: ChromeNativeHostRegistrar.defaultManifestDirectory(),
+            extensionDiscovery: discovery,
+            pairingStore: ChromeNativeHostPairingStore(
+                pairedExtensionIDs: [
+                    "bcdefghijklmnopabcdefghijklmnopa",
+                    "cdefghijklmnopabcdefghijklmnopab"
+                ]
+            ),
+            nativeHostSearchPaths: [nativeHost]
+        )
+
+        let result = registrar.register()
+        let chromeManifest = try readManifest(
+            at: chromeManifestDirectory.appendingPathComponent("com.swiftgetx.native.json")
+        )
+        let vivaldiManifest = try readManifest(
+            at: vivaldiManifestDirectory.appendingPathComponent("com.swiftgetx.native.json")
+        )
+
+        #expect(result.status == .ok)
+        #expect(chromeManifest.path == nativeHost.path)
+        #expect(chromeManifest.allowed_origins == [
+            "chrome-extension://bcdefghijklmnopabcdefghijklmnopa/"
+        ])
+        #expect(vivaldiManifest.path == nativeHost.path)
+        #expect(vivaldiManifest.allowed_origins == [
+            "chrome-extension://cdefghijklmnopabcdefghijklmnopab/"
+        ])
+    }
+
     @Test("pairs Atlas extension and writes Atlas native host manifest")
     func pairsAtlasExtensionAndWritesAtlasNativeHostManifest() throws {
         let root = try makeTemporaryDirectory()
@@ -351,6 +530,11 @@ struct ChromeNativeHostRegistrarTests {
             "name": name,
             "permissions": permissions
         ]
+    }
+
+    private func readManifest(at url: URL) throws -> ChromeNativeHostRegistrar.ManifestContent {
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(ChromeNativeHostRegistrar.ManifestContent.self, from: data)
     }
 }
 

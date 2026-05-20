@@ -1,5 +1,29 @@
 import Foundation
 
+struct ChromeNativeHostBrowserDiagnostic: Equatable, Identifiable {
+    var browserName: String
+    var userDataDirectory: URL
+    var manifestDirectory: URL
+    var manifestURL: URL
+    var discoveredExtensionIDs: [String]
+    var pairedExtensionIDs: [String]
+    var nativeHostPath: String?
+    var allowedOriginCount: Int?
+    var status: ChromeNativeHostRegistrationStatus
+    var statusMessage: String
+    var detailMessage: String
+    var isRepairable: Bool
+    var hasBrowserProfile: Bool
+
+    var id: String {
+        manifestURL.path
+    }
+
+    var isConfigured: Bool {
+        status == .ok && !pairedExtensionIDs.isEmpty
+    }
+}
+
 struct ChromeNativeHostRegistrar {
     static let defaultHostName = "com.swiftgetx.native"
 
@@ -63,7 +87,7 @@ struct ChromeNativeHostRegistrar {
         guard !pairedExtensionIDs.isEmpty else {
             return ChromeNativeHostRegistrationResult(
                 status: .warning,
-                statusMessage: L10n.string("native_host_chrome_extension_unpaired"),
+                statusMessage: L10n.string("native_host_extension_unpaired"),
                 detailMessage: L10n.string("native_host_pair_from_extension_detail"),
                 isRepairable: false
             )
@@ -89,6 +113,112 @@ struct ChromeNativeHostRegistrar {
             status: .ok,
             statusMessage: L10n.string("native_host_all_good"),
             detailMessage: L10n.string("native_host_installed_profile_count", okCount),
+            isRepairable: false
+        )
+    }
+
+    func browserDiagnostics() -> [ChromeNativeHostBrowserDiagnostic] {
+        let pairedExtensionIDs = pairingStore.pairedExtensionIDs()
+        let installations = extensionDiscovery.discoverExtensionInstallations()
+
+        guard usesDefaultManifestDirectory else {
+            let browserConfiguration = customManifestBrowserConfiguration()
+            return [
+                browserDiagnostic(
+                    browserConfiguration: browserConfiguration,
+                    discoveredExtensionIDs: extensionDiscovery.discoverExtensionIDs(),
+                    pairedExtensionIDs: pairedExtensionIDs
+                )
+            ]
+        }
+
+        return extensionDiscovery.browserConfigurations.map { browserConfiguration in
+            let discoveredExtensionIDs = Array(Set(
+                installations
+                    .filter { $0.browserConfiguration == browserConfiguration }
+                    .map(\.extensionID)
+            )).sorted()
+            let pairedInBrowser = discoveredExtensionIDs.filter { pairedExtensionIDs.contains($0) }
+            return browserDiagnostic(
+                browserConfiguration: browserConfiguration,
+                discoveredExtensionIDs: discoveredExtensionIDs,
+                pairedExtensionIDs: pairedInBrowser
+            )
+        }
+    }
+
+    func isSupportedBrowserName(_ browserName: String) -> Bool {
+        extensionDiscovery.browserConfigurations.contains { configuration in
+            configuration.name.caseInsensitiveCompare(browserName) == .orderedSame
+        }
+    }
+
+    private func browserDiagnostic(
+        browserConfiguration: ChromiumBrowserConfiguration,
+        discoveredExtensionIDs: [String],
+        pairedExtensionIDs: [String]
+    ) -> ChromeNativeHostBrowserDiagnostic {
+        let target = NativeHostManifestTarget(
+            browserConfiguration: browserConfiguration,
+            extensionIDs: pairedExtensionIDs
+        )
+        let result = pairedExtensionIDs.isEmpty
+            ? unpairedBrowserDiagnosticResult(
+                browserConfiguration: browserConfiguration,
+                discoveredExtensionIDs: discoveredExtensionIDs
+            )
+            : diagnose(target: target)
+
+        let manifestURL = target.manifestURL(hostName: hostName)
+        let manifest = readManifest(at: manifestURL)
+        return ChromeNativeHostBrowserDiagnostic(
+            browserName: browserConfiguration.name,
+            userDataDirectory: browserConfiguration.userDataDirectory,
+            manifestDirectory: target.manifestDirectory,
+            manifestURL: manifestURL,
+            discoveredExtensionIDs: discoveredExtensionIDs,
+            pairedExtensionIDs: pairedExtensionIDs,
+            nativeHostPath: manifest?.path,
+            allowedOriginCount: manifest.map { manifest in
+                ChromeNativeMessagingOrigin.sanitizedOrigins(from: manifest.allowed_origins ?? []).count
+            },
+            status: result.status,
+            statusMessage: result.statusMessage,
+            detailMessage: result.detailMessage,
+            isRepairable: result.isRepairable,
+            hasBrowserProfile: fileManager.fileExists(atPath: browserConfiguration.userDataDirectory.path)
+        )
+    }
+
+    private func unpairedBrowserDiagnosticResult(
+        browserConfiguration: ChromiumBrowserConfiguration,
+        discoveredExtensionIDs: [String]
+    ) -> ChromeNativeHostRegistrationResult {
+        guard fileManager.fileExists(atPath: browserConfiguration.userDataDirectory.path) else {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: L10n.string("browser_diagnostics_browser_not_found"),
+                detailMessage: L10n.string(
+                    "browser_diagnostics_profile_path",
+                    browserConfiguration.userDataDirectory.path
+                ),
+                isRepairable: false
+            )
+        }
+
+        guard !discoveredExtensionIDs.isEmpty else {
+            return ChromeNativeHostRegistrationResult(
+                status: .warning,
+                statusMessage: L10n.string("browser_diagnostics_extension_missing"),
+                detailMessage: L10n.string("browser_diagnostics_extension_missing_detail"),
+                isRepairable: false
+            )
+        }
+
+        return ChromeNativeHostRegistrationResult(
+            status: .warning,
+            statusMessage: L10n.string("native_host_extension_unpaired"),
+            detailMessage: L10n.string("native_host_pair_from_extension_detail"),
             isRepairable: false
         )
     }
@@ -394,15 +524,20 @@ struct ChromeNativeHostRegistrar {
             .first(where: fileManager.isExecutableFile)
     }
 
+    private func customManifestBrowserConfiguration() -> ChromiumBrowserConfiguration {
+        let configuredBrowser = extensionDiscovery.browserConfigurations.first
+        return ChromiumBrowserConfiguration(
+            name: configuredBrowser?.name ?? "Chrome",
+            userDataDirectory: configuredBrowser?.userDataDirectory ?? manifestDirectory.deletingLastPathComponent(),
+            nativeMessagingHostDirectory: manifestDirectory
+        )
+    }
+
     private func registrationManifestTargets(for pairedExtensionIDs: [String]) -> [NativeHostManifestTarget] {
         guard usesDefaultManifestDirectory else {
             return [
                 NativeHostManifestTarget(
-                    browserConfiguration: ChromiumBrowserConfiguration(
-                        name: "Chrome",
-                        userDataDirectory: manifestDirectory.deletingLastPathComponent(),
-                        nativeMessagingHostDirectory: manifestDirectory
-                    ),
+                    browserConfiguration: customManifestBrowserConfiguration(),
                     extensionIDs: pairedExtensionIDs
                 )
             ]

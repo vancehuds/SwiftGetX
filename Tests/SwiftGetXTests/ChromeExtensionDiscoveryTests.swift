@@ -4,6 +4,58 @@ import Testing
 
 @Suite("ChromeExtensionDiscovery")
 struct ChromeExtensionDiscoveryTests {
+    @Test("default browser configurations include supported Chromium variants")
+    func defaultBrowserConfigurationsIncludeSupportedChromiumVariants() throws {
+        let homeDirectory = URL(fileURLWithPath: "/Users/swiftgetx-test")
+
+        let configurations = ChromeExtensionDiscovery.defaultBrowserConfigurations(
+            homeDirectory: homeDirectory
+        )
+        let names = configurations.map(\.name)
+
+        #expect(names == [
+            "Chrome",
+            "Chrome Canary",
+            "Microsoft Edge",
+            "Brave",
+            "Vivaldi",
+            "Arc",
+            "Chromium",
+            "Atlas"
+        ])
+
+        let byName = Dictionary(uniqueKeysWithValues: configurations.map { ($0.name, $0) })
+        let edge = try #require(byName["Microsoft Edge"])
+        let brave = try #require(byName["Brave"])
+        let vivaldi = try #require(byName["Vivaldi"])
+        let arc = try #require(byName["Arc"])
+        let chromium = try #require(byName["Chromium"])
+        let canary = try #require(byName["Chrome Canary"])
+        let atlas = try #require(byName["Atlas"])
+
+        #expect(edge.userDataDirectory.path == homeDirectory
+            .appendingPathComponent("Library/Application Support/Microsoft Edge")
+            .path)
+        #expect(brave.userDataDirectory.path == homeDirectory
+            .appendingPathComponent("Library/Application Support/BraveSoftware/Brave-Browser")
+            .path)
+        #expect(vivaldi.userDataDirectory.path == homeDirectory
+            .appendingPathComponent("Library/Application Support/Vivaldi")
+            .path)
+        #expect(arc.userDataDirectory.path == homeDirectory
+            .appendingPathComponent("Library/Application Support/Arc/User Data")
+            .path)
+        #expect(chromium.userDataDirectory.path == homeDirectory
+            .appendingPathComponent("Library/Application Support/Chromium")
+            .path)
+        #expect(canary.userDataDirectory.path == homeDirectory
+            .appendingPathComponent("Library/Application Support/Google/Chrome Canary")
+            .path)
+        #expect(atlas.nativeMessagingHostDirectory.path == homeDirectory
+            .appendingPathComponent("Library/Application Support/OpenAI/ChatGPT Atlas/NativeMessagingHosts")
+            .path)
+    }
+
     @Test("discovers SwiftGetX extension IDs from Secure Preferences")
     func discoversFromSecurePreferences() throws {
         let root = try makeChromeProfile(
@@ -18,6 +70,55 @@ struct ChromeExtensionDiscoveryTests {
         let discovery = ChromeExtensionDiscovery(userDataDirectory: root)
 
         #expect(discovery.discoverExtensionIDs() == ["bcdefghijklmnopabcdefghijklmnopa"])
+    }
+
+    @Test("discovers SwiftGetX extension IDs from injected Chromium variants")
+    func discoversFromInjectedChromiumVariants() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let edgeProfile = root.appendingPathComponent("Microsoft Edge")
+        let braveProfile = root.appendingPathComponent("BraveSoftware/Brave-Browser")
+
+        try writePreferences(
+            to: edgeProfile.appendingPathComponent("Default/Secure Preferences"),
+            extensions: [
+                "bcdefghijklmnopabcdefghijklmnopa": manifest(name: "SwiftGetX", permissions: ["nativeMessaging"])
+            ]
+        )
+        try writePreferences(
+            to: braveProfile.appendingPathComponent("Profile 1/Preferences"),
+            extensions: [
+                "cdefghijklmnopabcdefghijklmnopab": manifest(name: "SwiftGetX", permissions: ["nativeMessaging"])
+            ]
+        )
+
+        let edgeConfiguration = ChromiumBrowserConfiguration(
+            name: "Microsoft Edge",
+            userDataDirectory: edgeProfile
+        )
+        let braveConfiguration = ChromiumBrowserConfiguration(
+            name: "Brave",
+            userDataDirectory: braveProfile
+        )
+        let discovery = ChromeExtensionDiscovery(
+            browserConfigurations: [edgeConfiguration, braveConfiguration]
+        )
+
+        #expect(discovery.discoverExtensionIDs() == [
+            "bcdefghijklmnopabcdefghijklmnopa",
+            "cdefghijklmnopabcdefghijklmnopab"
+        ])
+        #expect(discovery.discoverExtensionInstallations() == [
+            ChromeExtensionInstallation(
+                extensionID: "bcdefghijklmnopabcdefghijklmnopa",
+                browserConfiguration: edgeConfiguration
+            ),
+            ChromeExtensionInstallation(
+                extensionID: "cdefghijklmnopabcdefghijklmnopab",
+                browserConfiguration: braveConfiguration
+            )
+        ])
     }
 
     @Test("deduplicates SwiftGetX extension IDs across profiles")

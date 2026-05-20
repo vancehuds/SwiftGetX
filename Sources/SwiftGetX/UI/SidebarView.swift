@@ -3,6 +3,7 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var layout
+    @State private var diagnostics = NativeHostDiagnostics()
     let tasks: [DownloadTask]
 
     var body: some View {
@@ -36,25 +37,7 @@ struct SidebarView: View {
 
                 Spacer()
 
-                VStack(alignment: .leading, spacing: layout.value(8)) {
-                    HStack {
-                        Label(L10n.string("browser_takeover"), systemImage: "safari")
-                            .font(layout.font(12, weight: .semibold))
-                            .foregroundStyle(.primary)
-
-                        Spacer()
-
-                        Circle()
-                            .fill(Color.primary.opacity(0.72))
-                            .frame(width: layout.value(6), height: layout.value(6))
-                    }
-
-                    Text(L10n.string("browser_extensions_ready"))
-                        .font(layout.font(10.5))
-                        .lineSpacing(layout.value(2))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                BrowserStatusSidebarPanel(diagnostics: diagnostics)
                 .padding(layout.value(12))
                 .background {
                     ContentSurfaceBackground(cornerRadius: 10)
@@ -62,6 +45,58 @@ struct SidebarView: View {
                 .padding(layout.value(10))
             }
             .padding(.top, layout.value(8))
+        }
+        .onAppear(perform: checkBrowserDiagnostics)
+    }
+
+    private func checkBrowserDiagnostics() {
+        if diagnostics.status == .unchecked {
+            diagnostics.check()
+        }
+    }
+}
+
+private struct BrowserStatusSidebarPanel: View {
+    @Bindable var diagnostics: NativeHostDiagnostics
+    @Environment(\.responsiveLayout) private var layout
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            HStack {
+                Label(L10n.string("browser_takeover"), systemImage: "safari")
+                    .font(layout.font(12, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Circle()
+                    .fill(diagnostics.status.statusColor)
+                    .frame(width: layout.value(6), height: layout.value(6))
+                    .opacity(diagnostics.status == .checking ? 0.6 : 1)
+                    .animation(
+                        .easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                        value: diagnostics.status == .checking
+                    )
+            }
+
+            Text(diagnostics.sidebarStatusMessage)
+                .font(layout.font(10.5))
+                .lineSpacing(layout.value(2))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if diagnostics.configuredBrowserCount > 0 || diagnostics.discoveredExtensionCount > 0 {
+                Text(
+                    L10n.string(
+                        "browser_diagnostics_sidebar_counts",
+                        diagnostics.configuredBrowserCount,
+                        diagnostics.discoveredExtensionCount
+                    )
+                )
+                .font(layout.font(10))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            }
         }
     }
 }

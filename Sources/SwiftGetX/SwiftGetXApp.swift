@@ -134,7 +134,7 @@ struct SwiftGetXApp: App {
 
     @MainActor
     private func handleBrowserSetupRequest(_ request: BrowserSetupRequest) {
-        guard request.browser.caseInsensitiveCompare("Chrome") == .orderedSame else { return }
+        guard chromeNativeHostRegistrar.isSupportedBrowserName(request.browser) else { return }
 
         if chromeNativeHostRegistrar.isPairedExtensionID(request.extensionID) {
             _ = chromeNativeHostRegistrar.register()
@@ -173,8 +173,8 @@ struct SwiftGetXApp: App {
     @MainActor
     private func confirmChromePairing(_ request: BrowserSetupRequest) -> Bool {
         let alert = NSAlert()
-        alert.messageText = L10n.string("alert_allow_chrome_pairing_title")
-        alert.informativeText = L10n.string("alert_allow_chrome_pairing_message", request.extensionID)
+        alert.messageText = L10n.string("alert_allow_browser_pairing_title", request.browser)
+        alert.informativeText = L10n.string("alert_allow_browser_pairing_message", request.browser, request.extensionID)
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("action_allow_pairing"))
         alert.addButton(withTitle: L10n.string("action_reject"))
@@ -184,8 +184,8 @@ struct SwiftGetXApp: App {
     @MainActor
     private func showChromePairingRejectedAlert(extensionID: String) {
         let alert = NSAlert()
-        alert.messageText = L10n.string("alert_chrome_pairing_rejected_title")
-        alert.informativeText = L10n.string("alert_chrome_pairing_rejected_message", extensionID)
+        alert.messageText = L10n.string("alert_browser_pairing_rejected_title")
+        alert.informativeText = L10n.string("alert_browser_pairing_rejected_message", extensionID)
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("action_ok"))
         alert.runModal()
