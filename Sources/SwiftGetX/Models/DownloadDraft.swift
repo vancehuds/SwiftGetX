@@ -1,4 +1,5 @@
 import Foundation
+import SwiftGetXCore
 
 struct DownloadDraft: Equatable, Sendable {
     var source: String
@@ -7,6 +8,7 @@ struct DownloadDraft: Equatable, Sendable {
     var handoffSource: String?
     var sourcePageTitle: String?
     var sourcePageUrl: String?
+    var handoffAck: NativeHandoffAck?
 
     var isBrowserTakeover: Bool {
         handoffSource == "download-takeover"

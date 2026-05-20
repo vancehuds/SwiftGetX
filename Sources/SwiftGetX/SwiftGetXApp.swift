@@ -94,7 +94,21 @@ struct SwiftGetXApp: App {
         if draft.isBrowserTakeover, appSettings.confirmBrowserTakeoverDownloads {
             NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
         } else {
-            coordinator.add(source: draft.source, suggestedFilename: draft.suggestedFilename)
+            let tasks = coordinator.add(source: draft.source, suggestedFilename: draft.suggestedFilename)
+            acknowledgeNativeHandoff(
+                draft,
+                decision: NativeHandoffDecisionFactory.decision(
+                    queuedTaskCount: tasks.count,
+                    requiresUserConfirmation: false
+                )
+            )
+        }
+    }
+
+    private func acknowledgeNativeHandoff(_ draft: DownloadDraft, decision: NativeHandoffAckDecision) {
+        guard let handoffAck = draft.handoffAck else { return }
+        Task.detached {
+            try? await NativeHandoffAckClient.acknowledge(decision, handoff: handoffAck)
         }
     }
 
@@ -158,6 +172,28 @@ struct SwiftGetXApp: App {
     }
 }
 
+enum NativeHandoffDecisionFactory {
+    static func decision(
+        queuedTaskCount: Int,
+        requiresUserConfirmation: Bool
+    ) -> NativeHandoffAckDecision {
+        guard queuedTaskCount > 0 else {
+            return .rejected(
+                reason: "noDownloadableSources",
+                requiresUserConfirmation: requiresUserConfirmation,
+                message: "SwiftGetX received the request but no downloadable sources were found"
+            )
+        }
+
+        let confirmationText = requiresUserConfirmation ? "confirmed " : ""
+        return .accepted(
+            queued: true,
+            requiresUserConfirmation: requiresUserConfirmation,
+            message: "SwiftGetX queued \(queuedTaskCount) \(confirmationText)download task(s)"
+        )
+    }
+}
+
 enum DeepLinkParser {
     static func downloadDraft(from url: URL) -> DownloadDraft? {
         guard url.scheme == "swiftgetx", url.host == "download",
@@ -176,7 +212,8 @@ enum DeepLinkParser {
             browser: queryValue("browser", in: components),
             handoffSource: queryValue("source", in: components),
             sourcePageTitle: queryValue("sourcePageTitle", in: components),
-            sourcePageUrl: queryValue("sourcePageUrl", in: components)
+            sourcePageUrl: queryValue("sourcePageUrl", in: components),
+            handoffAck: handoffAck(in: components)
         )
     }
 
@@ -203,6 +240,20 @@ enum DeepLinkParser {
 
     private static func queryValue(_ name: String, in components: URLComponents) -> String? {
         components.queryItems?.first(where: { $0.name == name })?.value
+    }
+
+    private static func handoffAck(in components: URLComponents) -> NativeHandoffAck? {
+        guard let requestID = queryValue("ackRequestID", in: components),
+              let token = queryValue("ackToken", in: components),
+              let portString = queryValue("ackPort", in: components),
+              let port = UInt16(portString),
+              !requestID.isEmpty,
+              !token.isEmpty
+        else {
+            return nil
+        }
+
+        return NativeHandoffAck(requestID: requestID, token: token, port: port)
     }
 }
 

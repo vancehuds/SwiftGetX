@@ -48,7 +48,14 @@ struct NativeMessageHostTests {
     @Test("encodes length-prefixed response")
     func encodesResponse() throws {
         let encoded = try NativeMessageHost.encodeResponse(
-            NativeMessageResponse(ok: true, message: "accepted")
+            NativeMessageResponse(
+                ok: true,
+                message: "accepted",
+                accepted: true,
+                queued: true,
+                requiresUserConfirmation: false,
+                requestID: "request-1"
+            )
         )
 
         let payloadLength = encoded.prefix(4).withUnsafeBytes { pointer in
@@ -56,17 +63,25 @@ struct NativeMessageHostTests {
         }
 
         #expect(Int(payloadLength) == encoded.count - 4)
+
+        let response = try JSONDecoder().decode(NativeMessageResponse.self, from: encoded.dropFirst(4))
+        #expect(response.accepted == true)
+        #expect(response.queued == true)
+        #expect(response.requiresUserConfirmation == false)
+        #expect(response.requestID == "request-1")
     }
 
     @Test("builds download deep links with browser takeover metadata")
     func buildsDownloadDeepLinksWithMetadata() throws {
+        let handoffAck = NativeHandoffAck(requestID: "request-1", token: "secret-token", port: 49152)
         let url = try #require(DeepLinkBuilder.downloadURL(
             for: "https://example.com/file.dmg?token=a b",
             browser: "Chrome",
             suggestedFilename: "file.dmg",
             handoffSource: "download-takeover",
             sourcePageTitle: "Downloads",
-            sourcePageUrl: "https://example.com"
+            sourcePageUrl: "https://example.com",
+            handoffAck: handoffAck
         ))
 
         let draft = try #require(DeepLinkParser.downloadDraft(from: url))
@@ -76,6 +91,80 @@ struct NativeMessageHostTests {
         #expect(draft.suggestedFilename == "file.dmg")
         #expect(draft.handoffSource == "download-takeover")
         #expect(draft.isBrowserTakeover)
+        #expect(draft.handoffAck == handoffAck)
+    }
+
+    @Test("ack server returns accepted decisions from app callback")
+    func ackServerReturnsAcceptedDecisions() async throws {
+        let server = try NativeHandoffAckServer.start()
+        let waiter = Task.detached {
+            server.waitForResult(timeout: 2)
+        }
+
+        let expected = NativeHandoffAckDecision.accepted(
+            queued: true,
+            requiresUserConfirmation: false,
+            message: "queued"
+        )
+        try await NativeHandoffAckClient.acknowledge(expected, handoff: server.handoff)
+
+        let decision = await waiter.value
+        #expect(decision == expected)
+    }
+
+    @Test("ack server returns rejected decisions from user cancellation")
+    func ackServerReturnsRejectedDecisions() async throws {
+        let server = try NativeHandoffAckServer.start()
+        let waiter = Task.detached {
+            server.waitForResult(timeout: 2)
+        }
+
+        let expected = NativeHandoffAckDecision.rejected(
+            reason: "userCancelled",
+            requiresUserConfirmation: true,
+            message: "cancelled"
+        )
+        try await NativeHandoffAckClient.acknowledge(expected, handoff: server.handoff)
+
+        let decision = await waiter.value
+        #expect(decision == expected)
+    }
+
+    @Test("ack server times out when app never responds")
+    func ackServerTimesOutWhenAppNeverResponds() throws {
+        let server = try NativeHandoffAckServer.start()
+
+        let decision = server.waitForResult(timeout: 0.05)
+
+        #expect(decision.accepted == false)
+        #expect(decision.queued == false)
+        #expect(decision.requiresUserConfirmation == false)
+        #expect(decision.rejectedReason == "timeout")
+    }
+
+    @Test("native handoff decision rejects empty task creation")
+    func nativeHandoffDecisionRejectsEmptyTaskCreation() {
+        let decision = NativeHandoffDecisionFactory.decision(
+            queuedTaskCount: 0,
+            requiresUserConfirmation: true
+        )
+
+        #expect(decision.accepted == false)
+        #expect(decision.queued == false)
+        #expect(decision.requiresUserConfirmation == true)
+        #expect(decision.rejectedReason == "noDownloadableSources")
+    }
+
+    @Test("native handoff decision accepts queued tasks")
+    func nativeHandoffDecisionAcceptsQueuedTasks() {
+        let decision = NativeHandoffDecisionFactory.decision(
+            queuedTaskCount: 2,
+            requiresUserConfirmation: true
+        )
+
+        #expect(decision.accepted == true)
+        #expect(decision.queued == true)
+        #expect(decision.requiresUserConfirmation == true)
     }
 
     @Test("parses browser setup deep links")

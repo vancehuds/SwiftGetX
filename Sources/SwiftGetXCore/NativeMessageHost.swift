@@ -64,11 +64,30 @@ public struct NativeMessageResponse: Codable, Equatable, Sendable {
     public var ok: Bool
     public var message: String
     public var version: String?
+    public var accepted: Bool?
+    public var queued: Bool?
+    public var requiresUserConfirmation: Bool?
+    public var rejectedReason: String?
+    public var requestID: String?
 
-    public init(ok: Bool, message: String, version: String? = nil) {
+    public init(
+        ok: Bool,
+        message: String,
+        version: String? = nil,
+        accepted: Bool? = nil,
+        queued: Bool? = nil,
+        requiresUserConfirmation: Bool? = nil,
+        rejectedReason: String? = nil,
+        requestID: String? = nil
+    ) {
         self.ok = ok
         self.message = message
         self.version = version
+        self.accepted = accepted
+        self.queued = queued
+        self.requiresUserConfirmation = requiresUserConfirmation
+        self.rejectedReason = rejectedReason
+        self.requestID = requestID
     }
 }
 

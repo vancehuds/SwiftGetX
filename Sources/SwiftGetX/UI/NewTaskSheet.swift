@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftGetXCore
 import UniformTypeIdentifiers
 
 struct NewTaskSheet: View {
@@ -14,6 +15,7 @@ struct NewTaskSheet: View {
     @State private var selectedFileIndexesBySource = [String: Set<Int>]()
     @State private var filePrioritiesBySource = [String: [Int: TorrentFilePriority]]()
     @State private var isLoadingPreviews = false
+    @State private var didResolveNativeHandoff = false
     let draft: DownloadDraft?
 
     init(draft: DownloadDraft? = nil) {
@@ -44,6 +46,9 @@ struct NewTaskSheet: View {
         }
         .onChange(of: draft) { _, newDraft in
             apply(newDraft)
+        }
+        .onDisappear {
+            rejectNativeHandoffIfNeeded(reason: "userCancelled")
         }
         .task(id: sourceText) {
             await refreshPreviews()
@@ -165,6 +170,7 @@ struct NewTaskSheet: View {
 
             HStack {
                 Button(L10n.string("action_cancel")) {
+                    rejectNativeHandoffIfNeeded(reason: "userCancelled")
                     dismiss()
                 }
                 .buttonStyle(.bordered)
@@ -173,16 +179,27 @@ struct NewTaskSheet: View {
                 Spacer()
 
                 Button {
+                    let tasks: [DownloadTask]
                     if previews.contains(where: { $0.kind == .torrentMagnet || $0.kind == .torrentFile }) {
-                        coordinator.add(
+                        tasks = coordinator.add(
                             previews: previews,
                             saveDirectory: saveDirectory,
                             selectedFileIndexes: selectedFileIndexesForCoordinator,
                             filePriorities: filePrioritiesForCoordinator
                         )
                     } else {
-                        coordinator.add(source: sourceText, saveDirectory: saveDirectory, suggestedFilename: suggestedFilename)
+                        tasks = coordinator.add(
+                            source: sourceText,
+                            saveDirectory: saveDirectory,
+                            suggestedFilename: suggestedFilename
+                        )
                     }
+                    acknowledgeNativeHandoffIfNeeded(
+                        decision: NativeHandoffDecisionFactory.decision(
+                            queuedTaskCount: tasks.count,
+                            requiresUserConfirmation: draft?.isBrowserTakeover == true
+                        )
+                    )
                     dismiss()
                 } label: {
                     Label(L10n.string("add_task"), systemImage: "plus.circle.fill")
@@ -205,6 +222,7 @@ struct NewTaskSheet: View {
     private func apply(_ draft: DownloadDraft?) {
         sourceText = draft?.source ?? ""
         suggestedFilename = draft?.suggestedFilename
+        didResolveNativeHandoff = false
     }
 
     private func chooseDirectory() {
@@ -315,6 +333,29 @@ struct NewTaskSheet: View {
         Dictionary(uniqueKeysWithValues: preview.files.map { file in
             (file.index, selected.contains(file.index) ? file.priorityLevel : .skip)
         })
+    }
+
+    private func rejectNativeHandoffIfNeeded(reason: String) {
+        acknowledgeNativeHandoffIfNeeded(
+            decision: .rejected(
+                reason: reason,
+                requiresUserConfirmation: draft?.isBrowserTakeover == true,
+                message: "SwiftGetX download confirmation was cancelled"
+            )
+        )
+    }
+
+    private func acknowledgeNativeHandoffIfNeeded(decision: NativeHandoffAckDecision) {
+        guard !didResolveNativeHandoff,
+              let handoffAck = draft?.handoffAck
+        else {
+            return
+        }
+
+        didResolveNativeHandoff = true
+        Task.detached {
+            try? await NativeHandoffAckClient.acknowledge(decision, handoff: handoffAck)
+        }
     }
 }
 
