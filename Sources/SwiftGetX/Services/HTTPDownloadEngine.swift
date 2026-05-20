@@ -1,4 +1,5 @@
 import Foundation
+import SwiftGetXCore
 
 @MainActor
 final class HTTPDownloadEngine: DownloadEngine {
@@ -398,7 +399,12 @@ private struct HTTPDownloadWorker: Sendable {
             )
         )
 
-        var urlRequest = makeRequest(url: url, method: "GET", timeoutInterval: 30)
+        var urlRequest = makeRequest(
+            url: url,
+            method: "GET",
+            timeoutInterval: 30,
+            request: request
+        )
         if shouldResume {
             urlRequest.setValue("bytes=\(existingBytes)-", forHTTPHeaderField: "Range")
             applyIfRange(to: &urlRequest, metadata: metadata, request: request)
@@ -800,7 +806,12 @@ private struct HTTPDownloadWorker: Sendable {
         guard localBytes < segment.length else { return }
 
         let start = segment.start + localBytes
-        var urlRequest = makeRequest(url: url, method: "GET", timeoutInterval: 30)
+        var urlRequest = makeRequest(
+            url: url,
+            method: "GET",
+            timeoutInterval: 30,
+            request: request
+        )
         urlRequest.setValue("bytes=\(start)-\(segment.end)", forHTTPHeaderField: "Range")
         applyIfRange(to: &urlRequest, metadata: metadata, request: request)
 
@@ -896,7 +907,12 @@ private struct HTTPDownloadWorker: Sendable {
     }
 
     private func probe(url: URL, request: DownloadRequest) async -> HTTPMetadata {
-        let headRequest = makeRequest(url: url, method: "HEAD", timeoutInterval: 20)
+        let headRequest = makeRequest(
+            url: url,
+            method: "HEAD",
+            timeoutInterval: 20,
+            request: request
+        )
         var metadata = HTTPMetadata.unknown
 
         do {
@@ -904,7 +920,7 @@ private struct HTTPDownloadWorker: Sendable {
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode)
             else {
-                return await probeRange(url: url).filled(from: request)
+                return await probeRange(url: url, request: request).filled(from: request)
             }
 
             let length = Int64(httpResponse.value(forHTTPHeaderField: "Content-Length") ?? "") ?? 0
@@ -929,15 +945,20 @@ private struct HTTPDownloadWorker: Sendable {
             return metadata
         }
 
-        return await probeRange(url: url).merged(over: metadata)
+        return await probeRange(url: url, request: request).merged(over: metadata)
     }
 
-    private func probeRange(url: URL) async -> HTTPMetadata {
-        var request = makeRequest(url: url, method: "GET", timeoutInterval: 20)
-        request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+    private func probeRange(url: URL, request: DownloadRequest) async -> HTTPMetadata {
+        var urlRequest = makeRequest(
+            url: url,
+            method: "GET",
+            timeoutInterval: 20,
+            request: request
+        )
+        urlRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 
         do {
-            let (_, response) = try await Self.session.bytes(for: request)
+            let (_, response) = try await Self.session.bytes(for: urlRequest)
             guard let httpResponse = response as? HTTPURLResponse else {
                 return .unknown
             }
@@ -976,7 +997,12 @@ private struct HTTPDownloadWorker: Sendable {
         }
     }
 
-    private func makeRequest(url: URL, method: String, timeoutInterval: TimeInterval) -> URLRequest {
+    private func makeRequest(
+        url: URL,
+        method: String,
+        timeoutInterval: TimeInterval,
+        request downloadRequest: DownloadRequest
+    ) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = timeoutInterval
@@ -986,7 +1012,15 @@ private struct HTTPDownloadWorker: Sendable {
             request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
             request.setValue("2026-03-10", forHTTPHeaderField: "X-GitHub-Api-Version")
         }
+        applyBrowserContext(downloadRequest.browserContext, to: &request)
         return request
+    }
+
+    private func applyBrowserContext(_ context: BrowserDownloadContext?, to request: inout URLRequest) {
+        guard let context else { return }
+        for (name, value) in context.httpHeaders() {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
     }
 
     private func applyIfRange(

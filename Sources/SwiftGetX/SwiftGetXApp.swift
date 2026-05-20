@@ -91,10 +91,30 @@ struct SwiftGetXApp: App {
 
     @MainActor
     private func handleDownloadDraft(_ draft: DownloadDraft) {
+        if let handoffAck = draft.handoffAck {
+            Task {
+                var enrichedDraft = draft
+                if let context = try? await NativeHandoffPayloadClient.fetchContext(handoff: handoffAck) {
+                    enrichedDraft.browserContext = context
+                }
+                handleDownloadDraftWithContext(enrichedDraft)
+            }
+            return
+        }
+
+        handleDownloadDraftWithContext(draft)
+    }
+
+    @MainActor
+    private func handleDownloadDraftWithContext(_ draft: DownloadDraft) {
         if draft.isBrowserTakeover, appSettings.confirmBrowserTakeoverDownloads {
             NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
         } else {
-            let tasks = coordinator.add(source: draft.source, suggestedFilename: draft.suggestedFilename)
+            let tasks = coordinator.add(
+                source: draft.source,
+                suggestedFilename: draft.suggestedFilename,
+                browserContext: draft.browserContext
+            )
             acknowledgeNativeHandoff(
                 draft,
                 decision: NativeHandoffDecisionFactory.decision(
@@ -213,7 +233,15 @@ enum DeepLinkParser {
             handoffSource: queryValue("source", in: components),
             sourcePageTitle: queryValue("sourcePageTitle", in: components),
             sourcePageUrl: queryValue("sourcePageUrl", in: components),
-            handoffAck: handoffAck(in: components)
+            handoffAck: handoffAck(in: components),
+            browserContext: BrowserDownloadContext(
+                referrer: queryValue("sourcePageUrl", in: components),
+                originalURL: source,
+                suggestedFilename: queryValue("filename", in: components),
+                sourcePageTitle: queryValue("sourcePageTitle", in: components),
+                sourcePageURL: queryValue("sourcePageUrl", in: components),
+                handoffSource: queryValue("source", in: components)
+            )
         )
     }
 

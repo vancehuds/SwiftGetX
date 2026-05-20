@@ -32,17 +32,38 @@ Next step:
 
 ## Task 2: Browser Download Context
 
-Status: [ ]
+Status: [x]
 
 Extend browser/native message models and extension code to carry the minimum useful authenticated context: referrer, user agent, selected headers, method, optional body metadata, final/suggested filename metadata, and redacted source information. Ensure sensitive headers/cookies are not logged in plain text.
 
 Work performed:
 
+- Added `BrowserDownloadContext`, `BrowserDownloadHeader`, and `BrowserDownloadBodyMetadata` in `SwiftGetXCore` to represent referrer, user agent, method, selected headers, body metadata, final/original URLs, suggested filename, source page, and handoff source.
+- Extended `BrowserDownloadMessage` to carry structured context while preserving existing top-level fields for compatibility.
+- Extended the native-host handoff server with a token-protected `/payload` endpoint, so the App can fetch full browser context over localhost instead of putting sensitive headers into the public `swiftgetx://` URL.
+- Updated `SwiftGetXNativeHost` to build context from incoming native messages and provide it through the handoff payload.
+- Updated App deep-link handling, `DownloadDraft`, `BrowserBridge`, `NewTaskSheet`, `DownloadCoordinator`, and `DownloadRequest` so browser context flows into created tasks and active HTTP requests.
+- Added `DownloadTask.browserContextJSON` for persistable, redacted/non-sensitive context, while retaining full sensitive headers only in `DownloadCoordinator` runtime memory until task completion/failure/removal.
+- Updated `HTTPDownloadEngine` so HEAD, range probe, single-stream, and segmented GET requests apply browser context headers while blocking controlled headers such as `Range`, `If-Range`, `Host`, and `Content-Length`.
+- Updated task list and inspector source display to use redacted source URLs.
+- Updated the Chrome extension manifest and background worker to capture recent request method, selected request headers, referrer, user agent, final/original URLs, and body metadata with `webRequest`; sensitive headers are flagged as sensitive before native messaging.
+
 Verification evidence:
+
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- Focused tests passed: `swift test --filter NativeMessageHost --filter HTTPDownloadEngine --filter persistsOnlySafeBrowserContext` with 33 tests across NativeMessageHost, HTTPDownloadEngine, and Torrent files.
+- `swift test` passed with 84 tests across 12 suites.
+- New tests verify native handoff payload context fetch, HTTP request application of Authorization/Referer/User-Agent/Accept-Language headers while blocking browser-supplied `Range`, and persistence/display redaction that excludes Authorization/Cookie and redacts token-like URL query values.
 
 Remaining risk:
 
+- Chrome now requests `webRequest` plus `<all_urls>` host permissions so it can capture request headers; this is functionally necessary for authenticated downloads but increases extension permission surface. Later takeover-policy work should expose user-facing controls for which sites/headers are forwarded.
+- POST/body replay is not implemented in this task; only method and body metadata are carried. Actual POST retry/download support remains for later per-task request configuration work.
+- Sensitive headers are retained in memory only for active runtime requests and are dropped on completion/failure/removal; restart/resume of authenticated downloads will need a Keychain or short-lived session strategy in later tasks.
+
 Next step:
+
+- Task 3: Browser Diagnostics and Multi-Browser State.
 
 ## Task 3: Browser Diagnostics and Multi-Browser State
 

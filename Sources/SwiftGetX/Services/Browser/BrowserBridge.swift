@@ -23,7 +23,11 @@ final class BrowserBridge {
             return
         }
 
-        coordinator?.add(source: url, suggestedFilename: message.suggestedFilename)
+        coordinator?.add(
+            source: url,
+            suggestedFilename: message.suggestedFilename,
+            browserContext: BrowserDownloadContext.context(from: message)
+        )
         lastMessage = L10n.string(
             "browser_bridge_received_task",
             message.browser ?? L10n.string("browser_generic")

@@ -1,5 +1,6 @@
 import Testing
 @testable import SwiftGetX
+@testable import SwiftGetXCore
 
 @Suite("Torrent files")
 struct TorrentFileTests {
@@ -79,5 +80,43 @@ struct TorrentFileTests {
         #expect(task.torrentTrackers.first?.url == "udp://tracker.example:80")
         #expect(task.torrentPeers.first?.client == "Test")
         #expect(task.torrentHealth?.listenPort == 6881)
+    }
+
+    @Test("task persists only safe browser context")
+    func persistsOnlySafeBrowserContext() {
+        let rawContext = BrowserDownloadContext(
+            referrer: "https://example.com/downloads?token=secret&ok=1",
+            userAgent: "ExampleBrowser/1.0",
+            method: "GET",
+            headers: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
+                BrowserDownloadHeader(name: "Cookie", value: "session=secret"),
+                BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
+            ],
+            finalURL: "https://cdn.example.com/file.zip?signature=abc&file=1",
+            originalURL: "https://example.com/file.zip?auth=secret",
+            suggestedFilename: "file.zip",
+            sourcePageTitle: "Downloads",
+            sourcePageURL: "https://example.com/downloads?token=secret",
+            handoffSource: "download-takeover"
+        )
+
+        let task = DownloadTask(
+            name: "file.zip",
+            source: "https://example.com/file.zip?token=secret",
+            kind: .http,
+            savePath: "/tmp/file.zip",
+            browserContext: rawContext.persistable
+        )
+
+        #expect(task.browserContext?.headers == [
+            BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
+        ])
+        #expect(task.browserContext?.referrer == "https://example.com/downloads?token=%3Credacted%3E&ok=1")
+        #expect(task.browserContext?.finalURL == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
+        #expect(task.browserContext?.originalURL == "https://example.com/file.zip?auth=%3Credacted%3E")
+        #expect(task.displaySource == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
+        #expect(task.browserContextJSON?.contains("Bearer secret") == false)
+        #expect(task.browserContextJSON?.contains("session=secret") == false)
     }
 }

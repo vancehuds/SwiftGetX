@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import SwiftGetXCore
 
 @Model
 final class DownloadTask {
@@ -31,6 +32,7 @@ final class DownloadTask {
     var selectedFileIndexes: [Int]
     var torrentFilesJSON: String?
     var connectionSummary: String?
+    var browserContextJSON: String?
     var logEntries: [String]
 
     init(
@@ -62,6 +64,7 @@ final class DownloadTask {
         selectedFileIndexes: [Int] = [],
         torrentFilesJSON: String? = nil,
         connectionSummary: String? = nil,
+        browserContext: BrowserDownloadContext? = nil,
         logEntries: [String] = []
     ) {
         self.id = id
@@ -92,6 +95,7 @@ final class DownloadTask {
         self.selectedFileIndexes = selectedFileIndexes
         self.torrentFilesJSON = torrentFilesJSON
         self.connectionSummary = connectionSummary
+        self.browserContextJSON = Self.encode(browserContext)
         self.logEntries = logEntries
     }
 
@@ -116,6 +120,12 @@ final class DownloadTask {
 
     var hasFinishedDownloading: Bool {
         status == .completed || status == .seeding
+    }
+
+    var displaySource: String {
+        browserContext?.redactedPrimaryURL
+            ?? BrowserDownloadContext.redactedURLString(source)
+            ?? source
     }
 
     var torrentMetadataStatus: TorrentMetadataStatus {
@@ -196,6 +206,11 @@ final class DownloadTask {
     var torrentHealth: TorrentHealthInfo? {
         get { Self.decode(TorrentHealthInfo.self, from: torrentHealthJSON) }
         set { torrentHealthJSON = Self.encode(newValue) }
+    }
+
+    var browserContext: BrowserDownloadContext? {
+        get { Self.decode(BrowserDownloadContext.self, from: browserContextJSON) }
+        set { browserContextJSON = Self.encode(newValue) }
     }
 
     private static func decode<Value: Decodable>(_ type: Value.Type, from json: String?) -> Value? {

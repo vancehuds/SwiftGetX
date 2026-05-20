@@ -116,22 +116,61 @@ public enum NativeHandoffAckClient {
     }
 }
 
+public enum NativeHandoffPayloadClient {
+    public static func fetchContext(
+        handoff: NativeHandoffAck,
+        timeout: TimeInterval = 2
+    ) async throws -> BrowserDownloadContext {
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = "127.0.0.1"
+        components.port = Int(handoff.port)
+        components.path = "/payload"
+        components.queryItems = [
+            URLQueryItem(name: "requestID", value: handoff.requestID),
+            URLQueryItem(name: "token", value: handoff.token)
+        ]
+
+        guard let url = components.url else {
+            throw NativeHandoffAckError.invalidAckURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NativeHandoffAckError.invalidAckResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw NativeHandoffAckError.ackRejected(statusCode: httpResponse.statusCode)
+        }
+
+        return try JSONDecoder().decode(BrowserDownloadContext.self, from: data)
+    }
+}
+
 public final class NativeHandoffAckServer: @unchecked Sendable {
     public private(set) var handoff: NativeHandoffAck
 
     private let listener: NWListener
+    private let payload: Data?
     private let queue = DispatchQueue(label: "SwiftGetX.NativeHandoffAckServer")
     private let resultSemaphore = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var result: NativeHandoffAckDecision?
     private var completed = false
 
-    private init(listener: NWListener, handoff: NativeHandoffAck) {
+    private init(listener: NWListener, handoff: NativeHandoffAck, payload: Data?) {
         self.listener = listener
         self.handoff = handoff
+        self.payload = payload
     }
 
-    public static func start(startupTimeout: TimeInterval = 2) throws -> NativeHandoffAckServer {
+    public static func start(
+        payload: Data? = nil,
+        startupTimeout: TimeInterval = 2
+    ) throws -> NativeHandoffAckServer {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
 
@@ -142,7 +181,8 @@ public final class NativeHandoffAckServer: @unchecked Sendable {
                 requestID: UUID().uuidString,
                 token: UUID().uuidString.replacingOccurrences(of: "-", with: ""),
                 port: 0
-            )
+            ),
+            payload: payload
         )
 
         let readySemaphore = DispatchSemaphore(value: 0)
@@ -252,7 +292,7 @@ public final class NativeHandoffAckServer: @unchecked Sendable {
 
         guard let url = URL(string: "http://127.0.0.1\(parts[1])"),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              components.path == "/ack"
+              components.path == "/ack" || components.path == "/payload"
         else {
             sendHTTPResponse(statusCode: 404, body: #"{"ok":false}"#, on: connection)
             return
@@ -262,6 +302,16 @@ public final class NativeHandoffAckServer: @unchecked Sendable {
         let token = queryValue("token", in: components)
         guard requestID == handoff.requestID, token == handoff.token else {
             sendHTTPResponse(statusCode: 403, body: #"{"ok":false}"#, on: connection)
+            return
+        }
+
+        if components.path == "/payload" {
+            guard let payload else {
+                sendHTTPResponse(statusCode: 404, body: #"{"ok":false}"#, on: connection)
+                return
+            }
+
+            sendHTTPResponse(statusCode: 200, body: payload, on: connection)
             return
         }
 
@@ -296,6 +346,20 @@ public final class NativeHandoffAckServer: @unchecked Sendable {
         on connection: NWConnection,
         completion: (@Sendable () -> Void)? = nil
     ) {
+        sendHTTPResponse(
+            statusCode: statusCode,
+            body: Data(body.utf8),
+            on: connection,
+            completion: completion
+        )
+    }
+
+    private func sendHTTPResponse(
+        statusCode: Int,
+        body: Data,
+        on connection: NWConnection,
+        completion: (@Sendable () -> Void)? = nil
+    ) {
         let statusText: String
         switch statusCode {
         case 200:
@@ -314,13 +378,12 @@ public final class NativeHandoffAckServer: @unchecked Sendable {
             statusText = "Error"
         }
 
-        let bodyData = Data(body.utf8)
         var response = Data()
         response.append(Data("HTTP/1.1 \(statusCode) \(statusText)\r\n".utf8))
         response.append(Data("Content-Type: application/json\r\n".utf8))
-        response.append(Data("Content-Length: \(bodyData.count)\r\n".utf8))
+        response.append(Data("Content-Length: \(body.count)\r\n".utf8))
         response.append(Data("Connection: close\r\n\r\n".utf8))
-        response.append(bodyData)
+        response.append(body)
 
         connection.send(content: response, completion: .contentProcessed { _ in
             completion?()

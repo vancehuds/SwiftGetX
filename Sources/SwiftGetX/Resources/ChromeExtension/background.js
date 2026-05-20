@@ -7,13 +7,38 @@ const NATIVE_SETUP_RETRY_INTERVAL_MS = 1000;
 const NATIVE_SETUP_THROTTLE_MS = 60 * 1000;
 const NATIVE_SETUP_LAST_OPENED_KEY = "nativeSetupLastOpenedAt";
 const NATIVE_SETUP_PAIRED_KEY = "nativeHostPairingConfirmed";
+const RECENT_REQUEST_CONTEXT_TTL_MS = 5 * 60 * 1000;
+const RECENT_REQUEST_CONTEXT_LIMIT = 200;
 const DEFAULT_OPTIONS = {
   takeoverDownloads: true,
   takeoverDownloadsUserSet: false
 };
 const DOWNLOAD_SOURCE_PATTERN = /(magnet:\?|https?:\/\/|[^\s<>\]]+\.torrent(?:[?#][^\s<>\]]*)?)/i;
+const CONTEXT_HEADER_NAMES = new Set([
+  "accept",
+  "accept-language",
+  "authorization",
+  "cookie",
+  "origin",
+  "referer",
+  "user-agent",
+  "x-api-key",
+  "x-auth-token",
+  "x-csrf-token",
+  "x-requested-with",
+  "x-xsrf-token"
+]);
+const SENSITIVE_HEADER_NAMES = new Set([
+  "authorization",
+  "cookie",
+  "x-api-key",
+  "x-auth-token",
+  "x-csrf-token",
+  "x-xsrf-token"
+]);
 let currentOptions = { ...DEFAULT_OPTIONS };
 let activeNativeRepair;
+let recentRequestContexts = new Map();
 const i18n = (key, substitutions) => chrome.i18n.getMessage(key, substitutions) || key;
 
 const MENU_ITEMS = [
@@ -100,6 +125,18 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   handleContextMenuClick(info, tab);
 });
 
+chrome.webRequest.onBeforeRequest.addListener(
+  captureRequestBasics,
+  { urls: ["<all_urls>"] },
+  ["requestBody"]
+);
+
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  captureRequestHeaders,
+  { urls: ["<all_urls>"] },
+  ["requestHeaders", "extraHeaders"]
+);
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) {
     return false;
@@ -164,6 +201,8 @@ async function handleDownloadDeterminingFilename(downloadItem, suggest) {
     const url = downloadSourceURL(downloadItem);
     const payload = {
       url,
+      finalUrl: downloadItem.finalUrl,
+      originalUrl: downloadItem.url,
       suggestedFilename: filenameFromPath(downloadItem.filename) || filenameFromURL(url),
       sourcePageUrl: downloadItem.referrer,
       source: "download-takeover"
@@ -291,7 +330,8 @@ async function sendToSwiftGetX(payload, options = {}) {
     suggestedFilename: payload.suggestedFilename || filenameFromURL(url),
     sourcePageTitle: payload.sourcePageTitle,
     sourcePageUrl: payload.sourcePageUrl,
-    source: payload.source
+    source: payload.source,
+    context: buildBrowserContext(payload)
   };
 
   let result = await sendNativeMessage(message);
@@ -331,6 +371,191 @@ async function sendToSwiftGetX(payload, options = {}) {
     ok: result.ok,
     message: result.message || (result.ok ? i18n("sentToSwiftGetX") : i18n("sendFailed"))
   };
+}
+
+function captureRequestBasics(details) {
+  if (!isHTTPURL(details.url)) {
+    return;
+  }
+
+  const context = lookupRecentRequestContext(details.url) || {};
+  context.method = details.method || context.method || "GET";
+  context.originalURL = context.originalURL || details.url;
+
+  const bodyMetadata = bodyMetadataFromRequest(details);
+  if (bodyMetadata) {
+    context.bodyMetadata = bodyMetadata;
+  }
+
+  rememberRequestContext(details.url, context);
+}
+
+function captureRequestHeaders(details) {
+  if (!isHTTPURL(details.url)) {
+    return;
+  }
+
+  const context = lookupRecentRequestContext(details.url) || {};
+  context.method = details.method || context.method || "GET";
+  context.originalURL = context.originalURL || details.url;
+
+  const headers = [];
+  for (const header of details.requestHeaders || []) {
+    const name = header.name || "";
+    const lower = name.toLowerCase();
+    if (!CONTEXT_HEADER_NAMES.has(lower)) {
+      continue;
+    }
+
+    const value = header.value || "";
+    if (!value) {
+      continue;
+    }
+
+    headers.push({
+      name,
+      value,
+      sensitive: SENSITIVE_HEADER_NAMES.has(lower)
+    });
+
+    if (lower === "referer") {
+      context.referrer = value;
+    } else if (lower === "user-agent") {
+      context.userAgent = value;
+    }
+  }
+
+  context.headers = mergeHeaders(context.headers || [], headers);
+  rememberRequestContext(details.url, context);
+}
+
+function bodyMetadataFromRequest(details) {
+  const requestBody = details.requestBody;
+  if (!requestBody) {
+    return undefined;
+  }
+
+  if (requestBody.formData) {
+    const fieldCount = Object.keys(requestBody.formData).length;
+    return {
+      description: `form fields: ${fieldCount}`
+    };
+  }
+
+  if (requestBody.raw?.length) {
+    const byteCount = requestBody.raw.reduce((total, item) => total + (item.bytes?.byteLength || 0), 0);
+    return {
+      byteCount,
+      description: "raw request body"
+    };
+  }
+
+  return undefined;
+}
+
+function buildBrowserContext(payload) {
+  const url = (payload?.url || "").trim();
+  const isSingleHTTPSource = isHTTPURL(url) && !url.includes("\n");
+  const recentContext = isSingleHTTPSource
+    ? (lookupRecentRequestContext(payload.finalUrl) || lookupRecentRequestContext(payload.originalUrl) || lookupRecentRequestContext(url) || {})
+    : {};
+  const suggestedFilename = payload.suggestedFilename || filenameFromURL(url);
+
+  return {
+    ...recentContext,
+    referrer: recentContext.referrer || payload.sourcePageUrl,
+    userAgent: recentContext.userAgent,
+    method: recentContext.method || "GET",
+    headers: isSingleHTTPSource ? (recentContext.headers || []) : [],
+    bodyMetadata: isSingleHTTPSource ? recentContext.bodyMetadata : undefined,
+    finalURL: payload.finalUrl || recentContext.finalURL || (isSingleHTTPSource ? url : undefined),
+    originalURL: payload.originalUrl || recentContext.originalURL || (isSingleHTTPSource ? url : undefined),
+    suggestedFilename,
+    sourcePageTitle: payload.sourcePageTitle,
+    sourcePageURL: payload.sourcePageUrl,
+    handoffSource: payload.source
+  };
+}
+
+function mergeHeaders(existingHeaders, nextHeaders) {
+  const merged = new Map();
+  for (const header of [...existingHeaders, ...nextHeaders]) {
+    merged.set(header.name.toLowerCase(), header);
+  }
+  return Array.from(merged.values());
+}
+
+function rememberRequestContext(url, context) {
+  const key = contextKey(url);
+  if (!key) {
+    return;
+  }
+
+  pruneRecentRequestContexts();
+  recentRequestContexts.set(key, {
+    ...context,
+    capturedAt: Date.now()
+  });
+}
+
+function lookupRecentRequestContext(url) {
+  const key = contextKey(url);
+  if (!key) {
+    return undefined;
+  }
+
+  const context = recentRequestContexts.get(key);
+  if (!context) {
+    return undefined;
+  }
+
+  if (Date.now() - Number(context.capturedAt || 0) > RECENT_REQUEST_CONTEXT_TTL_MS) {
+    recentRequestContexts.delete(key);
+    return undefined;
+  }
+
+  const { capturedAt, ...payload } = context;
+  return payload;
+}
+
+function pruneRecentRequestContexts() {
+  const now = Date.now();
+  for (const [key, context] of recentRequestContexts.entries()) {
+    if (now - Number(context.capturedAt || 0) > RECENT_REQUEST_CONTEXT_TTL_MS) {
+      recentRequestContexts.delete(key);
+    }
+  }
+
+  while (recentRequestContexts.size > RECENT_REQUEST_CONTEXT_LIMIT) {
+    const firstKey = recentRequestContexts.keys().next().value;
+    if (!firstKey) {
+      break;
+    }
+    recentRequestContexts.delete(firstKey);
+  }
+}
+
+function contextKey(value) {
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function isHTTPURL(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function scheduleNativeHealthChecks() {

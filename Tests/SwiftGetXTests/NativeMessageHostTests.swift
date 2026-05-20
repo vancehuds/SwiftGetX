@@ -130,6 +130,32 @@ struct NativeMessageHostTests {
         #expect(decision == expected)
     }
 
+    @Test("handoff payload returns browser download context")
+    func handoffPayloadReturnsBrowserDownloadContext() async throws {
+        let context = BrowserDownloadContext(
+            referrer: "https://example.com/downloads",
+            userAgent: "Example Browser",
+            method: "GET",
+            headers: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
+                BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
+            ],
+            finalURL: "https://cdn.example.com/file.zip",
+            originalURL: "https://example.com/file.zip",
+            suggestedFilename: "file.zip",
+            sourcePageTitle: "Downloads",
+            sourcePageURL: "https://example.com/downloads",
+            handoffSource: "download-takeover"
+        )
+        let payload = try JSONEncoder().encode(context)
+        let server = try NativeHandoffAckServer.start(payload: payload)
+        defer { server.cancel() }
+
+        let fetched = try await NativeHandoffPayloadClient.fetchContext(handoff: server.handoff)
+
+        #expect(fetched == context)
+    }
+
     @Test("ack server times out when app never responds")
     func ackServerTimesOutWhenAppNeverResponds() throws {
         let server = try NativeHandoffAckServer.start()

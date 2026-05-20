@@ -24,7 +24,9 @@ do {
             throw NativeHostError.invalidDownloadSource
         }
 
-        let ackServer = try NativeHandoffAckServer.start()
+        let context = BrowserDownloadContext.context(from: message)
+        let payload = try context.map { try JSONEncoder().encode($0) }
+        let ackServer = try NativeHandoffAckServer.start(payload: payload)
         guard let url = DeepLinkBuilder.downloadURL(
             for: source,
             browser: message.browser,

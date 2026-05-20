@@ -1,4 +1,5 @@
 import Foundation
+import SwiftGetXCore
 
 @MainActor
 protocol DownloadEngine: AnyObject {
@@ -35,6 +36,7 @@ struct DownloadRequest: Sendable {
     let torrentResumeState: TorrentResumeState?
     let torrentRuntimeOptions: TorrentRuntimeOptions?
     let hasExplicitFileSelection: Bool
+    let browserContext: BrowserDownloadContext?
 
     init(
         id: UUID,
@@ -53,7 +55,8 @@ struct DownloadRequest: Sendable {
         torrentFiles: [TorrentFile] = [],
         torrentResumeState: TorrentResumeState? = nil,
         torrentRuntimeOptions: TorrentRuntimeOptions? = nil,
-        hasExplicitFileSelection: Bool = false
+        hasExplicitFileSelection: Bool = false,
+        browserContext: BrowserDownloadContext? = nil
     ) {
         self.id = id
         self.name = name
@@ -72,9 +75,10 @@ struct DownloadRequest: Sendable {
         self.torrentResumeState = torrentResumeState
         self.torrentRuntimeOptions = torrentRuntimeOptions
         self.hasExplicitFileSelection = hasExplicitFileSelection
+        self.browserContext = browserContext
     }
 
-    init(task: DownloadTask) {
+    init(task: DownloadTask, browserContext: BrowserDownloadContext? = nil) {
         id = task.id
         name = task.name
         source = task.source
@@ -94,6 +98,7 @@ struct DownloadRequest: Sendable {
         hasExplicitFileSelection = task.kind == .torrentMagnet || task.kind == .torrentFile
             ? !task.torrentFiles.isEmpty
             : false
+        self.browserContext = browserContext ?? task.browserContext
     }
 }
 

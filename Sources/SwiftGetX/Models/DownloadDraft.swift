@@ -9,6 +9,7 @@ struct DownloadDraft: Equatable, Sendable {
     var sourcePageTitle: String?
     var sourcePageUrl: String?
     var handoffAck: NativeHandoffAck?
+    var browserContext: BrowserDownloadContext?
 
     var isBrowserTakeover: Bool {
         handoffSource == "download-takeover"

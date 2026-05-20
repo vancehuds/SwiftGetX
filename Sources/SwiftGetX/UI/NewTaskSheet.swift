@@ -191,7 +191,8 @@ struct NewTaskSheet: View {
                         tasks = coordinator.add(
                             source: sourceText,
                             saveDirectory: saveDirectory,
-                            suggestedFilename: suggestedFilename
+                            suggestedFilename: suggestedFilename,
+                            browserContext: draft?.browserContext
                         )
                     }
                     acknowledgeNativeHandoffIfNeeded(

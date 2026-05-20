@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftData
+import SwiftGetXCore
 
 @MainActor
 @Observable
@@ -9,6 +10,7 @@ final class DownloadCoordinator {
     private var settings: AppSettings?
     private let httpEngine = HTTPDownloadEngine()
     private let torrentEngine = TorrentDownloadEngine()
+    private var runtimeBrowserContexts: [UUID: BrowserDownloadContext] = [:]
 
     var selectedTaskID: UUID?
     var activeFilter: DownloadFilter = .all
@@ -101,7 +103,12 @@ final class DownloadCoordinator {
     }
 
     @discardableResult
-    func add(source: String, saveDirectory: URL? = nil, suggestedFilename: String? = nil) -> [DownloadTask] {
+    func add(
+        source: String,
+        saveDirectory: URL? = nil,
+        suggestedFilename: String? = nil,
+        browserContext: BrowserDownloadContext? = nil
+    ) -> [DownloadTask] {
         let sources = SourceParser.extractSources(from: source)
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
         let tasks = sources.map { source in
@@ -111,7 +118,8 @@ final class DownloadCoordinator {
                 name: displayName,
                 source: source,
                 kind: kind,
-                savePath: saveDirectory.appendingPathComponent(displayName).path
+                savePath: saveDirectory.appendingPathComponent(displayName).path,
+                browserContext: browserContext?.persistable
             )
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
@@ -121,6 +129,9 @@ final class DownloadCoordinator {
         guard let modelContext else { return tasks }
         for task in tasks {
             modelContext.insert(task)
+            if let browserContext {
+                runtimeBrowserContexts[task.id] = browserContext
+            }
         }
         selectedTaskID = tasks.first?.id ?? selectedTaskID
         save()
@@ -201,7 +212,10 @@ final class DownloadCoordinator {
         task.errorMessage = nil
         task.retryCount = 0
         task.appendLog(L10n.string("log_start_download"))
-        let request = DownloadRequest(task: task)
+        let request = DownloadRequest(
+            task: task,
+            browserContext: runtimeBrowserContexts[task.id] ?? task.browserContext
+        )
         save()
 
         Task {
@@ -264,6 +278,7 @@ final class DownloadCoordinator {
         if task.kind == .torrentMagnet || task.kind == .torrentFile {
             TorrentResumeStore.removeResumeData(for: task.id)
         }
+        runtimeBrowserContexts[task.id] = nil
         modelContext.delete(task)
         if selectedTaskID == task.id {
             selectedTaskID = tasks().first?.id
@@ -480,6 +495,7 @@ final class DownloadCoordinator {
                 }
                 scheduleQueue()
             }
+            runtimeBrowserContexts[task.id] = nil
         case .completed:
             task.speedBytesPerSecond = 0
             if task.completedAt == nil {
@@ -490,10 +506,12 @@ final class DownloadCoordinator {
                 }
                 scheduleQueue()
             }
+            runtimeBrowserContexts[task.id] = nil
         case .failed:
             task.speedBytesPerSecond = 0
             task.appendLog(snapshot.errorMessage ?? L10n.string("error_download_failed"))
             scheduleQueue()
+            runtimeBrowserContexts[task.id] = nil
         default:
             break
         }

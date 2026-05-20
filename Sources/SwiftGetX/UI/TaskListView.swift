@@ -171,7 +171,7 @@ private struct TaskRowView: View {
                     HStack(spacing: layout.value(4)) {
                         Image(systemName: "globe")
                             .font(layout.font(10))
-                        Text(task.source)
+                        Text(task.displaySource)
                             .lineLimit(1)
                     }
                     .frame(maxWidth: layout.value(180), alignment: .leading)

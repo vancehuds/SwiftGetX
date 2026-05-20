@@ -8,6 +8,7 @@ public struct BrowserDownloadMessage: Codable, Sendable {
     public var sourcePageTitle: String?
     public var sourcePageUrl: String?
     public var source: String?
+    public var context: BrowserDownloadContext?
 
     public init(
         action: String,
@@ -16,7 +17,8 @@ public struct BrowserDownloadMessage: Codable, Sendable {
         suggestedFilename: String? = nil,
         sourcePageTitle: String? = nil,
         sourcePageUrl: String? = nil,
-        source: String? = nil
+        source: String? = nil,
+        context: BrowserDownloadContext? = nil
     ) {
         self.action = action
         self.url = url
@@ -25,5 +27,6 @@ public struct BrowserDownloadMessage: Codable, Sendable {
         self.sourcePageTitle = sourcePageTitle
         self.sourcePageUrl = sourcePageUrl
         self.source = source
+        self.context = context
     }
 }

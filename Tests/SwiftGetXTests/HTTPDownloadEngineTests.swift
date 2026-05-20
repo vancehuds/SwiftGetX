@@ -2,6 +2,7 @@ import Foundation
 import Network
 import Testing
 @testable import SwiftGetX
+@testable import SwiftGetXCore
 
 @Suite("HTTPDownloadEngine")
 @MainActor
@@ -566,6 +567,55 @@ struct HTTPDownloadEngineTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part1"))
     }
 
+    @Test("applies browser download context headers to HTTP requests")
+    func appliesBrowserDownloadContextHeadersToHTTPRequests() async throws {
+        let payload = Self.payload()
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let context = BrowserDownloadContext(
+            referrer: "https://example.com/releases?token=secret",
+            userAgent: "ExampleBrowser/1.0",
+            method: "GET",
+            headers: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
+                BrowserDownloadHeader(name: "Accept-Language", value: "en-US"),
+                BrowserDownloadHeader(name: "Range", value: "bytes=100-200")
+            ]
+        )
+        let engine = HTTPDownloadEngine()
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            browserContext: context
+        ))
+
+        let downloaded = try Data(contentsOf: destination)
+        #expect(downloaded == payload)
+        #expect(server.requests.contains { request in
+            request.hasPrefix("HEAD")
+                && request.contains("Authorization: Bearer secret")
+                && request.contains("Accept-Language: en-US")
+                && request.contains("Referer: https://example.com/releases?token=secret")
+                && request.contains("User-Agent: ExampleBrowser/1.0")
+                && !request.contains("Range: bytes=100-200")
+        })
+        #expect(server.requests.contains { request in
+            request.hasPrefix("GET")
+                && request.contains("Authorization: Bearer secret")
+                && request.contains("Accept-Language: en-US")
+                && request.contains("Referer: https://example.com/releases?token=secret")
+                && request.contains("User-Agent: ExampleBrowser/1.0")
+                && !request.contains("Range: bytes=100-200")
+        })
+    }
+
     private static func payload() -> Data {
         Data((0..<32_768).map { UInt8($0 % 251) })
     }
@@ -589,7 +639,8 @@ struct HTTPDownloadEngineTests {
         downloadedBytes: Int64 = 0,
         supportsResume: Bool = false,
         eTag: String? = nil,
-        lastModified: String? = nil
+        lastModified: String? = nil,
+        browserContext: BrowserDownloadContext? = nil
     ) -> DownloadRequest {
         DownloadRequest(
             id: UUID(),
@@ -603,7 +654,8 @@ struct HTTPDownloadEngineTests {
             supportsResume: supportsResume,
             eTag: eTag,
             lastModified: lastModified,
-            selectedFileIndexes: []
+            selectedFileIndexes: [],
+            browserContext: browserContext
         )
     }
 }
@@ -645,9 +697,16 @@ private final class RangeTestServer: @unchecked Sendable {
     private let lock = NSLock()
     private var getCount = 0
     private var rangedGETCount = 0
+    private var capturedRequests = [String]()
 
     var url: URL {
         URL(string: "http://127.0.0.1:\(listener.port!.rawValue)/payload.bin")!
+    }
+
+    var requests: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedRequests
     }
 
     init(payload: Data, behavior: Behavior = .normal) throws {
@@ -692,6 +751,10 @@ private final class RangeTestServer: @unchecked Sendable {
     }
 
     private func response(for request: String) -> Data {
+        lock.lock()
+        capturedRequests.append(request)
+        lock.unlock()
+
         if request.hasPrefix("HEAD") {
             if behavior == .headWithoutRangeMetadata {
                 return Self.httpResponse(
