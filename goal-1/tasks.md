@@ -629,24 +629,30 @@ Work performed:
 - Added `TorrentTrackerScheduler` state tracking with failure backoff, tracker success state, announce timing, and tier-aware candidate selection that rotates through equally eligible trackers by announce recency.
 - Added `TorrentTrackerScrape` helpers for announce-to-scrape conversion and scrape result parsing, and normalized scrape parse failures into tracker errors.
 - Wired the pure Swift torrent adapter to emit tracker diagnostics snapshots, surface tracker peers, and move through `fetchingPeers` and `connectingPeers` states using the new tracker client.
-- Added deterministic local mock tests covering HTTP and UDP tracker announce flows, transaction id mismatch validation, timeout retry behavior, compact/non-compact peer parsing, scrape parsing, and tracker-aware adapter snapshots.
+- Added deterministic local mock tests covering HTTP and UDP tracker announce flows, HTTP retry, transaction id mismatch validation, timeout retry behavior, compact/non-compact peer parsing, scrape parsing, and tracker-aware adapter snapshots.
+- Updated task list, toolbar, inspector, menu bar, filtering, and coordinator active-slot handling so the new peer-fetching statuses behave consistently with active torrent work.
 
 Verification evidence:
 
-- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine` passed with 38 tests across 2 suites after rerunning with SwiftPM cache access.
-- `swift test` passed with 181 tests across 14 suites after rerunning with SwiftPM cache access.
-- `git diff --check` passed after the final tracker-client refinements.
 - `swift build` passed after rerunning with SwiftPM cache access.
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine` passed with 39 tests across 2 suites after rerunning with SwiftPM cache access.
+- `swift test` passed with 182 tests across 14 suites after rerunning with SwiftPM cache access.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed after the final tracker-client refinements.
+- Static libtorrent audit found no `CSwiftGetXLibtorrent` or `LibtorrentAdapter` references in `Sources/SwiftGetXTorrentCore`; remaining references are limited to the existing optional adapter and `Package.swift` gate.
+- Static import audit found no SwiftUI, SwiftData, AppKit, or libtorrent imports in `Sources/SwiftGetXTorrentCore`; the tracker client uses conditional `Network` only for UDP tracker transport.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; the linker emitted local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 185 tests across 15 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
 - The Swift torrent adapter is still metadata/layout only beyond tracker diagnostics; peer-wire connections, storage writes, piece verification, and end-to-end swarm behavior remain in Tasks 16-18.
-- Switching the global engine changes the engine used for new/configured runtime starts, but already active torrent handles are not migrated between engines in this skeleton task.
+- Tracker peers are surfaced as diagnostics only until the peer-wire work lands in Task 16, so `connectingPeers` does not yet mean a peer socket has completed a BitTorrent handshake.
 - Optional libtorrent verification depends on the local prebuilt `.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a` archive and Homebrew OpenSSL libraries; this task did not change the C wrapper or vendored native build.
 
 Next step:
 
-Large Check 5: Swift Torrent Adapter and Tracker.
+- Large Check 5: Swift Torrent Adapter and Tracker.
 
 ## Large Check 5: Swift Torrent Adapter and Tracker
 
@@ -661,6 +667,7 @@ Verification evidence:
 Remaining risk:
 
 Next step:
+
 
 ## Task 16: Peer Wire MVP and Torrent Storage
 
