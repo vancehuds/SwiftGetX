@@ -36,29 +36,32 @@
 
 ## ✨ Features
 
-### 🎨 Responsive Liquid Glass UI
-*   **macOS Premium Aesthetics**: Sleek three-pane interface conforming to macOS human interface guidelines with full support for Light & Dark mode.
+### 🎨 Responsive Liquid Glass UI & Maintenance
+*   **macOS Premium Aesthetics**: Sleek three-pane interface conforming to macOS human interface guidelines with full support for Light & Dark mode and polished micro-interactions.
 *   **Polished Micro-Interactions**: Real-time inspector view, adjustable toolbar commands, user settings window, and a persistent Menu Bar status tray item.
+*   **Dynamic Localization**: Full runtime language switching for System Default, English, and Simplified Chinese (`zh-Hans`). The interface updates instantly without requiring an app relaunch, powered by a customized `AppResources` asset manager for on-demand string and bundle discovery.
 *   **Smart Clipboard Capture**: Monitors the clipboard for download links and presents them inside a gorgeous, interactive liquid-glass float banner.
+*   **Sparkle Auto-Updates**: Seamless integration of the gold-standard [Sparkle](https://sparkle-project.org) framework. Supports automatic update checks on launch or manual check via menu items. Updates are cryptographically secured using EdDSA (Ed25519) signatures and published automatically through GitHub Actions.
 
 ### ⚡ Segmented HTTP/HTTPS Engine
-*   **Multi-Segment Parallelism**: Fast multi-threaded segmented downloads with robust HTTP Range-based chunk resume capability.
-*   **Resiliency & Control**: Features automatic file metadata probing, intelligent retry on failure, real-time download speed limits, and duplicate filename collision protection.
-*   **Real-time Metrics**: Generates accurate granular segment states, aggregate progress percentages, speed graphs, and precise Estimated Time of Arrival (ETA).
+*   **Multi-Segment Parallelism**: Fast multi-threaded segmented downloads with robust HTTP Range-based chunk resume capability, with customizable per-task HTTP options.
+*   **Response Metadata Capture**: Automatically detects and records HTTP response metadata (including ETag, Last-Modified, and Server headers), rendering professional diagnostics in the inspector.
+*   **Scheduling & Resiliency**: Built-in robust download scheduler with global/queue concurrent task limits, automatic requeue on failure, and customizable retry limits.
 *   **Safe Assembly**: Keeps incomplete downloads under a temporary `.part` structure, merging and renaming them instantly upon successful integrity check.
 
 ### 🧩 Zero-Configuration Browser Integration
 *   **Chrome Takeover (Manifest V3)**: Built-in Chrome extension. When a supported HTTP, HTTPS, magnet, or `.torrent` download is triggered in Chrome, the extension intercept-transports it via Native Messaging to SwiftGetX, cancelling the Chrome item after SwiftGetX accepts. If IPC fails, Chrome resumes the original download instantly.
-*   **Active Host Discovery & Repair**: The main App scans Chromium user profiles (such as Google Chrome and OpenAI ChatGPT Atlas) on launch or activation. It **automatically discovers** paired SwiftGetX extensions, generating or repairing Native Messaging manifests (`com.swiftgetx.native.json`) locally. **No manual extension ID copy-pasting required**.
+*   **Multi-Chromium Discovery**: Main App automatically scans local directory trees on startup or focus, auto-detecting extension installations in Google Chrome and OpenAI ChatGPT Atlas. Generates or repairs Native Messaging manifests (`com.swiftgetx.native.json`) instantly with zero manual ID copy-pasting.
+*   **Rich Handoff Context**: Securely passes download origins (source page URL, page title, and proposed filename) via deep links (`swiftgetx://download` and `swiftgetx://browser-setup`) with an integrated diagnostic status panel.
 *   **Safari Web Extension Template**: Clean Safari Web Extension bundle placeholder, ready for easy Xcode App Extension Target integration with Apple Developer certificate signing.
-*   **Scheme Dispatch**: Custom deep links registered for `swiftgetx://download?url=...` and diagnostic `swiftgetx://browser-setup`.
 
-### 🧬 Pluggable BitTorrent Engine (Powered by libtorrent)
-*   **Decoupled Architecture**: Features a generic `TorrentEngineAdapter` protocol, isolating BT implementation details completely from SwiftData models and SwiftUI views.
-*   **Static CMake Wrapper**: Vendors a pinned source of `arvidn/libtorrent` v2.0.12, bundled via `CSwiftGetXLibtorrent` C++ bridge wrapper and built with CMake.
-*   **Dual-Compilation Modes**:
-    *   *Default Target*: Compiles a lightweight mock adapter in seconds with **zero external dependencies** (ideal for instant onboarding and HTTP engine development).
-    *   *Native Target*: Activate a robust, full-featured native BT engine by setting the environment variable `SWIFTGETX_ENABLE_LIBTORRENT=1`. Supports Magnet link resolution, DHT, PEX, custom Tracker updates, file priority selections, rechecking, and seed-ratio enforcement.
+### 🧬 Dual-Engine BitTorrent Architecture
+*   **Decoupled Design**: Features a generic `TorrentEngineAdapter` protocol, isolating BT implementation details completely from SwiftData models and SwiftUI views.
+*   **Swift-Native Torrent Module**: A built-in, lightweight pure-Swift BT/DHT engine. Implements custom KRPC UDP search lookup, routing tables, Local Service Discovery (LSD), and Peer Exchange (PEX). Features zero C++ dependencies and compiles instantly.
+*   **Pure Swift Protocol Stack**: Custom-built Peer Wire Protocol binary framing engine (enforces maximum length limits to prevent buffer overflow attacks) with full BEP 9 / BEP 10 Magnet Extension support to query metadata directly from peers. Features integrated pure-Swift HTTP/UDP Tracker announcers.
+*   **Pluggable Physical BT Engine (libtorrent)**: Vendors a pinned source of `arvidn/libtorrent` v2.0.12 via a static `CSwiftGetXLibtorrent` C++ bridge. Activated dynamically by setting `SWIFTGETX_ENABLE_LIBTORRENT=1` for robust, professional-grade downloading.
+*   **Fine-Grained Runtime Control**: Toggle DHT, PEX, and LSD options individually with custom DHT bootstrap routers. Supports real-time upload/download speed limits, sequential download prioritization, concurrent connection and upload slot limits, and seeding ratio enforcement.
+*   **Deep Health Snapshot & Diagnostics**: Displays metadata fetching progress, complete Peer lists (up to 100 peers monitored in real time), interactive Tracker tables (add, remove, or force reannounce), DHT routing metrics, and resume-data dirty state tracking.
 
 ---
 
@@ -144,7 +147,7 @@ If you prefer to run pre-built binaries directly without compiling from source, 
 ## 🚀 Quick Start (For Developers compiling from Source)
 
 ### One-command Local Build and Test
-The repository includes a local development entrypoint. By default, it runs the lightweight build and test suite with Native libtorrent disabled:
+The repository includes a local development entrypoint. By default, it runs the lightweight build and test suite with the pure-Swift BT engine (mock and fallback setups are the default):
 
 ```sh
 Scripts/local-build.sh
@@ -159,13 +162,19 @@ Scripts/local-build.sh --skip-tests
 # Release build
 Scripts/local-build.sh --release
 
+# Automatically check and install Homebrew dependencies (cmake, boost, openssl)
+Scripts/local-build.sh --install-deps
+
 # Build and test with Native libtorrent enabled
 Scripts/local-build.sh --native-libtorrent
 
-# Assemble SwiftGetX.app and SwiftGetX.dmg
+# Assemble SwiftGetX.app, SwiftGetX.dmg and automatically package the Chrome Extension
 Scripts/local-build.sh --release --dmg
 
-# Install the Chrome Native Messaging host after build
+# Package only the Chrome extension under dist/chrome/*.crx and *.zip
+Scripts/local-build.sh --chrome-extension
+
+# Install the Chrome Native Messaging host after build (with automatic extension discovery)
 Scripts/local-build.sh --install-native-host <your-extension-id>
 ```
 

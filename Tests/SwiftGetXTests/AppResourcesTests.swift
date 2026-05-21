@@ -40,6 +40,40 @@ struct AppResourcesTests {
         UserDefaults.standard.set("system", forKey: AppSettings.languageUserDefaultsKey)
     }
 
+    @Test("resolves lowercase SwiftPM localization directory names")
+    func resolvesLowercaseSwiftPMLocalizationDirectoryNames() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let bundleURL = root.appendingPathComponent("Test.bundle", isDirectory: true)
+        let englishURL = bundleURL.appendingPathComponent("en.lproj", isDirectory: true)
+        let chineseURL = bundleURL.appendingPathComponent("zh-hans.lproj", isDirectory: true)
+
+        try FileManager.default.createDirectory(at: englishURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: chineseURL, withIntermediateDirectories: true)
+        try """
+        "status_ready" = "Ready";
+        """.write(
+            to: englishURL.appendingPathComponent("Localizable.strings"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try """
+        "status_ready" = "就绪";
+        """.write(
+            to: chineseURL.appendingPathComponent("Localizable.strings"),
+            atomically: true,
+            encoding: .utf8
+        )
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        let baseBundle = try #require(Bundle(url: bundleURL))
+        let languageBundle = AppResources.localizationBundle(for: AppLanguage.zhHans.rawValue, in: baseBundle)
+
+        #expect(NSLocalizedString("status_ready", bundle: languageBundle, comment: "") == "就绪")
+    }
+
     @Test("AppSettings starts with persisted language preference")
     func appSettingsStartsWithPersistedLanguagePreference() {
         let originalLanguage = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey)

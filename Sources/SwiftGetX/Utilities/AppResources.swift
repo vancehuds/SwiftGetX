@@ -9,13 +9,20 @@ enum AppResources {
 
     static var localizationBundle: Bundle {
         let baseBundle = bundle
-        if let langCode = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey),
-           langCode != "system",
-           let path = baseBundle.path(forResource: langCode, ofType: "lproj"),
-           let languageBundle = Bundle(path: path) {
-            return languageBundle
+        return localizationBundle(
+            for: UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey),
+            in: baseBundle
+        )
+    }
+
+    static func localizationBundle(for languageCode: String?, in baseBundle: Bundle) -> Bundle {
+        guard let languageCode,
+              languageCode != AppLanguage.system.rawValue,
+              let languageBundle = languageBundle(for: languageCode, in: baseBundle)
+        else {
+            return baseBundle
         }
-        return baseBundle
+        return languageBundle
     }
 
     static func url(forResource name: String, withExtension extensionName: String? = nil) -> URL? {
@@ -76,6 +83,75 @@ enum AppResources {
     private static func containsLocalizedStrings(at url: URL) -> Bool {
         let enStrings = url.appendingPathComponent("en.lproj/Localizable.strings")
         return FileManager.default.fileExists(atPath: enStrings.path)
+    }
+
+    private static func languageBundle(for languageCode: String, in baseBundle: Bundle) -> Bundle? {
+        for candidate in localizationCandidates(for: languageCode) {
+            if let path = baseBundle.path(forResource: candidate, ofType: "lproj"),
+               let bundle = Bundle(path: path) {
+                return bundle
+            }
+        }
+
+        let resourceURL = baseBundle.resourceURL ?? baseBundle.bundleURL
+        guard let lprojURLs = try? FileManager.default.contentsOfDirectory(
+            at: resourceURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        let candidateKeys = Set(localizationCandidates(for: languageCode).map(localizationLookupKey))
+        for url in lprojURLs where url.pathExtension.caseInsensitiveCompare("lproj") == .orderedSame {
+            let name = url.deletingPathExtension().lastPathComponent
+            guard candidateKeys.contains(localizationLookupKey(name)),
+                  let bundle = Bundle(url: url)
+            else {
+                continue
+            }
+            return bundle
+        }
+
+        return nil
+    }
+
+    private static func localizationCandidates(for languageCode: String) -> [String] {
+        let normalizedCode = localizationLookupKey(languageCode)
+        var candidates = [
+            languageCode,
+            languageCode.replacingOccurrences(of: "_", with: "-"),
+            languageCode.replacingOccurrences(of: "-", with: "_"),
+            languageCode.lowercased(),
+            Locale(identifier: languageCode).identifier
+        ]
+
+        if normalizedCode == "zh-hans" || normalizedCode == "zh-cn" {
+            candidates.append(contentsOf: [
+                "zh-Hans",
+                "zh-hans",
+                "zh_Hans",
+                "zh_CN"
+            ])
+        }
+
+        return deduplicated(candidates)
+    }
+
+    private static func localizationLookupKey(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "_", with: "-")
+            .lowercased()
+    }
+
+    private static func deduplicated(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in values {
+            guard seen.insert(value).inserted else { continue }
+            result.append(value)
+        }
+        return result
     }
 
     private static func deduplicated(_ urls: [URL]) -> [URL] {

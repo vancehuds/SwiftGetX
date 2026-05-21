@@ -35,27 +35,33 @@
 
 ## ✨ 核心特性
 
-### 🎨 现代原生 UI
-*   **液态玻璃设计**：采用符合 macOS 设计规范的三栏式交互界面，支持深色模式。
+### 🎨 现代原生 UI & 维护
+*   **液态玻璃设计**：采用符合 macOS 设计规范的三栏式交互界面，支持深色模式与精致的微交互。
 *   **交互细节**：包含任务列表、右侧属性检查器、工具栏、偏好设置窗口及常驻系统菜单栏（Menu Bar）图标。
+*   **多语言动态本地化**：支持系统默认、英文、简体中文的运行时动态切换。切换时 UI 即时刷新，无需重启 App，配合自主研发的 `AppResources` 实现资源与本地化文件的智能发现与按需加载。
 *   **智能剪贴板**：自动检测剪贴板链接，并在主界面弹出流线型玻璃拟态的下载建议条。
+*   **Sparkle 自动更新**：集成 macOS 黄金标准 [Sparkle](https://sparkle-project.org) 框架，支持启动时自动检查更新及菜单栏“检查更新…”手动触发。更新包基于 EdDSA (Ed25519) 密钥签名验证完整性，配合 GitHub Actions 自动化流水线签名并分发 `appcast.xml`。
 
 ### ⚡ 模块化 HTTP/HTTPS 下载引擎
-*   **多线程分段**：支持高性能多线程多分段下载，支持 Range 断点续传。
-*   **智能重试与限速**：具备元数据自动探测、自动重试、实时下载限速及重复文件覆盖保护。
-*   **状态管理**：输出实时的多分段状态、聚合进度、预估完成时间（ETA）及平均下载速率。
+*   **多线程分段**：支持高性能多线程多分段下载，支持 Range 断点续传，支持为每个任务指定个性化的 HTTP 下载选项。
+*   **响应元数据保存**：自动探测并记录服务器的 HTTP 响应元数据（如 ETag、Last-Modified、Server 报头等），提供专业的网络诊断视轨。
+*   **调度策略与恢复**：内置强健的任务调度队列协调器，支持全局/队列并发限制、下载失败后自动重新排队、以及自定义的重试策略和次数上限。
 *   **安全性**：使用临时 `.part` 文件存储未完成的下载，校验成功后无缝重命名。
 
 ### 🧩 零配置浏览器深度集成
 *   **Chrome 下载接管**：内置 Chrome 扩展（Manifest V3），默认开启“下载接管”。当在 Chrome 中触发符合规则的下载任务时，扩展将任务透明接管，并通过 Native Messaging 协议派发给 SwiftGetX，随后自动取消 Chrome 原生下载任务。如果交接失败，Chrome 将无缝继续下载。
-*   **自动发现与注册修复**：App 内置智能宿主扫描器，会在启动或激活时**自动发现**本地 Chrome/Chromium（如 Google Chrome 以及 OpenAI Atlas 浏览器）的 Extension 配置文件。自动检测 Extension ID 并修复或写入本地 Native Messaging 宿主 manifest 文件（`com.swiftgetx.native.json`），普通开发者或用户**无需手动配置 Extension ID** 即可直接通信。
+*   **多 Chromium 浏览器发现**：App 内置智能宿主扫描器，会在启动或激活时**自动发现**本地 Google Chrome 以及 OpenAI ChatGPT Atlas 浏览器的 Extension 配置文件，自动探测 Extension ID 并一键修复本地 Native Messaging 宿主清单（`com.swiftgetx.native.json`），用户无需任何手动配置。
+*   **完整上下文传递**：交接时智能捕获并携带浏览器下载上下文（包括来源页面 URL、标题、建议的文件名等），并通过安全的自定义协议 `swiftgetx://download` 与 `swiftgetx://browser-setup` 进行派发，同时支持在偏好设置中一键开启诊断面板。
 *   **Safari 扩展占位**：提供 Safari Web Extension 资源模板，方便后续在 Xcode 中配置 App Extension Target 实施苹果签名链集成。
-*   **深度链接支持**：注册了自定义协议 `swiftgetx://download?url=...` 与交互式发现协议 `swiftgetx://browser-setup`。
 
-### 🧬 可插拔式 BitTorrent 引擎 (基于 libtorrent)
-*   **隔离架构**：定义了高度抽象的 `TorrentEngineAdapter` 接口协议，将 BT 引擎的具体实现与主 App 彻底隔离。
-*   **静态链接 wrapper**：仓库内置了 `arvidn/libtorrent` v2.0.12 的源码包，并通过 `CSwiftGetXLibtorrent` 提供 C/C++ 封装，通过 CMake 构建静态链接库绑定。
-*   **灵活编译**：默认 SwiftPM 编译会使用轻量级占位适配器（零依赖，数秒内即可极速编译）。通过设置环境变量 `SWIFTGETX_ENABLE_LIBTORRENT=1` 即可动态无缝激活 Native 物理 BT 下载功能，支持 Magnet 磁力链接/种子文件解析、DHT/PEX 节点网络、Tracker 更新、多文件优先级选择等。
+### 🧬 双引擎 BitTorrent 下载架构
+*   **隔离设计**：定义了高度抽象的 `TorrentEngineAdapter` 接口协议，将 BT 引擎的具体实现与主 App 彻底隔离。
+*   **Swift 原生极速 BT 模块**：内置纯 Swift 编写的极速 BT/DHT 功能。自主实现了基于 KRPC 的 UDP 磁力链接寻址、DHT 路由表管理、LSD 本地服务发现及 PEX 节点交换，零 C++ 依赖极速启动并探测 Peer。
+*   **协议栈纯 Swift 实现**：自主开发了 Peer Wire Protocol 原生二进制协议栈（具备最大数据帧长限制以防内存溢出攻击），并完美实现 BEP 9 / BEP 10 磁力链接扩展协议，支持直接与 Peer 进行 Metadata 元数据交换，实现“无种子”情况下的快速磁力解析。同时内置了纯 Swift 编写的 UDP 与 HTTP Tracker 客户端，实现主动 Tracker 公告宣告。
+*   **可插拔式物理 BT 引擎 (libtorrent)**：仓库内置了 `arvidn/libtorrent` v2.0.12 源码包，并通过 `CSwiftGetXLibtorrent` 提供 C++ 封装。默认使用轻量级 Swift 原生模块编译；设置 `SWIFTGETX_ENABLE_LIBTORRENT=1` 即可激活重量级 libtorrent 物理 BT/磁力下载引擎。
+*   **精细化运行时控制**：支持一键开关 DHT, PEX, LSD 协议，支持自定义引导路由节点。提供每秒上传/下载限速、顺序下载模式、最大连接数/上传槽限制、种子分享率限速等运行时配置。
+*   **深度健康快照与监控**：实时呈现涵盖 Metadata 获取状态、已连接/正在连接 Peer 列表（最高支持 100 个 Peer 监视）、Tracker 详细列表（支持重新公告、手动增删）、DHT 节点数及 resume 数据脏状态的全面健康快照。
+
 
 ---
 
@@ -141,7 +147,7 @@ graph TD
 ## 🚀 快速上手 (Quick Start - 面向开发者本地编译)
 
 ### 一键本地编译与测试
-仓库提供了本地开发入口脚本，默认执行轻量构建并运行测试（默认禁用 Native libtorrent，适合日常快速验证）：
+仓库提供了本地开发入口脚本，默认执行轻量构建并运行测试（默认使用轻量 Swift 原生 BT 引擎，适合日常快速验证）：
 
 ```sh
 Scripts/local-build.sh
@@ -156,11 +162,17 @@ Scripts/local-build.sh --skip-tests
 # Release 构建
 Scripts/local-build.sh --release
 
-# 启用 Native libtorrent 后构建并测试
+# 一键安装编译与打包依赖（cmake boost openssl）
+Scripts/local-build.sh --install-deps
+
+# 启用重量级 Native libtorrent 引擎后构建并测试
 Scripts/local-build.sh --native-libtorrent
 
-# 组装 SwiftGetX.app 与 SwiftGetX.dmg
+# 组装 SwiftGetX.app、SwiftGetX.dmg 并自动打包 Chrome 扩展
 Scripts/local-build.sh --release --dmg
+
+# 仅打包 Chrome 扩展生成 dist/chrome/*.crx 和 *.zip 资源
+Scripts/local-build.sh --chrome-extension
 
 # 构建后安装 Chrome Native Messaging Host（可省略 ID 自动发现）
 Scripts/local-build.sh --install-native-host <your-extension-id>
