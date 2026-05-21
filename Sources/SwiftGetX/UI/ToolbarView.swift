@@ -18,8 +18,18 @@ struct ToolbarView: View {
     }
 
     private var selectedTaskIsPausable: Bool {
-        guard let status = coordinator.selectedTask?.status else { return false }
-        return status == .running || status == .fetchingMetadata || status == .fetchingPeers || status == .connectingPeers || status == .seeding || status == .verifying
+        coordinator.selectedTasks.contains { task in
+            task.status == .running
+                || task.status == .fetchingMetadata
+                || task.status == .fetchingPeers
+                || task.status == .connectingPeers
+                || task.status == .seeding
+                || task.status == .verifying
+        }
+    }
+
+    private var hasSelection: Bool {
+        !coordinator.selectedTasks.isEmpty
     }
 
     var body: some View {
@@ -52,18 +62,16 @@ struct ToolbarView: View {
                     .help(L10n.string("command_new_download"))
 
                     Button {
-                        guard let task = coordinator.selectedTask else { return }
-                        switch task.status {
-                        case .running, .fetchingMetadata, .fetchingPeers, .connectingPeers, .seeding, .verifying:
-                            coordinator.pause(task)
-                        default:
-                            coordinator.resume(task)
+                        if selectedTaskIsPausable {
+                            coordinator.pauseSelected()
+                        } else {
+                            coordinator.resumeSelected()
                         }
                     } label: {
                         Image(systemName: selectedTaskIsPausable ? "pause.fill" : "play.fill")
                     }
                     .buttonStyle(IconButtonStyle())
-                    .disabled(coordinator.selectedTask == nil)
+                    .disabled(!hasSelection)
                     .help(L10n.string("help_toggle_selected_task"))
 
                     Button {
@@ -72,7 +80,7 @@ struct ToolbarView: View {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(IconButtonStyle())
-                    .disabled(coordinator.selectedTask == nil)
+                    .disabled(!hasSelection)
                     .help(L10n.string("action_delete_task"))
                 }
 

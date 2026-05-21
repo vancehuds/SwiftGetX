@@ -22,12 +22,67 @@ struct SidebarView: View {
 
                         ForEach(DownloadFilter.allCases) { filter in
                             SidebarRow(
-                                filter: filter,
+                                title: filter.title,
+                                symbolName: filter.symbolName,
+                                statusColor: filter.statusColor,
                                 count: tasks.filter { filter.matches($0) }.count,
                                 isSelected: coordinator.activeFilter == filter
+                                    && coordinator.activeCategory == nil
+                                    && coordinator.activeTag == nil
                             ) {
                                 withAnimation(.easeOut(duration: 0.12)) {
-                                    coordinator.activeFilter = filter
+                                    coordinator.selectFilter(filter)
+                                }
+                            }
+                        }
+
+                        let categories = coordinator.categories(in: tasks)
+                        if !categories.isEmpty {
+                            Text(L10n.string("sidebar_categories"))
+                                .font(layout.font(11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, layout.value(12))
+                                .padding(.top, layout.value(12))
+                                .padding(.bottom, layout.value(2))
+
+                            ForEach(categories) { category in
+                                SidebarRow(
+                                    title: category.title,
+                                    symbolName: category.symbolName,
+                                    statusColor: .purple,
+                                    count: tasks.filter { !$0.isArchived && $0.category == category }.count,
+                                    isSelected: coordinator.activeCategory == category
+                                ) {
+                                    withAnimation(.easeOut(duration: 0.12)) {
+                                        coordinator.selectCategory(category)
+                                    }
+                                }
+                            }
+                        }
+
+                        let tags = coordinator.tags(in: tasks)
+                        if !tags.isEmpty {
+                            Text(L10n.string("sidebar_tags"))
+                                .font(layout.font(11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, layout.value(12))
+                                .padding(.top, layout.value(12))
+                                .padding(.bottom, layout.value(2))
+
+                            ForEach(tags, id: \.self) { tag in
+                                SidebarRow(
+                                    title: "#\(tag)",
+                                    symbolName: "tag",
+                                    statusColor: .pink,
+                                    count: tasks.filter {
+                                        !$0.isArchived
+                                            && $0.normalizedTags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
+                                    }.count,
+                                    isSelected: coordinator.activeTag == tag
+                                ) {
+                                    withAnimation(.easeOut(duration: 0.12)) {
+                                        coordinator.selectTag(tag)
+                                    }
                                 }
                             }
                         }
@@ -102,7 +157,9 @@ private struct BrowserStatusSidebarPanel: View {
 }
 
 private struct SidebarRow: View {
-    let filter: DownloadFilter
+    let title: String
+    let symbolName: String
+    let statusColor: Color
     let count: Int
     let isSelected: Bool
     let action: () -> Void
@@ -113,12 +170,12 @@ private struct SidebarRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: layout.value(10)) {
-                Image(systemName: filter.symbolName)
+                Image(systemName: symbolName)
                     .font(layout.font(13, weight: isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? filter.statusColor : .secondary)
+                    .foregroundStyle(isSelected ? statusColor : .secondary)
                     .frame(width: layout.value(18))
 
-                Text(filter.title)
+                Text(title)
                     .font(layout.font(13.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(isSelected ? Color.primary : .secondary)
 
@@ -141,7 +198,7 @@ private struct SidebarRow: View {
                     ContentSurfaceBackground(
                         isSelected: isSelected,
                         isHovered: isHovered,
-                        tint: filter.statusColor,
+                        tint: statusColor,
                         cornerRadius: 8
                     )
                 }
@@ -159,6 +216,14 @@ private extension DownloadFilter {
         switch self {
         case .all:
             .primary
+        case .today:
+            .blue
+        case .recent:
+            .cyan
+        case .large:
+            .indigo
+        case .needsAttention:
+            .red
         case .running:
             .blue
         case .seeding:
@@ -177,6 +242,8 @@ private extension DownloadFilter {
             .indigo
         case .torrent:
             .teal
+        case .archived:
+            .brown
         }
     }
 }

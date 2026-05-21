@@ -395,10 +395,13 @@ private struct HTTPDownloadWorker: Sendable {
     let onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
 
     private func waitForDownloadCapacity(request: DownloadRequest, bytes: Int64) async {
+        let perTaskLimit = request.perTaskDownloadLimitBytes > 0
+            ? request.perTaskDownloadLimitBytes
+            : request.httpOptions?.perTaskDownloadLimitBytes
         await runState.waitForDownloadCapacity(
             taskID: request.id,
             bytes: bytes,
-            perTaskLimitBytesPerSecond: request.httpOptions?.perTaskDownloadLimitBytes
+            perTaskLimitBytesPerSecond: perTaskLimit
         )
     }
 

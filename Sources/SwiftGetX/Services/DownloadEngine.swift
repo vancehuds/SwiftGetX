@@ -44,6 +44,8 @@ struct DownloadRequest: Sendable {
     let torrentRuntimeOptions: TorrentRuntimeOptions?
     let hasExplicitFileSelection: Bool
     let browserContext: BrowserDownloadContext?
+    let perTaskDownloadLimitBytes: Int64
+    let perTaskUploadLimitBytes: Int64
 
     init(
         id: UUID,
@@ -69,7 +71,9 @@ struct DownloadRequest: Sendable {
         torrentResumeState: TorrentResumeState? = nil,
         torrentRuntimeOptions: TorrentRuntimeOptions? = nil,
         hasExplicitFileSelection: Bool = false,
-        browserContext: BrowserDownloadContext? = nil
+        browserContext: BrowserDownloadContext? = nil,
+        perTaskDownloadLimitBytes: Int64 = 0,
+        perTaskUploadLimitBytes: Int64 = 0
     ) {
         self.id = id
         self.name = name
@@ -95,6 +99,8 @@ struct DownloadRequest: Sendable {
         self.torrentRuntimeOptions = torrentRuntimeOptions
         self.hasExplicitFileSelection = hasExplicitFileSelection
         self.browserContext = browserContext
+        self.perTaskDownloadLimitBytes = max(0, perTaskDownloadLimitBytes)
+        self.perTaskUploadLimitBytes = max(0, perTaskUploadLimitBytes)
     }
 
     init(
@@ -128,6 +134,8 @@ struct DownloadRequest: Sendable {
             ? !task.torrentFiles.isEmpty
             : false
         self.browserContext = browserContext ?? task.browserContext
+        perTaskDownloadLimitBytes = task.perTaskDownloadLimitBytes
+        perTaskUploadLimitBytes = task.perTaskUploadLimitBytes
     }
 }
 

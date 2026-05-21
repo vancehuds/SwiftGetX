@@ -44,6 +44,11 @@ final class DownloadTask {
     var queuePriorityRawValue: String = DownloadQueuePriority.normal.rawValue
     var queueFailureCount: Int = 0
     var nextQueueRetryAt: Date?
+    var categoryRawValue: String = DownloadTaskCategory.uncategorized.rawValue
+    var tags: [String] = []
+    var archivedAt: Date?
+    var perTaskDownloadLimitBytes: Int64 = 0
+    var perTaskUploadLimitBytes: Int64 = 0
     var logEntries: [String]
 
     init(
@@ -86,6 +91,11 @@ final class DownloadTask {
         queuePriority: DownloadQueuePriority = .normal,
         queueFailureCount: Int = 0,
         nextQueueRetryAt: Date? = nil,
+        category: DownloadTaskCategory = .uncategorized,
+        tags: [String] = [],
+        archivedAt: Date? = nil,
+        perTaskDownloadLimitBytes: Int64 = 0,
+        perTaskUploadLimitBytes: Int64 = 0,
         logEntries: [String] = []
     ) {
         self.id = id
@@ -127,6 +137,11 @@ final class DownloadTask {
         self.queuePriorityRawValue = queuePriority.rawValue
         self.queueFailureCount = queueFailureCount
         self.nextQueueRetryAt = nextQueueRetryAt
+        self.categoryRawValue = category.rawValue
+        self.tags = Self.normalizedTagList(tags)
+        self.archivedAt = archivedAt
+        self.perTaskDownloadLimitBytes = max(0, perTaskDownloadLimitBytes)
+        self.perTaskUploadLimitBytes = max(0, perTaskUploadLimitBytes)
         self.logEntries = logEntries
     }
 
@@ -168,6 +183,19 @@ final class DownloadTask {
     var queuePriority: DownloadQueuePriority {
         get { DownloadQueuePriority(rawValue: queuePriorityRawValue) ?? .normal }
         set { queuePriorityRawValue = newValue.rawValue }
+    }
+
+    var category: DownloadTaskCategory {
+        get { DownloadTaskCategory(rawValue: categoryRawValue) ?? .uncategorized }
+        set { categoryRawValue = newValue.rawValue }
+    }
+
+    var isArchived: Bool {
+        archivedAt != nil
+    }
+
+    var normalizedTags: [String] {
+        Self.normalizedTagList(tags)
     }
 
     var effectiveQueuePosition: Double {
@@ -414,6 +442,17 @@ final class DownloadTask {
         }
         return unique
     }
+
+    static func normalizedTagList(_ tags: [String]) -> [String] {
+        var seen = Set<String>()
+        return tags
+            .flatMap { tag in
+                tag.components(separatedBy: CharacterSet(charactersIn: ",;"))
+            }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0.lowercased()).inserted }
+    }
 }
 
 enum DownloadKind: String, Codable, CaseIterable, Identifiable {
@@ -543,6 +582,67 @@ enum DownloadQueuePriority: String, Codable, CaseIterable, Identifiable {
         case .low:
             "arrow.down.circle"
         }
+    }
+}
+
+enum DownloadTaskCategory: String, Codable, CaseIterable, Identifiable {
+    case uncategorized
+    case software
+    case video
+    case document
+    case torrent
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .uncategorized:
+            L10n.string("category_uncategorized")
+        case .software:
+            L10n.string("category_software")
+        case .video:
+            L10n.string("category_video")
+        case .document:
+            L10n.string("category_document")
+        case .torrent:
+            "BT"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .uncategorized:
+            "tray"
+        case .software:
+            "shippingbox"
+        case .video:
+            "play.rectangle"
+        case .document:
+            "doc.text"
+        case .torrent:
+            "point.3.connected.trianglepath.dotted"
+        }
+    }
+
+    static func inferred(kind: DownloadKind, source: String, filename: String) -> DownloadTaskCategory {
+        if kind == .torrentMagnet || kind == .torrentFile {
+            return .torrent
+        }
+        let extensionValue = URL(fileURLWithPath: filename).pathExtension.lowercased()
+        let lowerSource = source.lowercased()
+        if ["dmg", "pkg", "app", "zip", "xip", "msi", "exe", "deb", "rpm"].contains(extensionValue) {
+            return .software
+        }
+        if ["mp4", "mkv", "mov", "avi", "webm", "m4v", "mp3", "flac", "wav", "m3u8", "mpd"].contains(extensionValue) {
+            return .video
+        }
+        if ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "epub"].contains(extensionValue) {
+            return .document
+        }
+        if lowerSource.contains("github.com") || lowerSource.contains("gitlab.com") {
+            return .software
+        }
+        return .uncategorized
     }
 }
 

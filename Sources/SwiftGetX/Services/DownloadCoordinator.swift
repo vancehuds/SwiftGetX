@@ -19,7 +19,10 @@ final class DownloadCoordinator {
     private let runsEngines: Bool
 
     var selectedTaskID: UUID?
+    var selectedTaskIDs = Set<UUID>()
     var activeFilter: DownloadFilter = .all
+    var activeCategory: DownloadTaskCategory?
+    var activeTag: String?
     var searchText = ""
     var downloadLimitBytes: Int64 = 0
     var uploadLimitBytes: Int64 = 0
@@ -36,6 +39,33 @@ final class DownloadCoordinator {
             predicate: #Predicate { $0.id == selectedTaskID }
         )
         return try? modelContext.fetch(descriptor).first
+    }
+
+    var selectedTasks: [DownloadTask] {
+        let ids = effectiveSelectedTaskIDs
+        guard !ids.isEmpty else { return [] }
+        return allTasks().filter { ids.contains($0.id) }
+    }
+
+    var effectiveSelectedTaskIDs: Set<UUID> {
+        if selectedTaskIDs.isEmpty, let selectedTaskID {
+            return [selectedTaskID]
+        }
+        return selectedTaskIDs
+    }
+
+    var selectedTaskCount: Int {
+        effectiveSelectedTaskIDs.count
+    }
+
+    var activeListTitle: String {
+        if let activeCategory {
+            return activeCategory.title
+        }
+        if let activeTag {
+            return "#\(activeTag)"
+        }
+        return activeFilter.title
     }
 
     func attach(modelContext: ModelContext, settings: AppSettings) {
@@ -108,13 +138,67 @@ final class DownloadCoordinator {
 
     func tasks(for filter: DownloadFilter = .all) -> [DownloadTask] {
         let allTasks = allTasks()
-        return allTasks.filter { task in
+        return filteredTasks(from: allTasks, filter: filter)
+    }
+
+    func filteredTasks(from tasks: [DownloadTask]) -> [DownloadTask] {
+        filteredTasks(from: tasks, filter: activeFilter)
+    }
+
+    func filteredTasks(from tasks: [DownloadTask], filter: DownloadFilter) -> [DownloadTask] {
+        sortedTasks(tasks.filter { task in
             let matchesFilter = filter.matches(task)
+            let matchesCategory = activeCategory.map { task.category == $0 && !task.isArchived } ?? true
+            let matchesTag = activeTag.map { tag in
+                task.normalizedTags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
+                    && !task.isArchived
+            } ?? true
             let matchesSearch = searchText.isEmpty
                 || task.name.localizedCaseInsensitiveContains(searchText)
                 || task.source.localizedCaseInsensitiveContains(searchText)
-            return matchesFilter && matchesSearch
-        }
+                || task.category.title.localizedCaseInsensitiveContains(searchText)
+                || task.normalizedTags.contains { $0.localizedCaseInsensitiveContains(searchText) }
+            return matchesFilter && matchesCategory && matchesTag && matchesSearch
+        })
+    }
+
+    func selectFilter(_ filter: DownloadFilter) {
+        activeFilter = filter
+        activeCategory = nil
+        activeTag = nil
+    }
+
+    func selectCategory(_ category: DownloadTaskCategory) {
+        activeFilter = .all
+        activeCategory = category
+        activeTag = nil
+    }
+
+    func selectTag(_ tag: String) {
+        let normalized = Self.normalizedTag(tag)
+        guard !normalized.isEmpty else { return }
+        activeFilter = .all
+        activeCategory = nil
+        activeTag = normalized
+    }
+
+    func clearSmartFilter() {
+        activeCategory = nil
+        activeTag = nil
+    }
+
+    func categories(in tasks: [DownloadTask]) -> [DownloadTaskCategory] {
+        let present = Set(tasks.filter { !$0.isArchived }.map(\.category))
+        return DownloadTaskCategory.allCases.filter { present.contains($0) }
+    }
+
+    func tags(in tasks: [DownloadTask]) -> [String] {
+        var seen = Set<String>()
+        return tasks
+            .filter { !$0.isArchived }
+            .flatMap(\.normalizedTags)
+            .filter { seen.insert($0.lowercased()).inserted }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     func allTasks() -> [DownloadTask] {
@@ -129,8 +213,50 @@ final class DownloadCoordinator {
         tasks.sorted(by: Self.queuePrecedes)
     }
 
+    func selectOnly(_ task: DownloadTask) {
+        selectedTaskID = task.id
+        selectedTaskIDs = [task.id]
+    }
+
+    func toggleSelection(_ task: DownloadTask) {
+        if selectedTaskIDs.isEmpty, let selectedTaskID {
+            selectedTaskIDs = [selectedTaskID]
+        }
+        if selectedTaskIDs.contains(task.id) {
+            selectedTaskIDs.remove(task.id)
+            if selectedTaskID == task.id {
+                selectedTaskID = selectedTaskIDs.first
+            }
+        } else {
+            selectedTaskIDs.insert(task.id)
+            selectedTaskID = task.id
+        }
+    }
+
+    func selectAllVisible(_ tasks: [DownloadTask]) {
+        let ids = Set(tasks.map(\.id))
+        selectedTaskIDs = ids
+        selectedTaskID = tasks.first?.id
+    }
+
+    func clearSelection() {
+        selectedTaskID = nil
+        selectedTaskIDs.removeAll()
+    }
+
+    func pruneSelection() {
+        let existingIDs = Set(allTasks().map(\.id))
+        selectedTaskIDs = selectedTaskIDs.intersection(existingIDs)
+        if let selectedTaskID, !existingIDs.contains(selectedTaskID) {
+            self.selectedTaskID = selectedTaskIDs.first
+        }
+        if selectedTaskIDs.isEmpty, selectedTaskID == nil {
+            clearSelection()
+        }
+    }
+
     func moveQueueItemToTop(_ task: DownloadTask) {
-        guard task.isQueueManageable else { return }
+        guard task.isQueueManageable, !task.isArchived else { return }
         var queueTasks = queueManageableTasks().filter { $0.id != task.id }
         queueTasks.insert(task, at: 0)
         rewriteQueuePositions(queueTasks)
@@ -148,11 +274,208 @@ final class DownloadCoordinator {
     }
 
     func setQueuePriority(_ task: DownloadTask, priority: DownloadQueuePriority) {
-        guard task.queuePriority != priority else { return }
+        guard !task.isArchived, task.queuePriority != priority else { return }
         task.queuePriority = priority
         task.appendLog(L10n.string("log_queue_priority_changed", priority.title))
         save()
         scheduleQueue()
+    }
+
+    func pauseSelected() {
+        let tasks = selectedTasks.filter {
+            !$0.isArchived && ($0.usesActiveDownloadSlot || $0.status == .seeding || $0.status == .queued)
+        }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            pause(task, schedulesQueueAfterFreeingSlot: false)
+        }
+        scheduleQueue()
+    }
+
+    func resumeSelected() {
+        let tasks = selectedTasks.filter {
+            !$0.isArchived
+                && ($0.status == .paused || $0.status == .failed || $0.status == .cancelled || $0.status == .queued)
+        }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            resume(task)
+        }
+    }
+
+    func cancelSelected() {
+        let tasks = selectedTasks.filter { !$0.isArchived && !$0.isTerminal }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            cancel(task)
+        }
+    }
+
+    func retrySelected() {
+        let tasks = selectedTasks.filter {
+            !$0.isArchived && ($0.status == .failed || $0.status == .cancelled || $0.status == .paused)
+        }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            retry(task)
+        }
+    }
+
+    func recheckSelected() {
+        let tasks = selectedTasks.filter { !$0.isArchived }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            recheck(task)
+        }
+    }
+
+    func removeSelected(deletingFiles: Bool) {
+        let tasks = selectedTasks
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            remove(task, deletingFiles: deletingFiles)
+        }
+        pruneSelection()
+    }
+
+    func moveSelectedToTop() {
+        let selectedIDs = effectiveSelectedTaskIDs
+        var queueTasks = queueManageableTasks()
+        let selected = queueTasks.filter { selectedIDs.contains($0.id) }
+        guard !selected.isEmpty else { return }
+        queueTasks.removeAll { selectedIDs.contains($0.id) }
+        queueTasks.insert(contentsOf: selected, at: 0)
+        rewriteQueuePositions(queueTasks)
+        for task in selected {
+            task.appendLog(L10n.string("log_queue_moved_top"))
+        }
+        save()
+        scheduleQueue()
+    }
+
+    func moveSelectedUp() {
+        moveSelectedQueueItems(offset: -1)
+    }
+
+    func moveSelectedDown() {
+        moveSelectedQueueItems(offset: 1)
+    }
+
+    func setSelectedQueuePriority(_ priority: DownloadQueuePriority) {
+        let tasks = selectedTasks.filter { !$0.isArchived && $0.isQueueManageable }
+        guard !tasks.isEmpty else { return }
+        for task in tasks where task.queuePriority != priority {
+            task.queuePriority = priority
+            task.appendLog(L10n.string("log_queue_priority_changed", priority.title))
+        }
+        save()
+        scheduleQueue()
+    }
+
+    func setSelectedDownloadLimit(_ bytesPerSecond: Int64) {
+        setSelectedSpeedLimit(downloadBytesPerSecond: bytesPerSecond, uploadBytesPerSecond: 0)
+    }
+
+    func setSelectedSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) {
+        let downloadLimit = downloadBytesPerSecond > 0 ? downloadBytesPerSecond : nil
+        let uploadLimit = max(0, uploadBytesPerSecond)
+        let tasks = selectedTasks.filter { !$0.isArchived }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            task.perTaskDownloadLimitBytes = max(0, downloadBytesPerSecond)
+            task.perTaskUploadLimitBytes = uploadLimit
+            if task.kind == .http {
+                let options = runtimeHTTPOptions[task.id] ?? task.httpOptions ?? HTTPDownloadOptions()
+                let updated = HTTPDownloadOptions(
+                    segmentCountOverride: options.segmentCountOverride,
+                    retryLimitOverride: options.retryLimitOverride,
+                    perTaskDownloadLimitBytes: downloadLimit,
+                    filenameOverride: options.filenameOverride,
+                    additionalHeaders: options.additionalHeaders
+                )
+                task.httpOptions = updated
+                runtimeHTTPOptions[task.id] = updated
+            }
+            task.appendLog(L10n.string("log_batch_speed_limit_changed", formattedSpeedLimit(downloadBytesPerSecond)))
+        }
+        save()
+    }
+
+    func setSelectedCategory(_ category: DownloadTaskCategory) {
+        let tasks = selectedTasks
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            task.category = category
+            task.appendLog(L10n.string("log_category_changed", category.title))
+        }
+        save()
+    }
+
+    func setSelectedTags(_ tags: [String]) {
+        let normalizedTags = DownloadTask.normalizedTagList(tags)
+        let tasks = selectedTasks
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            task.tags = normalizedTags
+            task.appendLog(L10n.string("log_tags_changed", normalizedTags.joined(separator: ", ")))
+        }
+        save()
+    }
+
+    func archiveSelected() {
+        archiveTasks(selectedTasks)
+    }
+
+    func unarchiveSelected() {
+        let tasks = selectedTasks.filter(\.isArchived)
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            task.archivedAt = nil
+            task.appendLog(L10n.string("log_unarchived_task"))
+        }
+        save()
+        scheduleQueue()
+    }
+
+    func archiveCompletedTasks() {
+        archiveTasks(allTasks().filter { !$0.isArchived && $0.hasFinishedDownloading })
+    }
+
+    func archiveFailedTasks() {
+        archiveTasks(allTasks().filter { !$0.isArchived && ($0.status == .failed || $0.status == .cancelled) })
+    }
+
+    func cleanupCompletedAndFailed(deletingFiles: Bool) {
+        let tasks = allTasks().filter {
+            !$0.isArchived
+                && ($0.status == .completed || $0.status == .failed || $0.status == .cancelled)
+        }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            remove(task, deletingFiles: deletingFiles)
+        }
+        pruneSelection()
+    }
+
+    func removeArchivedTaskRecords() {
+        let tasks = allTasks().filter(\.isArchived)
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            remove(task, deletingFiles: false)
+        }
+    }
+
+    func moveSelectedToDefaultDirectory() {
+        let directory = settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
+        moveSelected(toSaveDirectory: directory)
+    }
+
+    func moveSelected(toSaveDirectory directory: URL) {
+        let tasks = selectedTasks.filter { !$0.isArchived }
+        guard !tasks.isEmpty else { return }
+        for task in tasks {
+            move(task, toSaveDirectory: directory)
+        }
     }
 
     @discardableResult
@@ -192,6 +515,11 @@ final class DownloadCoordinator {
             if task.isTorrent {
                 task.applyTorrentLayout(saveDirectory: saveDirectory, outputName: displayName)
             }
+            task.category = DownloadTaskCategory.inferred(
+                kind: kind,
+                source: source,
+                filename: displayName
+            )
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
             return task
@@ -208,7 +536,9 @@ final class DownloadCoordinator {
                 runtimeHTTPOptions[task.id] = httpOptions
             }
         }
-        selectedTaskID = tasks.first?.id ?? selectedTaskID
+        if let firstTask = tasks.first {
+            selectOnly(firstTask)
+        }
         save()
         statusMessage = L10n.string("status_added_tasks", tasks.count)
         scheduleQueue()
@@ -263,6 +593,11 @@ final class DownloadCoordinator {
                     }
                 )
             }
+            task.category = DownloadTaskCategory.inferred(
+                kind: preview.kind,
+                source: preview.source,
+                filename: preview.displayName
+            )
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
             if let errorMessage = preview.errorMessage {
@@ -284,7 +619,9 @@ final class DownloadCoordinator {
                 runtimeHTTPOptions[task.id] = httpOptions
             }
         }
-        selectedTaskID = tasks.first?.id ?? selectedTaskID
+        if let firstTask = tasks.first {
+            selectOnly(firstTask)
+        }
         save()
         statusMessage = L10n.string("status_added_tasks", tasks.count)
         scheduleQueue()
@@ -313,6 +650,7 @@ final class DownloadCoordinator {
     }
 
     private func start(_ task: DownloadTask, resetsQueueFailureState: Bool) {
+        guard !task.isArchived else { return }
         task.status = .running
         task.errorMessage = nil
         task.retryCount = 0
@@ -388,6 +726,7 @@ final class DownloadCoordinator {
     }
 
     func resume(_ task: DownloadTask) {
+        guard !task.isArchived else { return }
         task.status = .queued
         task.errorMessage = nil
         task.speedBytesPerSecond = 0
@@ -401,6 +740,7 @@ final class DownloadCoordinator {
     }
 
     func retry(_ task: DownloadTask) {
+        guard !task.isArchived else { return }
         guard task.status == .failed || task.status == .cancelled || task.status == .paused else { return }
         task.appendLog(L10n.string("log_retry_task"))
         resume(task)
@@ -445,8 +785,9 @@ final class DownloadCoordinator {
         runtimeBrowserContexts[task.id] = nil
         runtimeHTTPOptions[task.id] = nil
         modelContext.delete(task)
+        selectedTaskIDs.remove(task.id)
         if selectedTaskID == task.id {
-            selectedTaskID = tasks().first?.id
+            selectedTaskID = selectedTaskIDs.first ?? filteredTasks(from: allTasks()).first?.id
         }
         save()
 
@@ -526,6 +867,59 @@ final class DownloadCoordinator {
         }
     }
 
+    func move(_ task: DownloadTask, toSaveDirectory directory: URL) {
+        let normalizedDirectory = directory.standardizedFileURL
+        guard normalizedDirectory.isFileURL, !normalizedDirectory.path.isEmpty else { return }
+        if task.isTorrent {
+            relocateTorrent(task, toSaveDirectory: normalizedDirectory)
+            return
+        }
+
+        let destination = FileManager.default.uniqueFileURL(
+            for: normalizedDirectory.appendingPathComponent(task.name)
+        )
+        let oldPath = task.savePath
+        let wasActive = task.usesActiveDownloadSlot
+        let oldRequest = DownloadRequest(task: task)
+        if wasActive {
+            task.status = .paused
+            task.speedBytesPerSecond = 0
+            task.appendLog(L10n.string("log_paused_for_relocation"))
+        }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try HTTPPartialDataStore(savePath: oldPath).moveData(to: destination.path)
+            if FileManager.default.fileExists(atPath: oldPath),
+               !FileManager.default.fileExists(atPath: destination.path)
+            {
+                try FileManager.default.moveItem(
+                    at: URL(fileURLWithPath: oldPath),
+                    to: destination
+                )
+            }
+            task.savePath = destination.path
+            task.name = destination.lastPathComponent
+            task.appendLog(L10n.string("log_moved_task_file", destination.path))
+            let request = DownloadRequest(task: task)
+            save()
+
+            guard runsEngines, wasActive else { return }
+            Task {
+                await engine(for: oldRequest.kind).pause(oldRequest)
+                await engine(for: request.kind).recheck(request)
+            }
+        } catch {
+            task.status = .failed
+            task.errorMessage = error.localizedDescription
+            task.appendLog(error.localizedDescription)
+            save()
+        }
+    }
+
     func reprobeHTTPMetadata(_ task: DownloadTask) {
         guard task.kind == .http,
               let url = URL(string: task.source)
@@ -569,6 +963,7 @@ final class DownloadCoordinator {
     }
 
     func recheck(_ task: DownloadTask) {
+        guard !task.isArchived else { return }
         task.status = .verifying
         task.nextQueueRetryAt = nil
         task.appendLog(L10n.string("log_start_recheck"))
@@ -853,13 +1248,13 @@ final class DownloadCoordinator {
     }
 
     func pauseAll() {
-        for task in allTasks() where task.usesActiveDownloadSlot || task.status == .seeding || task.status == .queued {
+        for task in allTasks() where !task.isArchived && (task.usesActiveDownloadSlot || task.status == .seeding || task.status == .queued) {
             pause(task, schedulesQueueAfterFreeingSlot: false)
         }
     }
 
     func resumeAll() {
-        for task in allTasks() where task.status == .paused || task.status == .failed || task.status == .cancelled || task.status == .queued {
+        for task in allTasks() where !task.isArchived && (task.status == .paused || task.status == .failed || task.status == .cancelled || task.status == .queued) {
             resume(task)
         }
     }
@@ -911,13 +1306,13 @@ final class DownloadCoordinator {
     func scheduleQueue() {
         let now = Date()
         let tasks = allTasks()
-        let running = tasks.filter(\.usesActiveDownloadSlot).count
+        let running = tasks.filter { !$0.isArchived && $0.usesActiveDownloadSlot }.count
         let availableSlots = max(0, (settings?.concurrentTaskLimit ?? 3) - running)
         scheduleNextQueueWake(from: tasks, now: now)
         guard availableSlots > 0 else { return }
 
         for task in tasks
-            .filter({ $0.status == .queued && $0.isQueueRetryDue(at: now) })
+            .filter({ !$0.isArchived && $0.status == .queued && $0.isQueueRetryDue(at: now) })
             .prefix(availableSlots)
         {
             start(task, resetsQueueFailureState: false)
@@ -1104,6 +1499,7 @@ final class DownloadCoordinator {
     private func moveQueueItem(_ task: DownloadTask, offset: Int) {
         var queueTasks = queueManageableTasks()
         guard task.isQueueManageable,
+              !task.isArchived,
               let index = queueTasks.firstIndex(where: { $0.id == task.id })
         else {
             return
@@ -1122,8 +1518,69 @@ final class DownloadCoordinator {
         scheduleQueue()
     }
 
+    private func moveSelectedQueueItems(offset: Int) {
+        let selectedIDs = effectiveSelectedTaskIDs
+        var queueTasks = queueManageableTasks()
+        guard !selectedIDs.isEmpty else { return }
+        if offset < 0 {
+            for index in queueTasks.indices.dropFirst() where selectedIDs.contains(queueTasks[index].id) {
+                let previousIndex = queueTasks.index(before: index)
+                if !selectedIDs.contains(queueTasks[previousIndex].id) {
+                    queueTasks.swapAt(index, previousIndex)
+                }
+            }
+        } else {
+            for index in queueTasks.indices.dropLast().reversed() where selectedIDs.contains(queueTasks[index].id) {
+                let nextIndex = queueTasks.index(after: index)
+                if !selectedIDs.contains(queueTasks[nextIndex].id) {
+                    queueTasks.swapAt(index, nextIndex)
+                }
+            }
+        }
+        rewriteQueuePositions(queueTasks)
+        for task in queueTasks where selectedIDs.contains(task.id) {
+            task.appendLog(offset < 0 ? L10n.string("log_queue_moved_up") : L10n.string("log_queue_moved_down"))
+        }
+        save()
+        scheduleQueue()
+    }
+
+    private func archiveTasks(_ tasks: [DownloadTask]) {
+        let tasks = tasks.filter { !$0.isArchived }
+        guard !tasks.isEmpty else { return }
+        let now = Date()
+        var activeRequests = [DownloadRequest]()
+        for task in tasks {
+            if task.usesActiveDownloadSlot || task.status == .seeding {
+                activeRequests.append(DownloadRequest(task: task))
+                task.status = .paused
+                task.speedBytesPerSecond = 0
+                task.nextQueueRetryAt = nil
+            } else if task.status == .queued {
+                task.status = .paused
+                task.nextQueueRetryAt = nil
+            }
+            task.archivedAt = now
+            task.appendLog(L10n.string("log_archived_task"))
+        }
+        selectedTaskIDs.subtract(tasks.map(\.id))
+        if let selectedTaskID, tasks.contains(where: { $0.id == selectedTaskID }) {
+            self.selectedTaskID = selectedTaskIDs.first
+        }
+        save()
+
+        if runsEngines {
+            for request in activeRequests {
+                Task {
+                    await engine(for: request.kind).pause(request)
+                }
+            }
+        }
+        scheduleQueue()
+    }
+
     private func queueManageableTasks() -> [DownloadTask] {
-        allTasks().filter(\.isQueueManageable)
+        allTasks().filter { !$0.isArchived && $0.isQueueManageable }
     }
 
     private func rewriteQueuePositions(_ tasks: [DownloadTask]) {
@@ -1175,7 +1632,7 @@ final class DownloadCoordinator {
 
     private func scheduleNextQueueWake(from tasks: [DownloadTask], now: Date) {
         let nextDate = tasks
-            .filter { $0.status == .queued }
+            .filter { !$0.isArchived && $0.status == .queued }
             .compactMap(\.nextQueueRetryAt)
             .filter { $0 > now }
             .min()
@@ -1201,6 +1658,10 @@ final class DownloadCoordinator {
     }
 
     private static func queuePrecedes(_ lhs: DownloadTask, _ rhs: DownloadTask) -> Bool {
+        if lhs.isArchived != rhs.isArchived {
+            return !lhs.isArchived
+        }
+
         if lhs.usesActiveDownloadSlot != rhs.usesActiveDownloadSlot {
             return lhs.usesActiveDownloadSlot
         }
@@ -1320,10 +1781,25 @@ final class DownloadCoordinator {
         }
         return true
     }
+
+    private static func normalizedTag(_ tag: String) -> String {
+        DownloadTask.normalizedTagList([tag]).first ?? ""
+    }
+
+    private func formattedSpeedLimit(_ bytesPerSecond: Int64) -> String {
+        guard bytesPerSecond > 0 else {
+            return L10n.string("speed_unlimited")
+        }
+        return ByteCountFormatter.downloadFormatter.string(fromByteCount: bytesPerSecond) + "/s"
+    }
 }
 
 enum DownloadFilter: String, CaseIterable, Identifiable {
     case all
+    case today
+    case recent
+    case large
+    case needsAttention
     case running
     case seeding
     case queued
@@ -1333,12 +1809,17 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
     case cancelled
     case http
     case torrent
+    case archived
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .all: L10n.string("filter_all")
+        case .today: L10n.string("filter_today")
+        case .recent: L10n.string("filter_recent_7_days")
+        case .large: L10n.string("filter_large")
+        case .needsAttention: L10n.string("filter_needs_attention")
         case .running: L10n.string("download_status_running")
         case .seeding: L10n.string("download_status_seeding")
         case .queued: L10n.string("download_status_queued")
@@ -1348,12 +1829,17 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         case .cancelled: L10n.string("download_status_cancelled")
         case .http: "HTTP"
         case .torrent: "BT"
+        case .archived: L10n.string("filter_archived")
         }
     }
 
     var symbolName: String {
         switch self {
         case .all: "tray.full"
+        case .today: "calendar"
+        case .recent: "clock.arrow.circlepath"
+        case .large: "internaldrive"
+        case .needsAttention: "exclamationmark.bubble"
         case .running: "arrow.down.circle"
         case .seeding: "arrow.up.circle"
         case .queued: "clock"
@@ -1363,13 +1849,30 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         case .cancelled: "xmark.circle"
         case .http: "link"
         case .torrent: "point.3.connected.trianglepath.dotted"
+        case .archived: "archivebox"
         }
     }
 
     func matches(_ task: DownloadTask) -> Bool {
-        switch self {
+        if self == .archived {
+            return task.isArchived
+        }
+        guard !task.isArchived else { return false }
+
+        return switch self {
         case .all:
             true
+        case .today:
+            Calendar.current.isDateInToday(task.createdAt)
+        case .recent:
+            task.createdAt >= (Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date())
+        case .large:
+            task.totalBytes >= 1_000_000_000
+        case .needsAttention:
+            task.status == .failed
+                || task.status == .cancelled
+                || task.errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                || task.nextQueueRetryAt.map { $0 > Date() } == true
         case .running:
             task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers
         case .seeding:
@@ -1388,6 +1891,8 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
             task.kind == .http
         case .torrent:
             task.kind == .torrentMagnet || task.kind == .torrentFile
+        case .archived:
+            task.isArchived
         }
     }
 }

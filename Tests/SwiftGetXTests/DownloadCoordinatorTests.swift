@@ -777,6 +777,218 @@ struct DownloadCoordinatorTests {
         #expect(completed.status == .completed)
     }
 
+    @Test("categories tags smart filters and archive behavior are consistent")
+    func categoriesTagsSmartFiltersAndArchiveBehaviorAreConsistent() throws {
+        let fixture = try makeFixture()
+        let now = Date()
+        let software = DownloadTask(
+            name: "Tool.dmg",
+            source: "https://github.com/example/tool/releases/download/v1/Tool.dmg",
+            kind: .http,
+            savePath: "/tmp/Tool.dmg",
+            totalBytes: 2_000_000_000,
+            createdAt: now,
+            category: .software,
+            tags: ["Release, Urgent", "urgent"]
+        )
+        let document = DownloadTask(
+            name: "Manual.pdf",
+            source: "https://example.com/manual.pdf",
+            kind: .http,
+            status: .failed,
+            savePath: "/tmp/Manual.pdf",
+            createdAt: now.addingTimeInterval(-3 * 24 * 60 * 60),
+            category: .document,
+            tags: ["Docs"]
+        )
+        let archived = DownloadTask(
+            name: "Old.zip",
+            source: "https://example.com/old.zip",
+            kind: .http,
+            status: .completed,
+            savePath: "/tmp/Old.zip",
+            createdAt: now.addingTimeInterval(-20 * 24 * 60 * 60),
+            category: .software,
+            archivedAt: now
+        )
+        for task in [software, document, archived] {
+            fixture.context.insert(task)
+        }
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.selectCategory(.software)
+        #expect(fixture.coordinator.filteredTasks(from: [software, document, archived]).map(\.id) == [software.id])
+
+        fixture.coordinator.selectTag("urgent")
+        #expect(fixture.coordinator.filteredTasks(from: [software, document, archived]).map(\.id) == [software.id])
+        #expect(software.normalizedTags == ["Release", "Urgent"])
+
+        fixture.coordinator.selectFilter(.large)
+        #expect(fixture.coordinator.filteredTasks(from: [software, document, archived]).map(\.id) == [software.id])
+
+        fixture.coordinator.selectFilter(.needsAttention)
+        #expect(fixture.coordinator.filteredTasks(from: [software, document, archived]).map(\.id) == [document.id])
+
+        fixture.coordinator.selectFilter(.archived)
+        #expect(fixture.coordinator.filteredTasks(from: [software, document, archived]).map(\.id) == [archived.id])
+
+        fixture.coordinator.searchText = "software"
+        fixture.coordinator.selectFilter(.all)
+        #expect(fixture.coordinator.filteredTasks(from: [software, document, archived]).map(\.id) == [software.id])
+    }
+
+    @Test("added tasks infer categories from source and kind")
+    func addedTasksInferCategoriesFromSourceAndKind() throws {
+        let fixture = try makeFixture()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        let tasks = fixture.coordinator.add(
+            source: """
+            https://github.com/example/tool/releases/download/v1/tool.zip
+            https://example.com/movie.mp4
+            magnet:?xt=urn:btih:0123456789012345678901234567890123456789
+            """
+        )
+
+        #expect(tasks.map(\.category) == [.software, .video, .torrent])
+    }
+
+    @Test("multi selection supports batch pause resume recheck archive and remove")
+    func multiSelectionSupportsBatchOperations() throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 0
+        let running = makeTask(name: "Running", status: .running, queuePosition: 1)
+        let queued = makeTask(name: "Queued", status: .queued, queuePosition: 2)
+        let failed = makeTask(name: "Failed", status: .failed, queuePosition: 3)
+        for task in [running, queued, failed] {
+            fixture.context.insert(task)
+        }
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.selectOnly(running)
+        fixture.coordinator.toggleSelection(queued)
+        fixture.coordinator.pauseSelected()
+
+        #expect(running.status == .paused)
+        #expect(queued.status == .paused)
+        #expect(failed.status == .failed)
+
+        fixture.coordinator.toggleSelection(failed)
+        fixture.coordinator.resumeSelected()
+
+        #expect(running.status == .queued)
+        #expect(queued.status == .queued)
+        #expect(failed.status == .queued)
+
+        fixture.coordinator.recheckSelected()
+
+        #expect(running.status == .verifying)
+        #expect(queued.status == .verifying)
+        #expect(failed.status == .verifying)
+
+        fixture.coordinator.archiveSelected()
+
+        #expect(running.isArchived)
+        #expect(queued.isArchived)
+        #expect(failed.isArchived)
+        #expect(running.status == .paused)
+        #expect(fixture.coordinator.selectedTasks.isEmpty)
+
+        fixture.coordinator.selectAllVisible([running, queued, failed])
+        fixture.coordinator.unarchiveSelected()
+        fixture.coordinator.removeSelected(deletingFiles: false)
+
+        #expect(fixture.coordinator.allTasks().isEmpty)
+    }
+
+    @Test("cleanup completed and failed removes only terminal cleanup targets")
+    func cleanupCompletedAndFailedRemovesOnlyTerminalCleanupTargets() throws {
+        let fixture = try makeFixture()
+        let completed = makeTask(name: "Completed", status: .completed, queuePosition: 1)
+        let failed = makeTask(name: "Failed", status: .failed, queuePosition: 2)
+        let cancelled = makeTask(name: "Cancelled", status: .cancelled, queuePosition: 3)
+        let paused = makeTask(name: "Paused", status: .paused, queuePosition: 4)
+        let seeding = makeTask(name: "Seeding", status: .seeding, queuePosition: 5)
+        for task in [completed, failed, cancelled, paused, seeding] {
+            fixture.context.insert(task)
+        }
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.cleanupCompletedAndFailed(deletingFiles: false)
+
+        #expect(fixture.coordinator.allTasks().map(\.name).sorted() == ["Paused", "Seeding"])
+    }
+
+    @Test("batch speed limit persists generic fields and HTTP fallback options")
+    func batchSpeedLimitPersistsGenericFieldsAndHTTPFallbackOptions() throws {
+        let fixture = try makeFixture()
+        let http = makeTask(name: "HTTP", queuePosition: 1)
+        let torrent = DownloadTask(
+            name: "Magnet",
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
+            kind: .torrentMagnet,
+            savePath: "/tmp/Magnet"
+        )
+        fixture.context.insert(http)
+        fixture.context.insert(torrent)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.selectAllVisible([http, torrent])
+        fixture.coordinator.setSelectedSpeedLimit(
+            downloadBytesPerSecond: 5_000_000,
+            uploadBytesPerSecond: 512_000
+        )
+
+        #expect(http.perTaskDownloadLimitBytes == 5_000_000)
+        #expect(http.perTaskUploadLimitBytes == 512_000)
+        #expect(http.httpOptions?.perTaskDownloadLimitBytes == 5_000_000)
+        #expect(torrent.perTaskDownloadLimitBytes == 5_000_000)
+        #expect(torrent.perTaskUploadLimitBytes == 512_000)
+        #expect(DownloadRequest(task: http).perTaskDownloadLimitBytes == 5_000_000)
+        #expect(DownloadRequest(task: torrent).perTaskUploadLimitBytes == 512_000)
+    }
+
+    @Test("moving selected HTTP tasks moves final and partial local data")
+    func movingSelectedHTTPTasksMovesFinalAndPartialLocalData() throws {
+        let fixture = try makeFixture()
+        let oldDirectory = try makeTemporaryDirectory()
+        let newDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: oldDirectory)
+            try? FileManager.default.removeItem(at: newDirectory)
+        }
+        let oldFinal = oldDirectory.appendingPathComponent("payload.bin")
+        let oldPart = URL(fileURLWithPath: oldFinal.path + ".part")
+        try Data([1, 2, 3]).write(to: oldFinal)
+        try Data([4, 5]).write(to: oldPart)
+        let task = makeTask(
+            name: "payload.bin",
+            status: .paused,
+            queuePosition: 1,
+            savePath: oldFinal.path
+        )
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.selectOnly(task)
+        fixture.coordinator.moveSelected(toSaveDirectory: newDirectory)
+
+        let newFinal = newDirectory.appendingPathComponent("payload.bin")
+        let newPart = URL(fileURLWithPath: newFinal.path + ".part")
+        #expect(task.savePath == newFinal.path)
+        #expect(task.name == "payload.bin")
+        #expect(!FileManager.default.fileExists(atPath: oldFinal.path))
+        #expect(!FileManager.default.fileExists(atPath: oldPart.path))
+        #expect(try Data(contentsOf: newFinal) == Data([1, 2, 3]))
+        #expect(try Data(contentsOf: newPart) == Data([4, 5]))
+        #expect(task.logEntries.contains { $0.contains(L10n.string("log_moved_task_file", newFinal.path)) })
+    }
+
     private func makeFixture() throws -> CoordinatorFixture {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(

@@ -86,18 +86,13 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .focusTaskFromNotification)) { notification in
             if let idString = notification.object as? String, let id = UUID(uuidString: idString) {
                 coordinator.selectedTaskID = id
+                coordinator.selectedTaskIDs = [id]
             }
         }
     }
 
     private func filteredTasks() -> [DownloadTask] {
-        coordinator.sortedTasks(allTasks.filter { task in
-            let matchesFilter = coordinator.activeFilter.matches(task)
-            let matchesSearch = coordinator.searchText.isEmpty
-                || task.name.localizedCaseInsensitiveContains(coordinator.searchText)
-                || task.source.localizedCaseInsensitiveContains(coordinator.searchText)
-            return matchesFilter && matchesSearch
-        })
+        coordinator.filteredTasks(from: allTasks)
     }
 }
 

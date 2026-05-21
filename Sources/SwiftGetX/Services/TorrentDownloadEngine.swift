@@ -238,8 +238,8 @@ final class TorrentDownloadEngine: DownloadEngine {
             resumeDataPath: request.torrentResumeState?.resumeDataPath
                 ?? TorrentResumeStore.resumeDataPath(for: request.id),
             runtimeOptions: request.torrentRuntimeOptions ?? runtimeOptions,
-            downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
-            uploadLimitBytesPerSecond: uploadLimitBytesPerSecond
+            downloadLimitBytesPerSecond: request.perTaskDownloadLimitBytes,
+            uploadLimitBytesPerSecond: request.perTaskUploadLimitBytes
         )
     }
 
@@ -262,8 +262,8 @@ final class TorrentDownloadEngine: DownloadEngine {
                 resumeDataPath: request.torrentResumeState?.resumeDataPath
                     ?? TorrentResumeStore.resumeDataPath(for: request.id),
                 runtimeOptions: request.torrentRuntimeOptions ?? runtimeOptions,
-                downloadLimitBytesPerSecond: downloadLimitBytesPerSecond,
-                uploadLimitBytesPerSecond: uploadLimitBytesPerSecond
+                downloadLimitBytesPerSecond: request.perTaskDownloadLimitBytes,
+                uploadLimitBytesPerSecond: request.perTaskUploadLimitBytes
             )
         }
         return torrentRequest(from: request)

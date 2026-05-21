@@ -5,7 +5,7 @@ struct TaskListView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var layout
     let tasks: [DownloadTask]
-    @State private var taskToDelete: DownloadTask?
+    @State private var tasksToDelete: [DownloadTask] = []
 
     var body: some View {
         @Bindable var coordinator = coordinator
@@ -14,7 +14,7 @@ struct TaskListView: View {
             VStack(spacing: 0) {
                 HStack {
                     VStack(alignment: .leading, spacing: layout.value(2)) {
-                        Text(coordinator.activeFilter.title)
+                        Text(coordinator.activeListTitle)
                             .font(layout.font(16, weight: .semibold))
                             .foregroundStyle(Color.primary)
                         Text(summary(for: tasks))
@@ -23,12 +23,63 @@ struct TaskListView: View {
                     }
 
                     Spacer()
+
+                    if !tasks.isEmpty {
+                        Button {
+                            coordinator.selectAllVisible(tasks)
+                        } label: {
+                            Label(L10n.string("action_select_all"), systemImage: "checklist")
+                                .labelStyle(.iconOnly)
+                                .font(layout.font(12, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .help(L10n.string("action_select_all"))
+
+                        Menu {
+                            Button(L10n.string("batch_cleanup_completed_failed")) {
+                                coordinator.cleanupCompletedAndFailed(deletingFiles: false)
+                            }
+                            Button(L10n.string("batch_cleanup_completed_failed_files"), role: .destructive) {
+                                coordinator.cleanupCompletedAndFailed(deletingFiles: true)
+                            }
+                            Divider()
+                            Button(L10n.string("batch_archive_completed")) {
+                                coordinator.archiveCompletedTasks()
+                            }
+                            Button(L10n.string("batch_archive_failed")) {
+                                coordinator.archiveFailedTasks()
+                            }
+                            if coordinator.activeFilter == .archived {
+                                Divider()
+                                Button(L10n.string("batch_remove_archived_records"), role: .destructive) {
+                                    coordinator.removeArchivedTaskRecords()
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(layout.font(13, weight: .semibold))
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                        .help(L10n.string("task_list_actions"))
+                    }
                 }
                 .padding(.horizontal, layout.value(18))
                 .padding(.vertical, layout.value(14))
 
                 Divider()
                     .opacity(0.24)
+
+                if coordinator.selectedTaskCount > 1 {
+                    BatchTaskActionBar(
+                        selectedCount: coordinator.selectedTaskCount,
+                        deleteAction: {
+                            tasksToDelete = coordinator.selectedTasks
+                        }
+                    )
+                    Divider()
+                        .opacity(0.24)
+                }
 
                 if tasks.isEmpty {
                     EmptyTaskView()
@@ -39,11 +90,15 @@ struct TaskListView: View {
                             ForEach(tasks) { task in
                                 TaskRowView(
                                     task: task,
-                                    isSelected: coordinator.selectedTaskID == task.id
+                                    isSelected: coordinator.effectiveSelectedTaskIDs.contains(task.id)
                                 )
                                 .onTapGesture {
                                     withAnimation(.easeOut(duration: 0.12)) {
-                                        coordinator.selectedTaskID = task.id
+                                        if NSEvent.modifierFlags.contains(.command) {
+                                            coordinator.toggleSelection(task)
+                                        } else {
+                                            coordinator.selectOnly(task)
+                                        }
                                     }
                                 }
                                 .contextMenu {
@@ -116,12 +171,48 @@ struct TaskListView: View {
                                         }
                                     }
                                     Divider()
+                                    Menu(L10n.string("task_category")) {
+                                        ForEach(DownloadTaskCategory.allCases) { category in
+                                            Button {
+                                                coordinator.selectOnly(task)
+                                                coordinator.setSelectedCategory(category)
+                                            } label: {
+                                                Label(category.title, systemImage: category.symbolName)
+                                            }
+                                        }
+                                    }
+                                    Menu(L10n.string("task_tags")) {
+                                        ForEach(["Important", "Later", "Review"], id: \.self) { tag in
+                                            Button(tag) {
+                                                coordinator.selectOnly(task)
+                                                coordinator.setSelectedTags([tag])
+                                            }
+                                        }
+                                        if !task.normalizedTags.isEmpty {
+                                            Button(L10n.string("task_tags_clear")) {
+                                                coordinator.selectOnly(task)
+                                                coordinator.setSelectedTags([])
+                                            }
+                                        }
+                                    }
+                                    if task.isArchived {
+                                        Button(L10n.string("action_unarchive")) {
+                                            coordinator.selectOnly(task)
+                                            coordinator.unarchiveSelected()
+                                        }
+                                    } else {
+                                        Button(L10n.string("action_archive")) {
+                                            coordinator.selectOnly(task)
+                                            coordinator.archiveSelected()
+                                        }
+                                    }
+                                    Divider()
                                     Button(L10n.string("action_reveal_in_finder")) {
                                         NSWorkspace.shared.activateFileViewerSelecting([task.revealURL])
                                     }
                                     Divider()
                                     Button(L10n.string("action_delete_task"), role: .destructive) {
-                                        taskToDelete = task
+                                        tasksToDelete = [task]
                                     }
                                 }
                             }
@@ -132,43 +223,75 @@ struct TaskListView: View {
             }
         }
         .confirmationDialog(
-            L10n.string("delete_task_dialog_title"),
+            deleteDialogTitle,
             isPresented: Binding(
-                get: { taskToDelete != nil },
-                set: { if !$0 { taskToDelete = nil } }
+                get: { !tasksToDelete.isEmpty },
+                set: { if !$0 { tasksToDelete = [] } }
             )
         ) {
-            if let taskToDelete {
-                if taskToDelete.hasFinishedDownloading {
+            if !tasksToDelete.isEmpty {
+                if tasksToDelete.allSatisfy(\.hasFinishedDownloading) {
                     Button(L10n.string("delete_task_only"), role: .destructive) {
-                        coordinator.remove(taskToDelete, deletingFiles: false)
-                        self.taskToDelete = nil
+                        removePendingTasks(deletingFiles: false)
                     }
                     Button(L10n.string("delete_task_and_local_file"), role: .destructive) {
-                        coordinator.remove(taskToDelete, deletingFiles: true)
-                        self.taskToDelete = nil
+                        removePendingTasks(deletingFiles: true)
                     }
                 } else {
                     Button(L10n.string("delete_task_and_partial_file"), role: .destructive) {
-                        coordinator.remove(taskToDelete, deletingFiles: true)
-                        self.taskToDelete = nil
+                        removePendingTasks(deletingFiles: true)
                     }
                 }
             }
             Button(L10n.string("action_cancel"), role: .cancel) {
-                taskToDelete = nil
+                tasksToDelete = []
             }
         } message: {
-            if let taskToDelete {
-                if taskToDelete.hasFinishedDownloading {
-                    Text(L10n.string("delete_task_completed_message", taskToDelete.localContentDeletionPathSummary))
+            if !tasksToDelete.isEmpty {
+                if tasksToDelete.count == 1, let task = tasksToDelete.first {
+                    if task.hasFinishedDownloading {
+                        Text(L10n.string("delete_task_completed_message", task.localContentDeletionPathSummary))
+                    } else {
+                        Text(L10n.string("delete_task_unfinished_message", task.localContentDeletionPathSummary))
+                    }
                 } else {
-                    Text(L10n.string("delete_task_unfinished_message", taskToDelete.localContentDeletionPathSummary))
+                    Text(batchDeleteMessage)
                 }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .confirmSelectedTaskRemoval)) { _ in
-            taskToDelete = coordinator.selectedTask
+            tasksToDelete = coordinator.selectedTasks
+        }
+    }
+
+    private var deleteDialogTitle: String {
+        if tasksToDelete.count > 1 {
+            return L10n.string("delete_tasks_dialog_title", tasksToDelete.count)
+        }
+        return L10n.string("delete_task_dialog_title")
+    }
+
+    private var batchDeleteMessage: String {
+        let paths = tasksToDelete
+            .flatMap(\.localContentDeletionURLs)
+            .map(\.path)
+            .joined(separator: "\n")
+        let summary = paths.isEmpty ? L10n.string("delete_task_no_known_local_content") : paths
+        if tasksToDelete.allSatisfy(\.hasFinishedDownloading) {
+            return L10n.string("delete_tasks_completed_message", tasksToDelete.count, summary)
+        }
+        return L10n.string("delete_tasks_unfinished_message", tasksToDelete.count, summary)
+    }
+
+    private func removePendingTasks(deletingFiles: Bool) {
+        let pending = tasksToDelete
+        tasksToDelete = []
+        if Set(pending.map(\.id)) == coordinator.effectiveSelectedTaskIDs {
+            coordinator.removeSelected(deletingFiles: deletingFiles)
+        } else {
+            for task in pending {
+                coordinator.remove(task, deletingFiles: deletingFiles)
+            }
         }
     }
 
@@ -176,6 +299,160 @@ struct TaskListView: View {
         let running = tasks.filter(\.usesActiveDownloadSlot).count
         let completed = tasks.filter(\.hasFinishedDownloading).count
         return L10n.string("task_list_summary", tasks.count, running, completed)
+    }
+}
+
+private struct BatchTaskActionBar: View {
+    @Environment(DownloadCoordinator.self) private var coordinator
+    @Environment(\.responsiveLayout) private var layout
+    let selectedCount: Int
+    let deleteAction: () -> Void
+
+    var body: some View {
+        HStack(spacing: layout.value(8)) {
+            Text(L10n.string("tasks_selected_count", selectedCount))
+                .font(layout.font(12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button {
+                coordinator.resumeSelected()
+            } label: {
+                Image(systemName: "play.fill")
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("action_start"))
+
+            Button {
+                coordinator.pauseSelected()
+            } label: {
+                Image(systemName: "pause.fill")
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("action_pause"))
+
+            Button {
+                coordinator.recheckSelected()
+            } label: {
+                Image(systemName: "checkmark.seal")
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("action_recheck"))
+
+            Menu {
+                Button(L10n.string("batch_move_default_folder")) {
+                    coordinator.moveSelectedToDefaultDirectory()
+                }
+                Divider()
+                Button(L10n.string("queue_move_top")) {
+                    coordinator.moveSelectedToTop()
+                }
+                Button(L10n.string("queue_move_up")) {
+                    coordinator.moveSelectedUp()
+                }
+                Button(L10n.string("queue_move_down")) {
+                    coordinator.moveSelectedDown()
+                }
+                Divider()
+                ForEach(DownloadQueuePriority.allCases) { priority in
+                    Button {
+                        coordinator.setSelectedQueuePriority(priority)
+                    } label: {
+                        Label(priority.title, systemImage: priority.symbolName)
+                    }
+                }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .help(L10n.string("queue_priority"))
+
+            Menu {
+                ForEach(DownloadTaskCategory.allCases) { category in
+                    Button {
+                        coordinator.setSelectedCategory(category)
+                    } label: {
+                        Label(category.title, systemImage: category.symbolName)
+                    }
+                }
+            } label: {
+                Image(systemName: "folder.badge.gearshape")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .help(L10n.string("task_category"))
+
+            Menu {
+                ForEach(["Important", "Later", "Review"], id: \.self) { tag in
+                    Button(tag) {
+                        coordinator.setSelectedTags([tag])
+                    }
+                }
+                Button(L10n.string("task_tags_clear")) {
+                    coordinator.setSelectedTags([])
+                }
+            } label: {
+                Image(systemName: "tag")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .help(L10n.string("task_tags"))
+
+            Menu {
+                Button(L10n.string("speed_unlimited")) {
+                    coordinator.setSelectedDownloadLimit(0)
+                }
+                Button("1 MB/s") {
+                    coordinator.setSelectedDownloadLimit(1_000_000)
+                }
+                Button("5 MB/s") {
+                    coordinator.setSelectedDownloadLimit(5_000_000)
+                }
+                Button("10 MB/s") {
+                    coordinator.setSelectedDownloadLimit(10_000_000)
+                }
+            } label: {
+                Image(systemName: "speedometer")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .help(L10n.string("speed_limit"))
+
+            Button {
+                coordinator.archiveSelected()
+            } label: {
+                Image(systemName: "archivebox")
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("action_archive"))
+
+            Button {
+                coordinator.unarchiveSelected()
+            } label: {
+                Image(systemName: "archivebox.fill")
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("action_unarchive"))
+
+            Button(role: .destructive, action: deleteAction) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("action_delete_task"))
+
+            Button {
+                coordinator.clearSelection()
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("action_clear_selection"))
+        }
+        .font(layout.font(12, weight: .semibold))
+        .padding(.horizontal, layout.value(18))
+        .padding(.vertical, layout.value(9))
     }
 }
 
@@ -194,6 +471,17 @@ private struct TaskRowView: View {
 
     var body: some View {
         HStack(spacing: layout.value(12)) {
+            Button {
+                coordinator.toggleSelection(task)
+            } label: {
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .font(layout.font(15, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .frame(width: layout.value(22), height: layout.value(34))
+            }
+            .buttonStyle(.plain)
+            .help(isSelected ? L10n.string("action_clear_selection") : L10n.string("action_select_task"))
+
             Image(systemName: task.kind.symbolName)
                 .font(layout.font(16, weight: .medium))
                 .foregroundStyle(statusColor)
@@ -351,7 +639,7 @@ private struct TaskRowView: View {
                     .help(L10n.string("action_reveal_in_finder"))
 
                     Button {
-                        coordinator.selectedTaskID = task.id
+                        coordinator.selectOnly(task)
                         NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
                     } label: {
                         Image(systemName: "trash.fill")
