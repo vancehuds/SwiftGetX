@@ -807,17 +807,43 @@ Next step:
 
 ## Large Check 6: Peer Wire and Magnet MVP
 
-Status: [~]
+Status: [x]
 
 Review Tasks 16-18 for protocol safety, storage consistency, piece verification, resume behavior, UI state transitions, and deterministic tests.
 
 Work performed:
 
+- Audited Tasks 16-18 against the torrent peer-wire and magnet plan, covering pure Swift core isolation, peer-wire framing, BEP 10/BEP 9 metadata exchange, storage writes, piece hash validation, resume-state persistence, partial deletion boundaries, UI state handling for `fetchingMetadata`, and deterministic mock tracker/peer fixtures.
+- Added peer-wire frame length hardening so `TorrentPeerWireMessage.decodeFrame(...)`, `TorrentPeerWireSession.readFrame(...)`, and `TorrentMagnetMetadataSession.readFrame(...)` reject frames above `TorrentPeerWireMessage.maximumFrameLength` before reading large advertised payloads.
+- Added regression tests for oversized peer-wire and extended metadata frames, including direct frame decoding and session-level pre-payload rejection.
+- Hardened `TorrentContentStorage.write(...)` so an unexpected zero-byte `pwrite` result fails instead of spinning indefinitely.
+- Confirmed `SwiftGetXTorrentCore` remains isolated from SwiftUI, SwiftData, AppKit, the C libtorrent target, and the app-level `LibtorrentAdapter` boundary.
+- Confirmed tracker, peer-wire, storage, magnet, deletion, and adapter tests use local fixtures, mock transports, temporary directories, or loopback-style deterministic helpers rather than public tracker or swarm dependencies.
+
 Verification evidence:
+
+- `swift test --filter TorrentPeerWire` passed with 12 tests in 1 suite.
+- `swift test --filter TorrentPeerWire --filter TorrentDownloadEngine --filter SwiftGetXTorrentCore` passed with 57 tests across 3 suites.
+- `swift test` passed with 200 tests across 15 suites.
+- `swift build` passed.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static core isolation audit with `rg -n "import (SwiftUI|SwiftData|AppKit)|CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore` found no matches.
+- Static libtorrent boundary audit with `rg -n "CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore Sources/SwiftGetX/Services/TorrentDownloadEngine.swift Package.swift` found no matches in `Sources/SwiftGetXTorrentCore`; remaining references are limited to the optional `Package.swift` gate and `Sources/SwiftGetX/Services/TorrentDownloadEngine.swift` app adapter boundary.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; the linker emitted the existing local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 203 tests across 16 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
+- Real public torrent and magnet validation was not run in this check to keep verification deterministic and independent of external trackers or swarms.
+- True seeding and upload behavior remain Task 20; the current Swift torrent path still completes downloads rather than proving long-lived seeding policy behavior.
+- DHT, PEX, LSD, persisted node discovery, and source statistics remain Task 19, so trackerless peer discovery is not complete yet.
+- Multi-peer concurrency is still MVP-level: richer duplicate endgame requests, peer rotation during slow magnet metadata exchange, long-lived peer statistics, and advanced retry policy remain future torrent hardening.
+- Timeout-visible magnet behavior exposes pause/cancel paths, but richer UI actions such as copy magnet or continue waiting remain later UX/support-tooling work.
+
 Next step:
+
+- Task 19: DHT, PEX, and LSD.
 
 ## Task 19: DHT, PEX, and LSD
 
