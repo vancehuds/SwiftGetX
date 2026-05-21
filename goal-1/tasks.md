@@ -1166,17 +1166,44 @@ Next step:
 
 ## Task 25: Download Rules and System Behavior Settings
 
-Status: [ ]
+Status: [x]
 
 Add rules for domain/extension/size save directories, thread counts, auto-start, browser takeover allow/deny lists, site headers/auth config, filename templates, login item, menu-bar background behavior, sleep prevention, exit prompts, and completion actions where local APIs permit.
 
 Work performed:
 
+- Added persisted `AppSettings`/`AppSettingsRecord` fields for download rules, browser takeover host allow/deny policy, login item, keep-running-in-menu-bar behavior, sleep prevention, active-task quit prompts, and completion actions.
+- Added `DownloadRule` and `DownloadRuleTextFormat` for domain/extension/size matching, save directory overrides, filename templates, segment/retry overrides, auto-start control, and safe persistable site headers with sensitive headers filtered.
+- Wired download rules into direct source creation and HTTP metadata-preview task creation, including rule-selected save paths, template-rendered filenames, HTTP option merging, and paused creation when `autoStart=false`.
+- Added app-side browser takeover allow/deny enforcement for trusted native handoffs so blocked or non-allowed HTTP hosts are rejected back through the native ack path and Chrome can fall back safely.
+- Added `SystemBehaviorController` for guarded launch-at-login registration, active-download sleep assertions, completion sound/Finder/open/script actions, plus coordinator/app integration for active-task sleep state and quit prompting.
+- Added Settings UI sections for download rules, browser takeover host policy, system behavior toggles, and completion actions, with English and Simplified Chinese localization.
+- Added regression tests for rule parsing/template rendering, sensitive header filtering, host policy boundaries, AppSettings persistence, coordinator rule application, and login-item bundle gating.
+- Committed Task 25 implementation as `df38bf6 Add download rules and system behavior settings`.
+
 Verification evidence:
+
+- Initial focused test commands failed in the sandbox due SwiftPM/clang module cache write restrictions under `/Users/vancehudson/.cache/clang/ModuleCache`; reruns used approved SwiftPM cache access.
+- `swift test --filter DownloadRule --filter DownloadCoordinator` passed with 36 tests across 2 suites after fixing test expectation typing.
+- The first full `swift test` run caught a regression where HTTP preview auto-rename save paths renamed the displayed task. Fixed preview-created task naming so duplicate auto-rename keeps the original display name unless a rule explicitly changes it.
+- `swift test --filter HTTPDownloadEngine --filter DownloadCoordinator --filter DownloadRule` passed with 76 tests across 3 suites after the preview-name fix.
+- `swift build` passed.
+- `swift test` passed with 248 tests across 19 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; linker emitted the existing local OpenSSL deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 251 tests across 20 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
+- Launch-at-login, Finder reveal/open, completion sound/script execution, sleep assertions, and quit prompts are guarded or compile/test verified, but not end-to-end exercised in a packaged signed app during this session.
+- Completion scripts only run when the configured path is executable and receive task metadata as arguments; richer script UI validation, sandbox entitlements, and audit logging remain future hardening.
+- Browser takeover host policy is enforced in the app for trusted native handoffs, while extension-local takeover policy remains separately configured until later settings/import/export work unifies policy distribution.
+- Sensitive rule headers are deliberately filtered from persisted rules; secure storage and richer site-auth configuration remain Task 26 scope.
+
 Next step:
+
+- Task 26: Persistence, Sensitive Data, and Large-Scale Performance.
 
 ## Task 26: Persistence, Sensitive Data, and Large-Scale Performance
 
