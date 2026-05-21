@@ -269,12 +269,29 @@ final class DownloadTask {
     }
 
     var localContentDeletionURLs: [URL] {
+        localContentDeletionURLs(requiresExisting: true)
+    }
+
+    var plannedTorrentContentURLs: [URL] {
+        torrentContentURLs(requiresExisting: false)
+    }
+
+    func localContentDeletionURLs(requiresExisting: Bool) -> [URL] {
         guard isTorrent else {
-            var urls = [URL(fileURLWithPath: savePath)]
-            urls.append(contentsOf: HTTPPartialDataStore(savePath: savePath).existingDataURLs)
-            return Self.uniqueStandardizedURLs(urls)
+            return FileSystemSafety.safeDeletionURLs(
+                candidates: [URL(fileURLWithPath: savePath)]
+                    + HTTPPartialDataStore(savePath: savePath).existingDataURLs,
+                allowedRoot: URL(fileURLWithPath: savePath).deletingLastPathComponent(),
+                allowsDirectories: false,
+                requiresExisting: requiresExisting
+            )
         }
 
+        return torrentContentURLs(requiresExisting: requiresExisting)
+    }
+
+    private func torrentContentURLs(requiresExisting: Bool) -> [URL] {
+        guard isTorrent else { return [] }
         let saveDirectoryURL = URL(
             fileURLWithPath: effectiveTorrentSaveDirectoryPath,
             isDirectory: true
@@ -289,7 +306,12 @@ final class DownloadTask {
         else {
             return []
         }
-        return [contentURL]
+        return FileSystemSafety.safeDeletionURLs(
+            candidates: [contentURL],
+            allowedRoot: saveDirectoryURL,
+            allowsDirectories: true,
+            requiresExisting: requiresExisting
+        )
     }
 
     var localContentDeletionPathSummary: String {
@@ -1585,16 +1607,6 @@ private extension String {
     var nonEmptyTrimmed: String? {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-}
-
-private extension URL {
-    func isDescendant(of ancestor: URL) -> Bool {
-        let ancestorPath = ancestor.standardizedFileURL.path
-        let path = standardizedFileURL.path
-        guard path.hasPrefix(ancestorPath) else { return false }
-        if path == ancestorPath { return true }
-        return path.dropFirst(ancestorPath.count).first == "/"
     }
 }
 

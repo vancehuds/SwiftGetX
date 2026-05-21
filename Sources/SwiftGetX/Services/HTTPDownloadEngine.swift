@@ -70,7 +70,11 @@ final class HTTPDownloadEngine: DownloadEngine {
     func remove(_ request: DownloadRequest, deletingFiles: Bool) async {
         await cancel(request)
         if deletingFiles {
-            try? FileManager.default.removeItem(atPath: request.savePath)
+            _ = try? FileSystemSafety.removeSafely(
+                URL(fileURLWithPath: request.savePath),
+                allowedRoot: URL(fileURLWithPath: request.savePath).deletingLastPathComponent(),
+                allowsDirectories: false
+            )
             HTTPPartialDataStore(savePath: request.savePath).removeData()
         }
     }
@@ -473,7 +477,12 @@ private struct HTTPDownloadWorker: Sendable {
         try Self.preflight(
             destination: destination,
             expectedBytes: max(metadata.contentLength, request.totalBytes),
-            existingBytes: layout.temporaryProgress(maxSegments: segmentScanLimit)
+            existingBytes: layout.temporaryProgress(maxSegments: segmentScanLimit),
+            additionalScratchBytes: segmentedScratchBytes(
+                contentLength: metadata.contentLength,
+                supportsResume: metadata.supportsResume,
+                segmentCount: segmentCount
+            )
         )
 
         let singlePartBytes = HTTPTemporaryLayout.localSize(at: layout.singlePartURL)
@@ -556,74 +565,32 @@ private struct HTTPDownloadWorker: Sendable {
         )
     }
 
-    private static func preflight(destination: URL, expectedBytes: Int64, existingBytes: Int64) throws {
-        let fileManager = FileManager.default
-        let directory = destination.deletingLastPathComponent()
-        var isDirectory: ObjCBool = false
-
-        guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory) else {
-            throw HTTPDownloadError.localPreflight(L10n.string("error_download_directory_missing", directory.path))
-        }
-        guard isDirectory.boolValue else {
-            throw HTTPDownloadError.localPreflight(L10n.string("error_download_directory_not_folder", directory.path))
-        }
-
-        var destinationIsDirectory: ObjCBool = false
-        if fileManager.fileExists(atPath: destination.path, isDirectory: &destinationIsDirectory),
-           destinationIsDirectory.boolValue
-        {
-            throw HTTPDownloadError.localPreflight(L10n.string("error_download_path_is_directory", destination.path))
-        }
-
-        guard fileManager.isWritableFile(atPath: directory.path) else {
-            throw HTTPDownloadError.localPreflight(L10n.string("error_download_directory_not_writable", directory.path))
-        }
-
-        let probeURL = directory.appendingPathComponent(".swiftgetx-write-\(UUID().uuidString)")
+    private static func preflight(
+        destination: URL,
+        expectedBytes: Int64,
+        existingBytes: Int64,
+        additionalScratchBytes: Int64 = 0
+    ) throws {
         do {
-            try Data().write(to: probeURL, options: .withoutOverwriting)
-            try? fileManager.removeItem(at: probeURL)
+            try FileSystemSafety.preflightDownloadDestination(
+                destination,
+                expectedBytes: expectedBytes,
+                existingBytes: existingBytes,
+                additionalScratchBytes: additionalScratchBytes
+            )
         } catch {
-            try? fileManager.removeItem(at: probeURL)
-            throw HTTPDownloadError.localPreflight(
-                L10n.string("error_download_write_probe_failed", directory.path, error.localizedDescription)
-            )
+            throw HTTPDownloadError.localPreflight(error.localizedDescription)
         }
+    }
 
-        let remainingBytes = max(0, expectedBytes - max(0, existingBytes))
-        guard expectedBytes > 0,
-              let availableBytes = availableCapacity(for: directory),
-              availableBytes < remainingBytes
-        else {
-            return
-        }
-
-        throw HTTPDownloadError.localPreflight(
-            L10n.string(
-                "error_insufficient_disk_space",
-                formatByteCount(remainingBytes),
-                formatByteCount(availableBytes)
-            )
+    private func segmentedScratchBytes(contentLength: Int64, supportsResume: Bool, segmentCount: Int) -> Int64 {
+        guard supportsResume, contentLength > 0, segmentCount > 1 else { return 0 }
+        let plan = SegmentPlan.make(
+            totalBytes: contentLength,
+            segmentCount: segmentCount,
+            minSplitSize: Self.minimumSplitSize
         )
-    }
-
-    private static func availableCapacity(for directory: URL) -> Int64? {
-        let keys: Set<URLResourceKey> = [
-            .volumeAvailableCapacityForImportantUsageKey,
-            .volumeAvailableCapacityKey
-        ]
-        guard let values = try? directory.resourceValues(forKeys: keys) else { return nil }
-        if let capacity = values.volumeAvailableCapacityForImportantUsage {
-            return capacity
-        }
-        if let capacity = values.volumeAvailableCapacity {
-            return Int64(capacity)
-        }
-        return nil
-    }
-
-    private static func formatByteCount(_ byteCount: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+        return plan.segments.count > 1 ? contentLength : 0
     }
 
     private func prepareInitialDestination(
@@ -851,6 +818,7 @@ private struct HTTPDownloadWorker: Sendable {
             throw HTTPDownloadError.serverStatus(httpResponse.statusCode)
         }
 
+        try? FileSystemSafety.preallocateFile(at: layout.singlePartURL, byteCount: metadata.contentLength)
         let fileHandle = try FileHandle(forWritingTo: layout.singlePartURL)
         defer {
             try? fileHandle.close()
@@ -1066,9 +1034,14 @@ private struct HTTPDownloadWorker: Sendable {
 
         let finalURL = FileManager.default.uniqueFileURL(for: destination)
         let mergeURL = layout.mergeURL(for: finalURL)
-        try? FileManager.default.removeItem(at: mergeURL)
+        _ = try? FileSystemSafety.removeSafely(
+            mergeURL,
+            allowedRoot: finalURL.deletingLastPathComponent(),
+            allowsDirectories: false
+        )
 
         do {
+            try? FileSystemSafety.preallocateFile(at: mergeURL, byteCount: manifest.totalBytes)
             try mergeSegments(
                 plan: plan,
                 layout: layout,
@@ -1081,7 +1054,11 @@ private struct HTTPDownloadWorker: Sendable {
             try FileManager.default.moveItem(at: mergeURL, to: finalURL)
             layout.setFileHidden(at: finalURL, hidden: false)
         } catch {
-            try? FileManager.default.removeItem(at: mergeURL)
+            _ = try? FileSystemSafety.removeSafely(
+                mergeURL,
+                allowedRoot: finalURL.deletingLastPathComponent(),
+                allowsDirectories: false
+            )
             throw error
         }
 
@@ -1206,7 +1183,11 @@ private struct HTTPDownloadWorker: Sendable {
         var localBytes = HTTPTemporaryLayout.localSize(at: segmentURL)
         if localBytes > segment.length {
             await progress.setDownloadedBytes(0, for: segment.index)
-            try FileManager.default.removeItem(at: segmentURL)
+            try FileSystemSafety.removeSafely(
+                segmentURL,
+                allowedRoot: URL(fileURLWithPath: layout.savePath).deletingLastPathComponent(),
+                allowsDirectories: false
+            )
             FileManager.default.createFile(atPath: segmentURL.path, contents: nil)
             layout.setFileHidden(at: segmentURL, hidden: hidesTemporaryFiles)
             localBytes = 0
@@ -1612,7 +1593,11 @@ private struct HTTPTemporaryLayout: Sendable {
         for segment in plan.segments {
             let url = segmentURL(index: segment.index)
             guard Self.localSize(at: url) > segment.length else { continue }
-            try FileManager.default.removeItem(at: url)
+            try FileSystemSafety.removeSafely(
+                url,
+                allowedRoot: URL(fileURLWithPath: savePath).deletingLastPathComponent(),
+                allowsDirectories: false
+            )
         }
     }
 
@@ -1644,11 +1629,20 @@ private struct HTTPTemporaryLayout: Sendable {
     }
 
     func removeTemporaryFiles(maxSegments: Int) {
-        try? FileManager.default.removeItem(at: singlePartURL)
-        try? FileManager.default.removeItem(at: manifestURL)
-        try? FileManager.default.removeItem(atPath: savePath + ".merge")
+        let root = URL(fileURLWithPath: savePath).deletingLastPathComponent()
+        _ = try? FileSystemSafety.removeSafely(singlePartURL, allowedRoot: root, allowsDirectories: false)
+        _ = try? FileSystemSafety.removeSafely(manifestURL, allowedRoot: root, allowsDirectories: false)
+        _ = try? FileSystemSafety.removeSafely(
+            URL(fileURLWithPath: savePath + ".merge"),
+            allowedRoot: root,
+            allowsDirectories: false
+        )
         for index in 0..<maxSegments {
-            try? FileManager.default.removeItem(at: segmentURL(index: index))
+            _ = try? FileSystemSafety.removeSafely(
+                segmentURL(index: index),
+                allowedRoot: root,
+                allowsDirectories: false
+            )
         }
     }
 

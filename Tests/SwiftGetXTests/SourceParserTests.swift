@@ -71,6 +71,42 @@ struct SourceParserTests {
         #expect(SourceParser.kind(for: sources[2]) == .torrentFile)
     }
 
+    @Test("keeps unsupported protocol families outside app-native parsing")
+    func keepsUnsupportedProtocolFamiliesOutsideAppNativeParsing() {
+        let sources = SourceParser.extractSources(
+            from: """
+            ftp://example.com/file.zip
+            sftp://example.com/file.zip
+            https://example.com/feed.metalink
+            https://example.com/video.m3u8
+            https://example.com/manifest.mpd
+            """
+        )
+
+        #expect(sources == [
+            "https://example.com/feed.metalink",
+            "https://example.com/video.m3u8",
+            "https://example.com/manifest.mpd"
+        ])
+        #expect(sources.allSatisfy { SourceParser.kind(for: $0) == .http })
+    }
+
+    @Test("leaves GitHub and GitLab release assets as direct HTTP downloads")
+    func leavesReleaseAssetsAsDirectHTTPDownloads() {
+        let sources = SourceParser.extractSources(
+            from: """
+            https://github.com/example/project/releases/download/v1.0.0/app.dmg
+            https://gitlab.com/example/project/-/releases/v1.0.0/downloads/app.dmg
+            """
+        )
+
+        #expect(sources == [
+            "https://github.com/example/project/releases/download/v1.0.0/app.dmg",
+            "https://gitlab.com/example/project/-/releases/v1.0.0/downloads/app.dmg"
+        ])
+        #expect(sources.allSatisfy { SourceParser.kind(for: $0) == .http })
+    }
+
     @Test("extracts local torrent paths and file urls")
     func extractsLocalTorrentSources() {
         let sources = SourceParser.extractSources(

@@ -24,7 +24,11 @@ struct HTTPPartialDataStore: Sendable {
     var existingDataURLs: [URL] {
         dataURLPairs(to: self)
             .map(\.source)
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+            .filter { url in
+                var isDirectory: ObjCBool = false
+                return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                    && !isDirectory.boolValue
+            }
     }
 
     var hasData: Bool {
@@ -50,7 +54,11 @@ struct HTTPPartialDataStore: Sendable {
 
     func removeData() {
         for url in existingDataURLs {
-            try? FileManager.default.removeItem(at: url)
+            _ = try? FileSystemSafety.removeSafely(
+                url,
+                allowedRoot: URL(fileURLWithPath: savePath).deletingLastPathComponent(),
+                allowsDirectories: false
+            )
         }
     }
 
@@ -67,7 +75,11 @@ struct HTTPPartialDataStore: Sendable {
 
         for pair in pairs {
             if FileManager.default.fileExists(atPath: pair.destination.path) {
-                try FileManager.default.removeItem(at: pair.destination)
+                try FileSystemSafety.removeSafely(
+                    pair.destination,
+                    allowedRoot: URL(fileURLWithPath: newSavePath).deletingLastPathComponent(),
+                    allowsDirectories: false
+                )
             }
             try FileManager.default.moveItem(at: pair.source, to: pair.destination)
         }

@@ -914,11 +914,19 @@ final class DownloadCoordinator {
 
         if shouldDeleteLocalData {
             if task.kind == .http {
-                try? FileManager.default.removeItem(atPath: task.savePath)
+                _ = try? FileSystemSafety.removeSafely(
+                    URL(fileURLWithPath: task.savePath),
+                    allowedRoot: URL(fileURLWithPath: task.savePath).deletingLastPathComponent(),
+                    allowsDirectories: false
+                )
                 HTTPPartialDataStore(savePath: task.savePath).removeData()
             } else {
                 for deletionURL in localDeletionURLs {
-                    try? FileManager.default.removeItem(at: deletionURL)
+                    _ = try? FileSystemSafety.removeSafely(
+                        deletionURL,
+                        allowedRoot: URL(fileURLWithPath: task.effectiveTorrentSaveDirectoryPath, isDirectory: true),
+                        allowsDirectories: true
+                    )
                 }
             }
         }
@@ -1409,7 +1417,7 @@ final class DownloadCoordinator {
             outputName: outputName,
             files: task.torrentFiles
         )
-        let newContentURLs = task.localContentDeletionURLs
+        let newContentURLs = task.plannedTorrentContentURLs
         let movedCount = moveTorrentContentIfSafe(from: oldContentURLs, to: newContentURLs)
         task.appendLog(L10n.string("log_relocated_torrent", normalizedDirectory.path))
         if movedCount > 0 {

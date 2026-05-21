@@ -161,6 +161,7 @@
 "error_download_directory_not_writable" = "Download folder is not writable: %@";
 "error_download_failed" = "Download failed";
 "error_download_path_is_directory" = "Download destination is a folder: %@";
+"error_download_path_escapes_directory" = "Download path escapes the selected save directory: %@";
 "error_download_write_probe_failed" = "Could not write to download folder %@: %@";
 "error_file_size_mismatch" = "File size does not match the task record";
 "error_incomplete_segment" = "Download segment is incomplete";
@@ -187,6 +188,7 @@
 "error_task_cancelled" = "Task cancelled";
 "error_torrent_metadata_timeout" = "Timed out while fetching torrent metadata";
 "error_unknown" = "Unknown error";
+"error_unsafe_deletion_target" = "Refused to delete unsafe local path: %@";
 "error_validator_changed" = "Server file changed. Temporary files were kept to avoid merging incorrect data.";
 "eta_hours_minutes" = "%dh %dm";
 "eta_minutes_seconds" = "%dm %ds";

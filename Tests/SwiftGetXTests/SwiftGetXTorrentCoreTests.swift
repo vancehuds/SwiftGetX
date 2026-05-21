@@ -230,6 +230,22 @@ struct SwiftGetXTorrentCoreTests {
         #expect(layout.files.first?.fileURL.path == "/tmp/SwiftGetXDownloads/demo.bin")
     }
 
+    @Test("torrent layout keeps generated paths inside save directory")
+    func torrentLayoutKeepsGeneratedPathsInsideSaveDirectory() throws {
+        let saveDirectory = URL(fileURLWithPath: "/tmp/SwiftGetXDownloads", isDirectory: true)
+        let layout = try TorrentContentLayout(
+            files: [
+                TorrentFileInfo(index: 0, path: "album/a.txt", length: 1),
+                TorrentFileInfo(index: 1, path: "album/nested/b.txt", length: 1)
+            ],
+            saveDirectory: saveDirectory,
+            outputName: "renamed-album"
+        )
+
+        #expect(layout.contentRoot.path == "/tmp/SwiftGetXDownloads/renamed-album")
+        #expect(layout.files.allSatisfy { $0.fileURL.path.hasPrefix("/tmp/SwiftGetXDownloads/renamed-album/") })
+    }
+
     @Test("multi-file metainfo keeps content root even with one file")
     func multiFileMetainfoKeepsContentRootEvenWithOneFile() throws {
         let info = bencodeDictionary([

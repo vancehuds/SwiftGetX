@@ -161,6 +161,7 @@
 "error_download_directory_not_writable" = "下载文件夹不可写：%@";
 "error_download_failed" = "下载失败";
 "error_download_path_is_directory" = "下载目标是文件夹：%@";
+"error_download_path_escapes_directory" = "下载路径越过了所选保存目录：%@";
 "error_download_write_probe_failed" = "无法写入下载文件夹 %@：%@";
 "error_file_size_mismatch" = "文件大小与任务记录不一致";
 "error_incomplete_segment" = "下载分片不完整";
@@ -187,6 +188,7 @@
 "error_task_cancelled" = "任务已取消";
 "error_torrent_metadata_timeout" = "获取种子 metadata 超时";
 "error_unknown" = "未知错误";
+"error_unsafe_deletion_target" = "已拒绝删除不安全的本地路径：%@";
 "error_validator_changed" = "服务器文件已变化，已保留临时文件以避免合并错误数据";
 "eta_hours_minutes" = "%d时 %d分";
 "eta_minutes_seconds" = "%d分 %d秒";

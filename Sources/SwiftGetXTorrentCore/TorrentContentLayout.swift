@@ -17,6 +17,7 @@ public enum TorrentContentLayoutError: Error, Equatable, Sendable, LocalizedErro
     case missingFiles
     case invalidPathComponent(fileIndex: Int, component: String)
     case pathTooLong(fileIndex: Int, path: String)
+    case pathEscapesSaveDirectory(fileIndex: Int, path: String)
     case duplicatePath(fileIndex: Int, path: String)
     case nonContiguousFileIndex(expected: Int, actual: Int)
     case totalLengthOverflow
@@ -31,6 +32,8 @@ public enum TorrentContentLayoutError: Error, Equatable, Sendable, LocalizedErro
             "Torrent file \(fileIndex) contains an unsafe path component: \(component)."
         case .pathTooLong(let fileIndex, let path):
             "Torrent file \(fileIndex) path is too long: \(path)."
+        case .pathEscapesSaveDirectory(let fileIndex, let path):
+            "Torrent file \(fileIndex) path escapes the selected save directory: \(path)."
         case .duplicatePath(let fileIndex, let path):
             "Torrent file \(fileIndex) duplicates another path: \(path)."
         case .nonContiguousFileIndex(let expected, let actual):
@@ -120,6 +123,14 @@ public struct TorrentContentLayout: Codable, Equatable, Sendable {
         let contentRoot = usesMultiFileRoot
             ? normalizedSaveDirectory.appendingPathComponent(resolvedOutputName, isDirectory: true)
             : normalizedSaveDirectory
+        guard contentRoot.standardizedFileURL.path == normalizedSaveDirectory.path
+            || contentRoot.standardizedFileURL.isDescendant(of: normalizedSaveDirectory)
+        else {
+            throw TorrentContentLayoutError.pathEscapesSaveDirectory(
+                fileIndex: sortedFiles[0].index,
+                path: contentRoot.path
+            )
+        }
 
         var offset: Int64 = 0
         var seenPaths = Set<String>()
@@ -168,6 +179,12 @@ public struct TorrentContentLayout: Codable, Equatable, Sendable {
             let fileURL = Self.fileURL(contentRoot: contentRoot, components: components)
             guard fileURL.standardizedFileURL.path.utf8.count <= maximumPathBytes else {
                 throw TorrentContentLayoutError.pathTooLong(fileIndex: file.index, path: fileURL.path)
+            }
+            guard fileURL.standardizedFileURL.isDescendant(of: normalizedSaveDirectory),
+                  contentRoot.standardizedFileURL.path == normalizedSaveDirectory.path
+                    || fileURL.standardizedFileURL.isDescendant(of: contentRoot)
+            else {
+                throw TorrentContentLayoutError.pathEscapesSaveDirectory(fileIndex: file.index, path: fileURL.path)
             }
             layoutFiles.append(
                 TorrentContentFile(
@@ -269,4 +286,14 @@ public struct TorrentContentLayout: Codable, Equatable, Sendable {
 private extension CharacterSet {
     static let torrentPathControlCharacters = CharacterSet.controlCharacters
         .union(CharacterSet(charactersIn: "\u{200E}\u{200F}\u{202A}\u{202B}\u{202C}\u{202D}\u{202E}\u{2066}\u{2067}\u{2068}\u{2069}"))
+}
+
+private extension URL {
+    func isDescendant(of ancestor: URL) -> Bool {
+        let ancestorPath = ancestor.standardizedFileURL.path
+        let path = standardizedFileURL.path
+        guard path.hasPrefix(ancestorPath) else { return false }
+        if path == ancestorPath { return true }
+        return path.dropFirst(ancestorPath.count).first == "/"
+    }
 }

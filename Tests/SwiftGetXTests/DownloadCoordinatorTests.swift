@@ -526,6 +526,37 @@ struct DownloadCoordinatorTests {
         #expect(!FileManager.default.fileExists(atPath: deletedPartURL.path))
     }
 
+    @Test("HTTP local deletion excludes destination directories")
+    func httpLocalDeletionExcludesDestinationDirectories() throws {
+        let fixture = try makeFixture()
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destinationDirectory = directory.appendingPathComponent("payload.bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        let nestedFile = destinationDirectory.appendingPathComponent("keep.txt")
+        let partURL = URL(fileURLWithPath: destinationDirectory.path + ".part")
+        try Data([1]).write(to: nestedFile)
+        try Data([2]).write(to: partURL)
+
+        let task = makeTask(
+            name: "Directory",
+            status: .failed,
+            queuePosition: 1,
+            savePath: destinationDirectory.path
+        )
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        #expect(task.localContentDeletionURLs == [partURL.standardizedFileURL])
+
+        fixture.coordinator.remove(task, deletingFiles: true)
+
+        #expect(FileManager.default.fileExists(atPath: destinationDirectory.path))
+        #expect(FileManager.default.fileExists(atPath: nestedFile.path))
+        #expect(!FileManager.default.fileExists(atPath: partURL.path))
+    }
+
     @Test("torrent preview tasks persist save directory and content paths")
     func torrentPreviewTasksPersistSaveDirectoryAndContentPaths() throws {
         let fixture = try makeFixture()

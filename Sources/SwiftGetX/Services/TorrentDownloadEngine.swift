@@ -484,6 +484,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             return
         }
 
+        try preflight(layout: layout, metainfo: metainfo, request: request)
         do {
             try await downloadTorrent(
                 request: request,
@@ -2038,6 +2039,20 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             infoHashV1: metainfo.infoHashV1,
             metainfo: metainfo,
             layout: layout
+        )
+    }
+
+    private func preflight(
+        layout: TorrentContentLayout,
+        metainfo: TorrentMetainfo,
+        request: TorrentStartRequest
+    ) throws {
+        try FileSystemSafety.preflightTorrentLayout(
+            saveDirectory: layout.saveDirectory,
+            contentRoot: layout.contentRoot,
+            fileURLs: layout.files.map(\.fileURL),
+            expectedBytes: wantedContent(in: layout, metainfo: metainfo, request: request).totalBytes,
+            existingBytes: request.downloadedBytes
         )
     }
 }

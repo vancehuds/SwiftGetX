@@ -793,6 +793,32 @@ struct HTTPDownloadEngineTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path + ".part1"))
     }
 
+    @Test("removing HTTP data refuses to delete destination directories")
+    func removingHTTPDataRefusesToDeleteDestinationDirectories() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destinationDirectory = directory.appendingPathComponent("payload.bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        let nestedFile = destinationDirectory.appendingPathComponent("keep.txt")
+        try Data([1, 2, 3]).write(to: nestedFile)
+        let partURL = URL(fileURLWithPath: destinationDirectory.path + ".part")
+        try Data([4, 5, 6]).write(to: partURL)
+
+        let engine = HTTPDownloadEngine()
+        await engine.remove(Self.request(
+            source: URL(string: "http://example.com/payload.bin")!,
+            destination: destinationDirectory,
+            status: .paused,
+            totalBytes: 4_096,
+            downloadedBytes: 2_048
+        ), deletingFiles: true)
+
+        #expect(FileManager.default.fileExists(atPath: destinationDirectory.path))
+        #expect(FileManager.default.fileExists(atPath: nestedFile.path))
+        #expect(!FileManager.default.fileExists(atPath: partURL.path))
+    }
+
     @Test("applies browser download context headers to HTTP requests")
     func appliesBrowserDownloadContextHeadersToHTTPRequests() async throws {
         let payload = Self.payload()
