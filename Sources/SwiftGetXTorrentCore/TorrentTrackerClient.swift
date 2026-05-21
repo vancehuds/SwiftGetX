@@ -912,15 +912,15 @@ private extension Array where Element == UInt8 {
     }
 
     func int64(at offset: Int) -> Int64 {
-        let value = (UInt64(self[offset]) << 56)
+        let high = (UInt64(self[offset]) << 56)
             | (UInt64(self[offset + 1]) << 48)
             | (UInt64(self[offset + 2]) << 40)
             | (UInt64(self[offset + 3]) << 32)
-            | (UInt64(self[offset + 4]) << 24)
+        let low = (UInt64(self[offset + 4]) << 24)
             | (UInt64(self[offset + 5]) << 16)
             | (UInt64(self[offset + 6]) << 8)
             | UInt64(self[offset + 7])
-        return Int64(bitPattern: value)
+        return Int64(bitPattern: high | low)
     }
 }
 
