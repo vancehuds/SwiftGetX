@@ -927,17 +927,45 @@ Next step:
 
 ## Task 21: Torrent File Priority and Advanced UX
 
-Status: [ ]
+Status: [x]
 
 Support live file/folder priority, skip/low/normal/high, folder-level selection, extension filters, sequential download mode, recheck existing files, move/relocate downloads, and batch tracker operations.
 
 Work performed:
 
+- Added low torrent file priority while preserving existing stored raw values for skip/normal/high/max, plus explicit app-to-engine priority mapping for Swift and libtorrent paths.
+- Updated live torrent file selection/priority handling so wanted low/normal/high/max files stay selected, skipped files are excluded, and Swift adapter piece selection/download totals are based on wanted content.
+- Added Swift adapter recheck support that verifies existing wanted pieces against SHA-1 hashes, saves resume state, and reports wanted-byte totals plus tracker/discovery diagnostics.
+- Added storage read support for torrent recheck verification across single-file and multi-file layouts.
+- Added coordinator APIs for multi-file priority updates, folder priority updates, extension filters, batch tracker add/remove, relocation with exact known-content moves, and active-task pause/recheck after relocation.
+- Updated libtorrent adapter live and startup file-priority paths to map app priorities to native 0...7 priorities and map native file snapshots back to app priorities.
+- Added inspector controls for extension priority filters, folder-level priority menus, relocation path, sequential mode, and batch tracker add/remove/remove-listed/remove-all operations.
+- Added English and Simplified Chinese localization for low priority, batch file/tracker logs, relocation logs, and new inspector controls.
+- Added regression tests for priority persistence/mapping, coordinator folder/extension priority, batch trackers, relocation, Swift adapter skipped-file downloads, and recheck behavior.
+- Committed Task 21 implementation as `83b1d23 Add advanced torrent file controls`.
+
 Verification evidence:
+
+- `swift test --filter DownloadCoordinator --filter TorrentDownloadEngine --filter TorrentFile` passed with 58 tests across 4 suites after rerunning with SwiftPM cache access.
+- `swift build` passed.
+- `swift test` passed with 223 tests across 16 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; linker emitted the existing local OpenSSL deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 226 tests across 17 suites; the same local OpenSSL deployment-target warnings were present.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static core isolation audit with `rg -n "import (SwiftUI|SwiftData|AppKit)|CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore` found no matches.
+- Static libtorrent boundary audit with `rg -n "CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore Sources/SwiftGetX/Services/TorrentDownloadEngine.swift Package.swift` found no matches in `Sources/SwiftGetXTorrentCore`; remaining references are limited to the optional `Package.swift` gate and `Sources/SwiftGetX/Services/TorrentDownloadEngine.swift` app adapter boundary.
 
 Remaining risk:
 
+- Live Swift adapter priority changes are applied between piece downloads; an already in-flight piece is not cancelled mid-piece when a file is skipped.
+- Folder controls group by torrent path prefixes and expose a bounded visible list in the inspector; very large torrent folder trees may need richer navigation in a later UX pass.
+- Relocation moves only exact known content paths when the destination path does not already exist, then rechecks; complex partial-content conflicts remain conservative rather than interactive.
+- Optional libtorrent verification still depends on the local prebuilt libtorrent archive and Homebrew OpenSSL libraries.
+
 Next step:
+
+- Large Check 7: Advanced Torrent UX.
 
 ## Large Check 7: Advanced Torrent UX
 
