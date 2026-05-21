@@ -287,6 +287,11 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("k", modifiers: [.command, .option])
 
+            Button(L10n.string("command_reveal_selected")) {
+                coordinator.revealSelectedInFinder()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .option])
+
             Button(L10n.string("command_delete_selected")) {
                 NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
             }

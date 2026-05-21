@@ -329,6 +329,12 @@ final class DownloadCoordinator {
         }
     }
 
+    func revealSelectedInFinder() {
+        let urls = selectedTasks.map(\.revealURL)
+        guard !urls.isEmpty else { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
     func removeSelected(deletingFiles: Bool) {
         let tasks = selectedTasks
         guard !tasks.isEmpty else { return }

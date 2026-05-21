@@ -81,6 +81,7 @@
 "command_new_download" = "新建下载任务";
 "command_pause_all" = "暂停全部";
 "command_recheck_selected" = "校验所选";
+"command_reveal_selected" = "在访达中显示所选";
 "command_retry_selected" = "重试所选";
 "command_resume_all" = "恢复全部";
 "command_toggle_selected" = "启动/暂停所选";
@@ -385,6 +386,9 @@
 "task_list_summary" = "%d 个任务 · %d 下载中 · %d 已完成";
 "task_list_actions" = "任务列表操作";
 "task_ready" = "已安全就绪";
+"task_tag_important" = "重要";
+"task_tag_later" = "稍后";
+"task_tag_review" = "复查";
 "task_tags" = "标签";
 "task_tags_clear" = "清除标签";
 "tasks_selected_count" = "已选择 %d 个";

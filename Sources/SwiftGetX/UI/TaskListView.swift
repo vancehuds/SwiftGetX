@@ -33,6 +33,7 @@ struct TaskListView: View {
                                 .font(layout.font(12, weight: .semibold))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.string("action_select_all"))
                         .help(L10n.string("action_select_all"))
 
                         Menu {
@@ -61,6 +62,7 @@ struct TaskListView: View {
                         }
                         .menuStyle(.button)
                         .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.string("task_list_actions"))
                         .help(L10n.string("task_list_actions"))
                     }
                 }
@@ -182,7 +184,7 @@ struct TaskListView: View {
                                         }
                                     }
                                     Menu(L10n.string("task_tags")) {
-                                        ForEach(["Important", "Later", "Review"], id: \.self) { tag in
+                                        ForEach(TaskTagPresets.localized, id: \.self) { tag in
                                             Button(tag) {
                                                 coordinator.selectOnly(task)
                                                 coordinator.setSelectedTags([tag])
@@ -322,6 +324,7 @@ private struct BatchTaskActionBar: View {
                 Image(systemName: "play.fill")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("action_start"))
             .help(L10n.string("action_start"))
 
             Button {
@@ -330,6 +333,7 @@ private struct BatchTaskActionBar: View {
                 Image(systemName: "pause.fill")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("action_pause"))
             .help(L10n.string("action_pause"))
 
             Button {
@@ -338,6 +342,7 @@ private struct BatchTaskActionBar: View {
                 Image(systemName: "checkmark.seal")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("action_recheck"))
             .help(L10n.string("action_recheck"))
 
             Menu {
@@ -367,6 +372,7 @@ private struct BatchTaskActionBar: View {
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("queue_priority"))
             .help(L10n.string("queue_priority"))
 
             Menu {
@@ -382,10 +388,11 @@ private struct BatchTaskActionBar: View {
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("task_category"))
             .help(L10n.string("task_category"))
 
             Menu {
-                ForEach(["Important", "Later", "Review"], id: \.self) { tag in
+                ForEach(Self.presetTags, id: \.self) { tag in
                     Button(tag) {
                         coordinator.setSelectedTags([tag])
                     }
@@ -398,6 +405,7 @@ private struct BatchTaskActionBar: View {
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("task_tags"))
             .help(L10n.string("task_tags"))
 
             Menu {
@@ -418,6 +426,7 @@ private struct BatchTaskActionBar: View {
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("speed_limit"))
             .help(L10n.string("speed_limit"))
 
             Button {
@@ -426,6 +435,7 @@ private struct BatchTaskActionBar: View {
                 Image(systemName: "archivebox")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("action_archive"))
             .help(L10n.string("action_archive"))
 
             Button {
@@ -434,12 +444,14 @@ private struct BatchTaskActionBar: View {
                 Image(systemName: "archivebox.fill")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("action_unarchive"))
             .help(L10n.string("action_unarchive"))
 
             Button(role: .destructive, action: deleteAction) {
                 Image(systemName: "trash")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("action_delete_task"))
             .help(L10n.string("action_delete_task"))
 
             Button {
@@ -448,11 +460,26 @@ private struct BatchTaskActionBar: View {
                 Image(systemName: "xmark.circle")
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L10n.string("action_clear_selection"))
             .help(L10n.string("action_clear_selection"))
         }
         .font(layout.font(12, weight: .semibold))
         .padding(.horizontal, layout.value(18))
         .padding(.vertical, layout.value(9))
+    }
+
+    private static var presetTags: [String] {
+        TaskTagPresets.localized
+    }
+}
+
+private enum TaskTagPresets {
+    static var localized: [String] {
+        [
+            L10n.string("task_tag_important"),
+            L10n.string("task_tag_later"),
+            L10n.string("task_tag_review")
+        ]
     }
 }
 

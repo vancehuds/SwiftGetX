@@ -498,6 +498,16 @@ private struct FilesPanel: View {
                                 .foregroundStyle(task.selectedFileIndexes.contains(file.index) ? .green : .secondary)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(
+                            task.selectedFileIndexes.contains(file.index)
+                                ? L10n.string("action_clear_selection")
+                                : L10n.string("action_select_task")
+                        )
+                        .help(
+                            task.selectedFileIndexes.contains(file.index)
+                                ? L10n.string("action_clear_selection")
+                                : L10n.string("action_select_task")
+                        )
 
                         VStack(alignment: .leading, spacing: layout.value(4)) {
                             Text(file.path)
@@ -560,6 +570,7 @@ private struct FilesPanel: View {
                     Image(systemName: "line.3.horizontal.decrease.circle")
                 }
                 .disabled(extensionFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel(L10n.string("torrent_apply_extension_filter"))
                 .help(L10n.string("torrent_apply_extension_filter"))
             }
 
@@ -574,6 +585,7 @@ private struct FilesPanel: View {
                     Image(systemName: "folder.badge.gearshape")
                 }
                 .disabled(relocatePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel(L10n.string("torrent_relocate_download"))
                 .help(L10n.string("torrent_relocate_download"))
             }
         }
@@ -613,6 +625,7 @@ private struct FilesPanel: View {
                                 Image(systemName: "slider.horizontal.3")
                             }
                             .menuStyle(.borderlessButton)
+                            .accessibilityLabel(L10n.string("torrent_folder_priority"))
                             .help(L10n.string("torrent_folder_priority"))
                         }
                     }
@@ -792,6 +805,7 @@ private struct ConnectionsPanel: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
+                .accessibilityLabel(L10n.string("torrent_force_reannounce"))
                 .help(L10n.string("torrent_force_reannounce"))
             }
 
@@ -806,6 +820,8 @@ private struct ConnectionsPanel: View {
                     Image(systemName: "plus.circle")
                 }
                 .disabled(trackerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel(L10n.string("torrent_add_trackers"))
+                .help(L10n.string("torrent_add_trackers"))
             }
 
             VStack(alignment: .leading, spacing: layout.value(6)) {

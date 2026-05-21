@@ -81,6 +81,7 @@
 "command_new_download" = "New Download";
 "command_pause_all" = "Pause All";
 "command_recheck_selected" = "Verify Selected";
+"command_reveal_selected" = "Show Selected in Finder";
 "command_retry_selected" = "Retry Selected";
 "command_resume_all" = "Resume All";
 "command_toggle_selected" = "Start/Pause Selected";
@@ -385,6 +386,9 @@
 "task_list_summary" = "%d tasks · %d downloading · %d completed";
 "task_list_actions" = "Task List Actions";
 "task_ready" = "Ready";
+"task_tag_important" = "Important";
+"task_tag_later" = "Later";
+"task_tag_review" = "Review";
 "task_tags" = "Tags";
 "task_tags_clear" = "Clear Tags";
 "tasks_selected_count" = "%d selected";
