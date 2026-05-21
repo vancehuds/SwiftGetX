@@ -12,6 +12,7 @@ protocol DownloadEngine: AnyObject {
     func setFileSelection(_ request: DownloadRequest, selectedFileIndexes: [Int]) async
     func setTorrentFilePriority(_ request: DownloadRequest, fileIndex: Int, priority: Int) async
     func setTorrentSequentialDownload(_ request: DownloadRequest, enabled: Bool) async
+    func setTorrentRuntimeOptions(_ request: DownloadRequest, options: TorrentRuntimeOptions) async
     func addTorrentTracker(_ request: DownloadRequest, url: String) async
     func removeTorrentTracker(_ request: DownloadRequest, url: String) async
     func forceTorrentReannounce(_ request: DownloadRequest) async
@@ -133,6 +134,7 @@ struct DownloadRequest: Sendable {
 extension DownloadEngine {
     func setTorrentFilePriority(_ request: DownloadRequest, fileIndex: Int, priority: Int) async {}
     func setTorrentSequentialDownload(_ request: DownloadRequest, enabled: Bool) async {}
+    func setTorrentRuntimeOptions(_ request: DownloadRequest, options: TorrentRuntimeOptions) async {}
     func addTorrentTracker(_ request: DownloadRequest, url: String) async {}
     func removeTorrentTracker(_ request: DownloadRequest, url: String) async {}
     func forceTorrentReannounce(_ request: DownloadRequest) async {}

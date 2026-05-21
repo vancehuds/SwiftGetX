@@ -886,17 +886,44 @@ Next step:
 
 ## Task 20: Seeding State and Policies
 
-Status: [ ]
+Status: [x]
 
 Add `seeding` status, upload speed, share ratio, seeding time, per-task/global seeding policies, completion versus seeding-stop notifications, and stop-at-ratio/time/never-stop behavior.
 
 Work performed:
 
+- Added `TorrentSeedingLimitMode.stopAfterTime`, persisted `stopSeedingAfterSeconds` through `AppSettings`/`AppSettingsRecord`, and extended torrent runtime option JSON decoding with legacy-safe defaults.
+- Added seeding duration to torrent connection and health diagnostics, plus UI display in task rows and inspector panels.
+- Added global settings and per-task inspector controls for stop-at-ratio, stop-after-time, stop-when-complete, and never-stop seeding policy.
+- Added `DownloadEngine.setTorrentRuntimeOptions(...)` and adapter plumbing so task-level policy edits reach active torrent engines.
+- Updated the Swift torrent adapter to enter `.seeding` after data completion unless policy stops immediately, emit modeled upload rate/share ratio/seeding time snapshots, send tracker `completed` and later `stopped` announces, stop after ratio/time policy, and apply policy changes while already seeding.
+- Updated the libtorrent adapter to preserve per-task runtime seeding options, track local seeding duration, pass ratio/time policy checks through `TorrentRuntimeOptions.shouldStopSeeding(...)`, and include seeding duration in connection/health snapshots.
+- Updated coordinator notification behavior so first `.seeding` is treated as download-ready completion, while `.completed` after `.seeding` logs and notifies a distinct seeding-stop event.
+- Added localization for seeding policy, seeding time, seeding-stop logs, and notifications.
+- Added regression tests for seeding time JSON persistence, seeding policy forwarding, Swift adapter stop-after-time behavior, active seeding policy changes, tracker `stopped` announces, and stabilized magnet snapshot assertions around async callback ordering.
+
 Verification evidence:
+
+- `swift test --filter TorrentDownloadEngine` passed with 23 tests in 1 suite after the active policy update and snapshot assertion fix.
+- `swift build` passed.
+- `swift test` passed with 216 tests across 16 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; the linker emitted the existing local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 219 tests across 17 suites; the same local OpenSSL deployment-target linker warnings were present.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static core isolation audit with `rg -n "import (SwiftUI|SwiftData|AppKit)|CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore` found no matches.
+- Static libtorrent boundary audit with `rg -n "CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore Sources/SwiftGetX/Services/TorrentDownloadEngine.swift Package.swift` found no matches in `Sources/SwiftGetXTorrentCore`; remaining references are limited to the optional `Package.swift` gate and app adapter boundary.
 
 Remaining risk:
 
+- The pure Swift adapter does not yet implement true peer-serving upload. It reports configured upload capacity and models uploaded bytes/share ratio for seeding-policy enforcement; real piece serving, uploaded-byte accounting from peer sessions, and richer long-lived seeding behavior remain future torrent runtime hardening.
+- Stop-at-ratio in the Swift adapter can only auto-stop when a positive upload limit lets the model estimate uploaded bytes. With no modeled or real upload throughput, never-stop/manual stop remains the practical behavior.
+- Seeding notifications and SwiftUI controls were compile/test verified and statically inspected, but not screenshot-tested or end-to-end exercised against a real public swarm.
+- Optional libtorrent verification depends on the local prebuilt `.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a` archive and Homebrew OpenSSL libraries; this task did not change the C wrapper or vendored native build.
+
 Next step:
+
+- Task 21: Torrent File Priority and Advanced UX.
 
 ## Task 21: Torrent File Priority and Advanced UX
 

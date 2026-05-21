@@ -251,6 +251,10 @@ final class TorrentDownloadEngine: DownloadEngine {
         await adapter.setSequentialDownload(id: request.id, enabled: enabled)
     }
 
+    func setTorrentRuntimeOptions(_ request: DownloadRequest, options: TorrentRuntimeOptions) async {
+        await adapter.setRuntimeOptions(id: request.id, options: options)
+    }
+
     func addTorrentTracker(_ request: DownloadRequest, url: String) async {
         await adapter.addTracker(id: request.id, url: url)
     }
@@ -277,6 +281,8 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     private var peerWorkspaces: [UUID: TorrentPeerWorkspace] = [:]
     private var swarmStates: [UUID: SwiftTorrentSwarmRuntimeState] = [:]
     private var peerDiscoveryStates: [UUID: SwiftTorrentPeerDiscoveryState] = [:]
+    private var seedingTasks: [UUID: Task<Void, Never>] = [:]
+    private var seedingContexts: [UUID: SwiftTorrentSeedingContext] = [:]
     private var globalDownloadLimitBytesPerSecond: Int64 = 0
     private var globalUploadLimitBytesPerSecond: Int64 = 0
     private let trackerClient: TorrentTrackerClient
@@ -334,6 +340,9 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     ) async throws {
         requests[request.id] = request
         snapshotHandlers[request.id] = onSnapshot
+        seedingTasks[request.id]?.cancel()
+        seedingTasks[request.id] = nil
+        seedingContexts[request.id] = nil
         var metadata = metadataSnapshot(for: request)
         metadataByID[request.id] = metadata
         let trackerSession = SwiftTorrentTrackerSession(
@@ -498,15 +507,24 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 _ = try? await session.pause()
             }
         }
+        seedingTasks[id]?.cancel()
+        seedingTasks[id] = nil
+        seedingContexts[id] = nil
         await announceStopped(id: id)
     }
 
     func cancel(id: UUID) async {
+        seedingTasks[id]?.cancel()
+        seedingTasks[id] = nil
+        seedingContexts[id] = nil
         await announceStopped(id: id)
         peerSessions[id] = nil
     }
 
     func remove(id: UUID, deletingFiles: Bool) async {
+        seedingTasks[id]?.cancel()
+        seedingTasks[id] = nil
+        seedingContexts[id] = nil
         await announceStopped(id: id)
         if deletingFiles, let workspace = peerWorkspaces[id] {
             try? workspace.deletePartialData()
@@ -519,6 +537,8 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         peerWorkspaces[id] = nil
         swarmStates[id] = nil
         peerDiscoveryStates[id] = nil
+        seedingTasks[id] = nil
+        seedingContexts[id] = nil
     }
 
     func recheck(id: UUID) async {}
@@ -529,6 +549,15 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {}
     func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {}
     func setSequentialDownload(id: UUID, enabled: Bool) async {}
+    func setRuntimeOptions(id: UUID, options: TorrentRuntimeOptions) async {
+        if var request = requests[id] {
+            request.runtimeOptions = options
+            requests[id] = request
+        }
+        if let context = seedingContexts[id] {
+            await reevaluateSeedingPolicy(context: context, options: options)
+        }
+    }
 
     func addTracker(id: UUID, url: String) async {
         guard let session = trackerSessions[id] else { return }
@@ -800,23 +829,358 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             left: 0,
             force: true
         ) ?? trackerSummary
+        await completeOrSeedTorrent(
+            request: request,
+            metadata: metadata,
+            trackerSummary: completedTrackerSummary,
+            peerStates: Array(peerStates.values),
+            resumeState: resumeState,
+            metainfo: metainfo,
+            layout: layout,
+            onSnapshot: onSnapshot
+        )
+    }
+
+    private func completeOrSeedTorrent(
+        request: TorrentStartRequest,
+        metadata: SwiftTorrentMetadataSnapshot,
+        trackerSummary: SwiftTorrentTrackerAnnounceSummary,
+        peerStates: [SwiftTorrentPeerRuntimeState],
+        resumeState: TorrentCoreResumeState,
+        metainfo: TorrentMetainfo,
+        layout: TorrentContentLayout,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async {
+        let options = effectiveRuntimeOptions(for: request, metadata: metadata)
+        let seedingStartedAt = Date()
+        let uploadRate = effectiveUploadLimit(for: request)
+        let initialUploadedBytes: Int64 = 0
+        let initialShareRatio = shareRatio(
+            uploadedBytes: initialUploadedBytes,
+            totalBytes: metadata.totalBytes
+        )
         swarmStates[request.id] = SwiftTorrentSwarmRuntimeState(
-            peers: Array(peerStates.values),
-            downloadedBytes: metadata.totalBytes
+            peers: peerStates,
+            downloadedBytes: metadata.totalBytes,
+            uploadedBytes: initialUploadedBytes,
+            seedingStartedAt: seedingStartedAt
+        )
+
+        if options.shouldStopSeeding(
+            isSeeding: true,
+            shareRatio: initialShareRatio,
+            completed: true,
+            seedingDurationSeconds: 0
+        ) {
+            onSnapshot(snapshot(
+                for: request,
+                status: .completed,
+                metadata: metadata,
+                trackerSummary: trackerSummary,
+                downloadedBytes: metadata.totalBytes,
+                speedBytesPerSecond: 0,
+                etaSeconds: nil,
+                peerStates: peerStates,
+                resumeState: resumeState,
+                metainfo: metainfo,
+                layout: layout,
+                resumeStateStatus: request.resumeDataPath == nil ? .missing : .saved,
+                uploadRateBytesPerSecond: 0,
+                shareRatio: initialShareRatio,
+                seedingDurationSeconds: 0
+            ))
+            return
+        }
+
+        onSnapshot(snapshot(
+            for: request,
+            status: .seeding,
+            metadata: metadata,
+            trackerSummary: trackerSummary,
+            downloadedBytes: metadata.totalBytes,
+            speedBytesPerSecond: 0,
+            etaSeconds: nil,
+            peerStates: peerStates,
+            resumeState: resumeState,
+            metainfo: metainfo,
+            layout: layout,
+            resumeStateStatus: request.resumeDataPath == nil ? .missing : .saved,
+            uploadRateBytesPerSecond: uploadRate,
+            shareRatio: initialShareRatio,
+            seedingDurationSeconds: 0
+        ))
+        seedingContexts[request.id] = SwiftTorrentSeedingContext(
+            request: request,
+            metadata: metadata,
+            trackerSummary: trackerSummary,
+            peerStates: peerStates,
+            resumeState: resumeState,
+            metainfo: metainfo,
+            layout: layout,
+            seedingStartedAt: seedingStartedAt,
+            uploadRateBytesPerSecond: uploadRate,
+            onSnapshot: onSnapshot
+        )
+        scheduleSeedingPolicyTask(
+            request: request,
+            metadata: metadata,
+            trackerSummary: trackerSummary,
+            peerStates: peerStates,
+            resumeState: resumeState,
+            metainfo: metainfo,
+            layout: layout,
+            seedingStartedAt: seedingStartedAt,
+            uploadRateBytesPerSecond: uploadRate,
+            onSnapshot: onSnapshot
+        )
+    }
+
+    private func reevaluateSeedingPolicy(
+        context: SwiftTorrentSeedingContext,
+        options: TorrentRuntimeOptions
+    ) async {
+        let elapsed = max(0, Date().timeIntervalSince(context.seedingStartedAt))
+        let uploadedBytes = Self.modeledUploadedBytes(
+            uploadRateBytesPerSecond: context.uploadRateBytesPerSecond,
+            duration: elapsed
+        )
+        let ratio = shareRatio(
+            uploadedBytes: uploadedBytes,
+            totalBytes: context.metadata.totalBytes
+        )
+        if options.shouldStopSeeding(
+            isSeeding: true,
+            shareRatio: ratio,
+            completed: true,
+            seedingDurationSeconds: elapsed
+        ) {
+            await finishSeedingDueToPolicy(
+                request: context.request.withRuntimeOptions(options),
+                metadata: context.metadata,
+                trackerSummary: context.trackerSummary,
+                peerStates: context.peerStates,
+                resumeState: context.resumeState,
+                metainfo: context.metainfo,
+                layout: context.layout,
+                uploadedBytes: uploadedBytes,
+                seedingDurationSeconds: elapsed,
+                onSnapshot: context.onSnapshot
+            )
+            return
+        }
+
+        seedingTasks[context.request.id]?.cancel()
+        emitSeedingUpdate(
+            request: context.request.withRuntimeOptions(options),
+            metadata: context.metadata,
+            trackerSummary: context.trackerSummary,
+            peerStates: context.peerStates,
+            resumeState: context.resumeState,
+            metainfo: context.metainfo,
+            layout: context.layout,
+            uploadedBytes: uploadedBytes,
+            seedingDurationSeconds: elapsed,
+            uploadRateBytesPerSecond: context.uploadRateBytesPerSecond,
+            onSnapshot: context.onSnapshot
+        )
+        scheduleSeedingPolicyTask(
+            request: context.request.withRuntimeOptions(options),
+            metadata: context.metadata,
+            trackerSummary: context.trackerSummary,
+            peerStates: context.peerStates,
+            resumeState: context.resumeState,
+            metainfo: context.metainfo,
+            layout: context.layout,
+            seedingStartedAt: context.seedingStartedAt,
+            uploadRateBytesPerSecond: context.uploadRateBytesPerSecond,
+            onSnapshot: context.onSnapshot
+        )
+    }
+
+    private func scheduleSeedingPolicyTask(
+        request: TorrentStartRequest,
+        metadata: SwiftTorrentMetadataSnapshot,
+        trackerSummary: SwiftTorrentTrackerAnnounceSummary,
+        peerStates: [SwiftTorrentPeerRuntimeState],
+        resumeState: TorrentCoreResumeState,
+        metainfo: TorrentMetainfo,
+        layout: TorrentContentLayout,
+        seedingStartedAt: Date,
+        uploadRateBytesPerSecond: Int64,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) {
+        let options = effectiveRuntimeOptions(for: request, metadata: metadata)
+        let shouldSchedule: Bool
+        switch options.seedingLimitMode {
+        case .stopAfterTime:
+            shouldSchedule = true
+        case .stopAtRatio:
+            shouldSchedule = uploadRateBytesPerSecond > 0
+                && metadata.totalBytes > 0
+                && options.stopSeedingAtRatio > 0
+        case .stopWhenComplete, .neverStop:
+            shouldSchedule = false
+        }
+        guard shouldSchedule else {
+            seedingTasks[request.id]?.cancel()
+            seedingTasks[request.id] = nil
+            return
+        }
+
+        seedingTasks[request.id]?.cancel()
+        seedingTasks[request.id] = Task {
+            while !Task.isCancelled {
+                let elapsed = Date().timeIntervalSince(seedingStartedAt)
+                let uploadedBytes = Self.modeledUploadedBytes(
+                    uploadRateBytesPerSecond: uploadRateBytesPerSecond,
+                    duration: elapsed
+                )
+                let ratio = Self.shareRatio(
+                    uploadedBytes: uploadedBytes,
+                    totalBytes: metadata.totalBytes
+                )
+                if options.shouldStopSeeding(
+                    isSeeding: true,
+                    shareRatio: ratio,
+                    completed: true,
+                    seedingDurationSeconds: elapsed
+                ) {
+                    await self.finishSeedingDueToPolicy(
+                        request: request,
+                        metadata: metadata,
+                        trackerSummary: trackerSummary,
+                        peerStates: peerStates,
+                        resumeState: resumeState,
+                        metainfo: metainfo,
+                        layout: layout,
+                        uploadedBytes: uploadedBytes,
+                        seedingDurationSeconds: elapsed,
+                        onSnapshot: onSnapshot
+                    )
+                    return
+                }
+
+                let sleepSeconds = Self.nextSeedingPolicyWakeInterval(
+                    options: options,
+                    elapsed: elapsed,
+                    uploadRateBytesPerSecond: uploadRateBytesPerSecond,
+                    totalBytes: metadata.totalBytes
+                )
+                do {
+                    try await Task.sleep(nanoseconds: Self.nanoseconds(for: sleepSeconds))
+                } catch {
+                    return
+                }
+
+                let updatedElapsed = Date().timeIntervalSince(seedingStartedAt)
+                let updatedUploadedBytes = Self.modeledUploadedBytes(
+                    uploadRateBytesPerSecond: uploadRateBytesPerSecond,
+                    duration: updatedElapsed
+                )
+                self.emitSeedingUpdate(
+                    request: request,
+                    metadata: metadata,
+                    trackerSummary: trackerSummary,
+                    peerStates: peerStates,
+                    resumeState: resumeState,
+                    metainfo: metainfo,
+                    layout: layout,
+                    uploadedBytes: updatedUploadedBytes,
+                    seedingDurationSeconds: updatedElapsed,
+                    uploadRateBytesPerSecond: uploadRateBytesPerSecond,
+                    onSnapshot: onSnapshot
+                )
+            }
+        }
+    }
+
+    private func emitSeedingUpdate(
+        request: TorrentStartRequest,
+        metadata: SwiftTorrentMetadataSnapshot,
+        trackerSummary: SwiftTorrentTrackerAnnounceSummary,
+        peerStates: [SwiftTorrentPeerRuntimeState],
+        resumeState: TorrentCoreResumeState,
+        metainfo: TorrentMetainfo,
+        layout: TorrentContentLayout,
+        uploadedBytes: Int64,
+        seedingDurationSeconds: TimeInterval,
+        uploadRateBytesPerSecond: Int64,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) {
+        guard seedingContexts[request.id] != nil else { return }
+        let ratio = shareRatio(uploadedBytes: uploadedBytes, totalBytes: metadata.totalBytes)
+        swarmStates[request.id] = SwiftTorrentSwarmRuntimeState(
+            peers: peerStates,
+            downloadedBytes: metadata.totalBytes,
+            uploadedBytes: uploadedBytes,
+            seedingStartedAt: Date().addingTimeInterval(-seedingDurationSeconds)
+        )
+        onSnapshot(snapshot(
+            for: request,
+            status: .seeding,
+            metadata: metadata,
+            trackerSummary: trackerSummary,
+            downloadedBytes: metadata.totalBytes,
+            speedBytesPerSecond: 0,
+            etaSeconds: nil,
+            peerStates: peerStates,
+            resumeState: resumeState,
+            metainfo: metainfo,
+            layout: layout,
+            resumeStateStatus: request.resumeDataPath == nil ? .missing : .saved,
+            uploadRateBytesPerSecond: uploadRateBytesPerSecond,
+            shareRatio: ratio,
+            seedingDurationSeconds: seedingDurationSeconds
+        ))
+    }
+
+    private func finishSeedingDueToPolicy(
+        request: TorrentStartRequest,
+        metadata: SwiftTorrentMetadataSnapshot,
+        trackerSummary: SwiftTorrentTrackerAnnounceSummary,
+        peerStates: [SwiftTorrentPeerRuntimeState],
+        resumeState: TorrentCoreResumeState,
+        metainfo: TorrentMetainfo,
+        layout: TorrentContentLayout,
+        uploadedBytes: Int64,
+        seedingDurationSeconds: TimeInterval,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async {
+        seedingTasks[request.id]?.cancel()
+        seedingTasks[request.id] = nil
+        seedingContexts[request.id] = nil
+        let stoppedTrackerSummary = await announceTrackers(
+            for: request,
+            metadata: metadata,
+            trackerSession: trackerSessions[request.id],
+            event: .stopped,
+            downloaded: metadata.totalBytes,
+            left: 0,
+            force: true
+        ) ?? trackerSummary
+        let ratio = shareRatio(uploadedBytes: uploadedBytes, totalBytes: metadata.totalBytes)
+        swarmStates[request.id] = SwiftTorrentSwarmRuntimeState(
+            peers: peerStates,
+            downloadedBytes: metadata.totalBytes,
+            uploadedBytes: uploadedBytes,
+            seedingStartedAt: Date().addingTimeInterval(-seedingDurationSeconds)
         )
         onSnapshot(snapshot(
             for: request,
             status: .completed,
             metadata: metadata,
-            trackerSummary: completedTrackerSummary,
+            trackerSummary: stoppedTrackerSummary,
             downloadedBytes: metadata.totalBytes,
             speedBytesPerSecond: 0,
             etaSeconds: nil,
-            peerStates: Array(peerStates.values),
+            peerStates: peerStates,
             resumeState: resumeState,
             metainfo: metainfo,
             layout: layout,
-            resumeStateStatus: request.resumeDataPath == nil ? .missing : .saved
+            resumeStateStatus: request.resumeDataPath == nil ? .missing : .saved,
+            uploadRateBytesPerSecond: 0,
+            shareRatio: ratio,
+            seedingDurationSeconds: seedingDurationSeconds
         ))
     }
 
@@ -963,6 +1327,49 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             .min() ?? 0
     }
 
+    private static func shareRatio(uploadedBytes: Int64, totalBytes: Int64) -> Double {
+        guard totalBytes > 0 else { return 0 }
+        return max(0, Double(uploadedBytes) / Double(totalBytes))
+    }
+
+    private func shareRatio(uploadedBytes: Int64, totalBytes: Int64) -> Double {
+        Self.shareRatio(uploadedBytes: uploadedBytes, totalBytes: totalBytes)
+    }
+
+    private static func modeledUploadedBytes(
+        uploadRateBytesPerSecond: Int64,
+        duration: TimeInterval
+    ) -> Int64 {
+        guard uploadRateBytesPerSecond > 0, duration.isFinite, duration > 0 else {
+            return 0
+        }
+        return Int64(Double(uploadRateBytesPerSecond) * duration)
+    }
+
+    private static func nextSeedingPolicyWakeInterval(
+        options: TorrentRuntimeOptions,
+        elapsed: TimeInterval,
+        uploadRateBytesPerSecond: Int64,
+        totalBytes: Int64
+    ) -> TimeInterval {
+        switch options.seedingLimitMode {
+        case .stopAfterTime:
+            return max(0.05, min(1, options.stopSeedingAfterSeconds - elapsed))
+        case .stopAtRatio:
+            guard uploadRateBytesPerSecond > 0, totalBytes > 0 else { return 1 }
+            let requiredUploadedBytes = Double(totalBytes) * options.stopSeedingAtRatio
+            let requiredSeconds = requiredUploadedBytes / Double(uploadRateBytesPerSecond)
+            return max(0.05, min(1, requiredSeconds - elapsed))
+        case .stopWhenComplete, .neverStop:
+            return 1
+        }
+    }
+
+    private static func nanoseconds(for seconds: TimeInterval) -> UInt64 {
+        let clamped = max(0.001, min(seconds, 3600))
+        return UInt64(clamped * 1_000_000_000)
+    }
+
     private func observedSpeed(
         downloadedBytes: Int64,
         initialDownloadedBytes: Int64,
@@ -1086,7 +1493,10 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         resumeState: TorrentCoreResumeState? = nil,
         metainfo: TorrentMetainfo? = nil,
         layout: TorrentContentLayout? = nil,
-        resumeStateStatus: TorrentResumeState.Status = .missing
+        resumeStateStatus: TorrentResumeState.Status = .missing,
+        uploadRateBytesPerSecond: Int64? = nil,
+        shareRatio: Double? = nil,
+        seedingDurationSeconds: TimeInterval = 0
     ) -> DownloadSnapshot {
         let options = effectiveRuntimeOptions(for: request, metadata: metadata)
         let isMagnet = request.displaySource.lowercased().hasPrefix("magnet:")
@@ -1145,7 +1555,9 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 engineStatus: .available,
                 peerCount: peers.count,
                 downloadRate: speedBytesPerSecond,
-                uploadRate: effectiveUploadLimit(for: request),
+                uploadRate: uploadRateBytesPerSecond ?? effectiveUploadLimit(for: request),
+                shareRatio: shareRatio ?? 0,
+                seedingDurationSeconds: seedingDurationSeconds,
                 distributedCopies: distributedCopies(
                     metainfo: metainfo,
                     resumeState: resumeState,
@@ -1183,6 +1595,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 dhtPeerCount: discoveryState.count(for: .dht),
                 pexPeerCount: discoveryState.count(for: .pex),
                 lsdPeerCount: discoveryState.count(for: .lsd),
+                seedingDurationSeconds: seedingDurationSeconds,
                 lastError: trackerSummary?.lastDiscoveryError
             )
         )
@@ -1200,6 +1613,8 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             L10n.string("torrent_tracker_connecting_peers", peerCount)
         case .completed:
             L10n.string("download_status_completed")
+        case .seeding:
+            L10n.string("download_status_seeding")
         default:
             L10n.string("torrent_swift_engine_runtime_pending")
         }
@@ -1210,7 +1625,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         trackerSummary: SwiftTorrentTrackerAnnounceSummary?
     ) -> String? {
         switch status {
-        case .fetchingMetadata, .fetchingPeers, .connectingPeers, .running, .completed:
+        case .fetchingMetadata, .fetchingPeers, .connectingPeers, .running, .seeding, .completed:
             nil
         case .failed where trackerSummary?.successfulTrackerURL == nil && trackerSummary != nil:
             L10n.string("torrent_tracker_no_peers")
@@ -1339,6 +1754,21 @@ private struct SwiftTorrentMetadataSnapshot: Sendable {
 private struct SwiftTorrentSwarmRuntimeState: Sendable {
     var peers: [SwiftTorrentPeerRuntimeState]
     var downloadedBytes: Int64
+    var uploadedBytes: Int64 = 0
+    var seedingStartedAt: Date? = nil
+}
+
+private struct SwiftTorrentSeedingContext: Sendable {
+    var request: TorrentStartRequest
+    var metadata: SwiftTorrentMetadataSnapshot
+    var trackerSummary: SwiftTorrentTrackerAnnounceSummary
+    var peerStates: [SwiftTorrentPeerRuntimeState]
+    var resumeState: TorrentCoreResumeState
+    var metainfo: TorrentMetainfo
+    var layout: TorrentContentLayout
+    var seedingStartedAt: Date
+    var uploadRateBytesPerSecond: Int64
+    var onSnapshot: @Sendable (DownloadSnapshot) -> Void
 }
 
 private struct SwiftTorrentPeerDiscoveryState: Sendable {
@@ -1633,6 +2063,7 @@ protocol TorrentEngineAdapter: Sendable {
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async
     func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async
     func setSequentialDownload(id: UUID, enabled: Bool) async
+    func setRuntimeOptions(id: UUID, options: TorrentRuntimeOptions) async
     func addTracker(id: UUID, url: String) async
     func removeTracker(id: UUID, url: String) async
     func forceReannounce(id: UUID) async
@@ -1653,9 +2084,17 @@ struct TorrentStartRequest: Sendable {
     let hasExplicitFileSelection: Bool
     let filePriorities: [Int: Int]
     let resumeDataPath: String?
-    let runtimeOptions: TorrentRuntimeOptions
+    var runtimeOptions: TorrentRuntimeOptions
     let downloadLimitBytesPerSecond: Int64
     let uploadLimitBytesPerSecond: Int64
+}
+
+private extension TorrentStartRequest {
+    func withRuntimeOptions(_ options: TorrentRuntimeOptions) -> TorrentStartRequest {
+        var copy = self
+        copy.runtimeOptions = options
+        return copy
+    }
 }
 
 struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
@@ -1716,6 +2155,7 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {}
     func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {}
     func setSequentialDownload(id: UUID, enabled: Bool) async {}
+    func setRuntimeOptions(id: UUID, options: TorrentRuntimeOptions) async {}
     func addTracker(id: UUID, url: String) async {}
     func removeTracker(id: UUID, url: String) async {}
     func forceReannounce(id: UUID) async {}

@@ -39,8 +39,16 @@ struct TorrentFileTests {
             magnetMetadataTimeoutSeconds: 30,
             maxConnections: 64,
             maxUploadSlots: 4,
-            seedingLimitMode: .neverStop,
-            stopSeedingAtRatio: 2
+            seedingLimitMode: .stopAfterTime,
+            stopSeedingAtRatio: 2,
+            stopSeedingAfterSeconds: 900
+        )
+        task.torrentConnection = TorrentConnectionInfo(
+            metadataStatus: .available,
+            peerCount: 1,
+            uploadRate: 5,
+            shareRatio: 0.5,
+            seedingDurationSeconds: 120
         )
         task.torrentResumeState = TorrentResumeState(
             resumeDataPath: "/tmp/demo.fastresume",
@@ -71,15 +79,19 @@ struct TorrentFileTests {
             listenPort: 6881,
             dhtNodeCount: 0,
             distributedCopies: 1,
-            trackerCount: 1
+            trackerCount: 1,
+            seedingDurationSeconds: 120
         )
 
-        #expect(task.torrentRuntimeOptions?.seedingLimitMode == .neverStop)
+        #expect(task.torrentRuntimeOptions?.seedingLimitMode == .stopAfterTime)
+        #expect(task.torrentRuntimeOptions?.stopSeedingAfterSeconds == 900)
         #expect(task.torrentRuntimeOptions?.isSequentialDownloadEnabled == true)
+        #expect(task.torrentConnection?.seedingDurationSeconds == 120)
         #expect(task.torrentResumeState?.status == .saved)
         #expect(task.torrentTrackers.first?.url == "udp://tracker.example:80")
         #expect(task.torrentPeers.first?.client == "Test")
         #expect(task.torrentHealth?.listenPort == 6881)
+        #expect(task.torrentHealth?.seedingDurationSeconds == 120)
     }
 
     @Test("task decodes legacy torrent diagnostics without engine fields")
@@ -103,11 +115,14 @@ struct TorrentFileTests {
         #expect(task.torrentConnection?.engine == .libtorrent)
         #expect(task.torrentConnection?.engineStatus == .available)
         #expect(task.torrentConnection?.peerCount == 3)
+        #expect(task.torrentConnection?.seedingDurationSeconds == 0)
         #expect(task.torrentHealth?.engine == .libtorrent)
         #expect(task.torrentHealth?.engineStatus == .available)
         #expect(task.torrentHealth?.listenPort == 6881)
+        #expect(task.torrentHealth?.seedingDurationSeconds == 0)
         #expect(task.torrentRuntimeOptions?.engine == .swift)
         #expect(task.torrentRuntimeOptions?.seedingLimitMode == .neverStop)
+        #expect(task.torrentRuntimeOptions?.stopSeedingAfterSeconds == 3600)
     }
 
     @Test("task persists only safe browser context")

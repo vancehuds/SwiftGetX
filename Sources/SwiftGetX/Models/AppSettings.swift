@@ -27,6 +27,7 @@ final class AppSettings {
     var automaticallyRequeuesFailedTasks = false
     var queueFailureRetryLimit: Int = 3
     var stopSeedingAtRatio: Double = 1.0
+    var stopSeedingAfterSeconds: TimeInterval = 3600
     var torrentDHTEnabled = true
     var torrentPEXEnabled = true
     var torrentLSDEnabled = true
@@ -64,6 +65,7 @@ final class AppSettings {
         automaticallyRequeuesFailedTasks = record.automaticallyRequeuesFailedTasks
         queueFailureRetryLimit = record.queueFailureRetryLimit
         stopSeedingAtRatio = record.stopSeedingAtRatio
+        stopSeedingAfterSeconds = record.stopSeedingAfterSeconds
         torrentDHTEnabled = record.torrentDHTEnabled
         torrentPEXEnabled = record.torrentPEXEnabled
         torrentLSDEnabled = record.torrentLSDEnabled
@@ -94,6 +96,7 @@ final class AppSettings {
             automaticallyRequeuesFailedTasks: automaticallyRequeuesFailedTasks,
             queueFailureRetryLimit: queueFailureRetryLimit,
             stopSeedingAtRatio: stopSeedingAtRatio,
+            stopSeedingAfterSeconds: stopSeedingAfterSeconds,
             torrentDHTEnabled: torrentDHTEnabled,
             torrentPEXEnabled: torrentPEXEnabled,
             torrentLSDEnabled: torrentLSDEnabled,
@@ -124,6 +127,7 @@ final class AppSettings {
         record.automaticallyRequeuesFailedTasks = automaticallyRequeuesFailedTasks
         record.queueFailureRetryLimit = queueFailureRetryLimit
         record.stopSeedingAtRatio = stopSeedingAtRatio
+        record.stopSeedingAfterSeconds = stopSeedingAfterSeconds
         record.torrentDHTEnabled = torrentDHTEnabled
         record.torrentPEXEnabled = torrentPEXEnabled
         record.torrentLSDEnabled = torrentLSDEnabled
@@ -148,7 +152,8 @@ final class AppSettings {
             maxConnections: torrentMaxConnections,
             maxUploadSlots: torrentMaxUploadSlots,
             seedingLimitMode: torrentSeedingLimitMode,
-            stopSeedingAtRatio: stopSeedingAtRatio
+            stopSeedingAtRatio: stopSeedingAtRatio,
+            stopSeedingAfterSeconds: stopSeedingAfterSeconds
         )
     }
 }
@@ -228,6 +233,7 @@ final class AppSettingsRecord {
     var automaticallyRequeuesFailedTasks: Bool = false
     var queueFailureRetryLimit: Int = 3
     var stopSeedingAtRatio: Double
+    var stopSeedingAfterSeconds: TimeInterval = 3600
     var torrentDHTEnabled: Bool = true
     var torrentPEXEnabled: Bool = true
     var torrentLSDEnabled: Bool = true
@@ -258,6 +264,7 @@ final class AppSettingsRecord {
         automaticallyRequeuesFailedTasks: Bool = false,
         queueFailureRetryLimit: Int = 3,
         stopSeedingAtRatio: Double = 1.0,
+        stopSeedingAfterSeconds: TimeInterval = 3600,
         torrentDHTEnabled: Bool = true,
         torrentPEXEnabled: Bool = true,
         torrentLSDEnabled: Bool = true,
@@ -286,6 +293,7 @@ final class AppSettingsRecord {
         self.automaticallyRequeuesFailedTasks = automaticallyRequeuesFailedTasks
         self.queueFailureRetryLimit = queueFailureRetryLimit
         self.stopSeedingAtRatio = stopSeedingAtRatio
+        self.stopSeedingAfterSeconds = max(1, stopSeedingAfterSeconds)
         self.torrentDHTEnabled = torrentDHTEnabled
         self.torrentPEXEnabled = torrentPEXEnabled
         self.torrentLSDEnabled = torrentLSDEnabled

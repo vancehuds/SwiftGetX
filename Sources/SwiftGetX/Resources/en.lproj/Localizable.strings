@@ -189,6 +189,8 @@
 "inspector_tab_overview" = "Overview";
 "log_download_completed" = "Download completed";
 "log_download_ready_seeding" = "Download complete; seeding is active";
+"log_seeding_stopped" = "Seeding stopped";
+"log_updated_bt_seeding_policy" = "Updated BT seeding policy: %@";
 "log_copied_error" = "Copied error message";
 "log_deleted_partial_data" = "Deleted downloaded data";
 "log_paused" = "Paused";
@@ -277,6 +279,7 @@
 "new_task_title" = "New Download Task";
 "not_supported_or_unknown" = "Not supported / unknown";
 "notification_download_complete" = "Download Complete";
+"notification_seeding_stopped" = "Seeding Stopped";
 "save_directory" = "Save Directory";
 "queue_auto_requeue_failed" = "Automatically requeue failed tasks";
 "queue_move_down" = "Move Down";
@@ -312,6 +315,8 @@
 "status_ready" = "Ready";
 "status_save_failed" = "Save failed: %@";
 "stop_seeding_ratio_message" = "Stop seeding after the share ratio reaches %.1f";
+"stop_seeding_time_limit" = "Seeding time limit: %@";
+"stop_seeding_time_message" = "Stop seeding after %@";
 "supported" = "Supported";
 "task_failed_message" = "Failed: %@";
 "task_list_summary" = "%d tasks · %d downloading · %d completed";
@@ -368,6 +373,8 @@
 "torrent_seeding_mode_complete" = "Stop when complete";
 "torrent_seeding_mode_never" = "Never stop automatically";
 "torrent_seeding_mode_ratio" = "Stop at ratio";
+"torrent_seeding_mode_time" = "Stop after seeding time";
+"torrent_seeding_time" = "Seeding Time";
 "torrent_sequential_download" = "Sequential";
 "torrent_share_ratio" = "Share Ratio";
 "torrent_tracker_url" = "Tracker URL";

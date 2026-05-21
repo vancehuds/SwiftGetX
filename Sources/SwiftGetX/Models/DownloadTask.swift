@@ -705,6 +705,7 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
     var downloadRate: Int64
     var uploadRate: Int64
     var shareRatio: Double
+    var seedingDurationSeconds: TimeInterval
     var distributedCopies: Double
     var isDHTEnabled: Bool
     var isPEXEnabled: Bool
@@ -720,6 +721,7 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
         case downloadRate
         case uploadRate
         case shareRatio
+        case seedingDurationSeconds
         case distributedCopies
         case isDHTEnabled
         case isPEXEnabled
@@ -736,6 +738,7 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
         downloadRate: Int64 = 0,
         uploadRate: Int64 = 0,
         shareRatio: Double = 0,
+        seedingDurationSeconds: TimeInterval = 0,
         distributedCopies: Double = 0,
         isDHTEnabled: Bool = false,
         isPEXEnabled: Bool = false,
@@ -750,6 +753,7 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
         self.downloadRate = downloadRate
         self.uploadRate = uploadRate
         self.shareRatio = shareRatio
+        self.seedingDurationSeconds = max(0, seedingDurationSeconds)
         self.distributedCopies = distributedCopies
         self.isDHTEnabled = isDHTEnabled
         self.isPEXEnabled = isPEXEnabled
@@ -783,6 +787,10 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
         downloadRate = try container.decodeIfPresent(Int64.self, forKey: .downloadRate) ?? 0
         uploadRate = try container.decodeIfPresent(Int64.self, forKey: .uploadRate) ?? 0
         shareRatio = try container.decodeIfPresent(Double.self, forKey: .shareRatio) ?? 0
+        seedingDurationSeconds = max(
+            0,
+            try container.decodeIfPresent(TimeInterval.self, forKey: .seedingDurationSeconds) ?? 0
+        )
         distributedCopies = try container.decodeIfPresent(Double.self, forKey: .distributedCopies) ?? 0
         isDHTEnabled = try container.decodeIfPresent(Bool.self, forKey: .isDHTEnabled) ?? false
         isPEXEnabled = try container.decodeIfPresent(Bool.self, forKey: .isPEXEnabled) ?? false
@@ -913,6 +921,7 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
     var dhtPeerCount: Int
     var pexPeerCount: Int
     var lsdPeerCount: Int
+    var seedingDurationSeconds: TimeInterval
     var lastError: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -933,6 +942,7 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         case dhtPeerCount
         case pexPeerCount
         case lsdPeerCount
+        case seedingDurationSeconds
         case lastError
     }
 
@@ -954,6 +964,7 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         dhtPeerCount: Int = 0,
         pexPeerCount: Int = 0,
         lsdPeerCount: Int = 0,
+        seedingDurationSeconds: TimeInterval = 0,
         lastError: String? = nil
     ) {
         self.nativeEngineAvailable = nativeEngineAvailable
@@ -973,6 +984,7 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         self.dhtPeerCount = dhtPeerCount
         self.pexPeerCount = pexPeerCount
         self.lsdPeerCount = lsdPeerCount
+        self.seedingDurationSeconds = max(0, seedingDurationSeconds)
         self.lastError = lastError
     }
 
@@ -997,6 +1009,10 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         dhtPeerCount = try container.decodeIfPresent(Int.self, forKey: .dhtPeerCount) ?? 0
         pexPeerCount = try container.decodeIfPresent(Int.self, forKey: .pexPeerCount) ?? 0
         lsdPeerCount = try container.decodeIfPresent(Int.self, forKey: .lsdPeerCount) ?? 0
+        seedingDurationSeconds = max(
+            0,
+            try container.decodeIfPresent(TimeInterval.self, forKey: .seedingDurationSeconds) ?? 0
+        )
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
     }
 }
@@ -1029,6 +1045,7 @@ struct TorrentResumeState: Codable, Equatable, Sendable {
 
 enum TorrentSeedingLimitMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case stopAtRatio
+    case stopAfterTime
     case stopWhenComplete
     case neverStop
 
@@ -1038,6 +1055,8 @@ enum TorrentSeedingLimitMode: String, Codable, CaseIterable, Identifiable, Senda
         switch self {
         case .stopAtRatio:
             L10n.string("torrent_seeding_mode_ratio")
+        case .stopAfterTime:
+            L10n.string("torrent_seeding_mode_time")
         case .stopWhenComplete:
             L10n.string("torrent_seeding_mode_complete")
         case .neverStop:
@@ -1057,6 +1076,7 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
     var maxUploadSlots: Int
     var seedingLimitMode: TorrentSeedingLimitMode
     var stopSeedingAtRatio: Double
+    var stopSeedingAfterSeconds: TimeInterval
 
     private enum CodingKeys: String, CodingKey {
         case engine
@@ -1069,6 +1089,7 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         case maxUploadSlots
         case seedingLimitMode
         case stopSeedingAtRatio
+        case stopSeedingAfterSeconds
     }
 
     init(
@@ -1081,7 +1102,8 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         maxConnections: Int = 200,
         maxUploadSlots: Int = 8,
         seedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio,
-        stopSeedingAtRatio: Double = 1.0
+        stopSeedingAtRatio: Double = 1.0,
+        stopSeedingAfterSeconds: TimeInterval = 3600
     ) {
         self.engine = engine
         self.isDHTEnabled = isDHTEnabled
@@ -1093,6 +1115,7 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         self.maxUploadSlots = max(-1, maxUploadSlots)
         self.seedingLimitMode = seedingLimitMode
         self.stopSeedingAtRatio = max(0, stopSeedingAtRatio)
+        self.stopSeedingAfterSeconds = max(0, stopSeedingAfterSeconds)
     }
 
     init(from decoder: Decoder) throws {
@@ -1107,18 +1130,39 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
             maxConnections: try container.decodeIfPresent(Int.self, forKey: .maxConnections) ?? 200,
             maxUploadSlots: try container.decodeIfPresent(Int.self, forKey: .maxUploadSlots) ?? 8,
             seedingLimitMode: try container.decodeIfPresent(TorrentSeedingLimitMode.self, forKey: .seedingLimitMode) ?? .stopAtRatio,
-            stopSeedingAtRatio: try container.decodeIfPresent(Double.self, forKey: .stopSeedingAtRatio) ?? 1.0
+            stopSeedingAtRatio: try container.decodeIfPresent(Double.self, forKey: .stopSeedingAtRatio) ?? 1.0,
+            stopSeedingAfterSeconds: try container.decodeIfPresent(TimeInterval.self, forKey: .stopSeedingAfterSeconds) ?? 3600
         )
     }
 
-    func shouldStopSeeding(isSeeding: Bool, shareRatio: Double, completed: Bool) -> Bool {
+    func shouldStopSeeding(
+        isSeeding: Bool,
+        shareRatio: Double,
+        completed: Bool,
+        seedingDurationSeconds: TimeInterval = 0
+    ) -> Bool {
         switch seedingLimitMode {
         case .stopAtRatio:
-            return isSeeding && stopSeedingAtRatio > 0 && shareRatio >= stopSeedingAtRatio
+            return isSeeding && shareRatio >= stopSeedingAtRatio
+        case .stopAfterTime:
+            return isSeeding && seedingDurationSeconds >= stopSeedingAfterSeconds
         case .stopWhenComplete:
             return completed
         case .neverStop:
             return false
+        }
+    }
+
+    var seedingPolicyDescription: String {
+        switch seedingLimitMode {
+        case .stopAtRatio:
+            L10n.string("stop_seeding_ratio_message", stopSeedingAtRatio)
+        case .stopAfterTime:
+            L10n.string("stop_seeding_time_message", TimeFormatter.eta(stopSeedingAfterSeconds))
+        case .stopWhenComplete:
+            TorrentSeedingLimitMode.stopWhenComplete.title
+        case .neverStop:
+            TorrentSeedingLimitMode.neverStop.title
         }
     }
 }

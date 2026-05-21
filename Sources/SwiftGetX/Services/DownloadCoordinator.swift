@@ -637,6 +637,42 @@ final class DownloadCoordinator {
         }
     }
 
+    func setTorrentSeedingLimitMode(_ task: DownloadTask, mode: TorrentSeedingLimitMode) {
+        setTorrentRuntimeOptions(task, logMessage: nil) { options in
+            options.seedingLimitMode = mode
+        }
+    }
+
+    func setTorrentStopSeedingAtRatio(_ task: DownloadTask, ratio: Double) {
+        setTorrentRuntimeOptions(task, logMessage: nil) { options in
+            options.stopSeedingAtRatio = ratio
+        }
+    }
+
+    func setTorrentStopSeedingAfterSeconds(_ task: DownloadTask, seconds: TimeInterval) {
+        setTorrentRuntimeOptions(task, logMessage: nil) { options in
+            options.stopSeedingAfterSeconds = seconds
+        }
+    }
+
+    private func setTorrentRuntimeOptions(
+        _ task: DownloadTask,
+        logMessage: String?,
+        update: (inout TorrentRuntimeOptions) -> Void
+    ) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        var options = task.torrentRuntimeOptions ?? settings?.torrentRuntimeOptions ?? TorrentRuntimeOptions()
+        update(&options)
+        task.torrentRuntimeOptions = options
+        task.appendLog(logMessage ?? L10n.string("log_updated_bt_seeding_policy", options.seedingPolicyDescription))
+        let request = DownloadRequest(task: task)
+        save()
+
+        Task {
+            await engine(for: request.kind).setTorrentRuntimeOptions(request, options: options)
+        }
+    }
+
     func addTorrentTracker(_ task: DownloadTask, url: String) {
         guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -759,6 +795,7 @@ final class DownloadCoordinator {
             return
         }
 
+        let previousStatus = task.status
         task.status = snapshot.status
         if let name = snapshot.name {
             task.name = name
@@ -847,6 +884,11 @@ final class DownloadCoordinator {
                     NotificationManager.notifyCompletion(for: task)
                 }
                 scheduleQueue()
+            } else if previousStatus == .seeding {
+                task.appendLog(L10n.string("log_seeding_stopped"))
+                if settings?.completionNotificationsEnabled ?? true {
+                    NotificationManager.notifySeedingStopped(for: task)
+                }
             }
             runtimeBrowserContexts[task.id] = nil
             runtimeHTTPOptions[task.id] = nil

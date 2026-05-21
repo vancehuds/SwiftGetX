@@ -147,18 +147,22 @@ struct TorrentDownloadEngineTests {
 
         await engine.setTorrentFilePriority(request, fileIndex: 2, priority: 7)
         await engine.setTorrentSequentialDownload(request, enabled: true)
+        await engine.setTorrentRuntimeOptions(request, options: TorrentRuntimeOptions(seedingLimitMode: .stopAfterTime, stopSeedingAfterSeconds: 120))
         await engine.addTorrentTracker(request, url: "udp://tracker.example:80")
         await engine.removeTorrentTracker(request, url: "udp://tracker.example:80")
         await engine.forceTorrentReannounce(request)
 
         let priorities = await adapter.filePriorities
         let sequential = await adapter.sequentialChanges
+        let runtimeOptions = await adapter.runtimeOptionChanges
         let added = await adapter.addedTrackers
         let removed = await adapter.removedTrackers
         let reannounceCount = await adapter.reannounceCount
         #expect(priorities.first?.fileIndex == 2)
         #expect(priorities.first?.priority == 7)
         #expect(sequential == [true])
+        #expect(runtimeOptions.first?.seedingLimitMode == .stopAfterTime)
+        #expect(runtimeOptions.first?.stopSeedingAfterSeconds == 120)
         #expect(added == ["udp://tracker.example:80"])
         #expect(removed == ["udp://tracker.example:80"])
         #expect(reannounceCount == 1)
@@ -410,7 +414,11 @@ struct TorrentDownloadEngineTests {
             hasExplicitFileSelection: false,
             filePriorities: [:],
             resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
-            runtimeOptions: TorrentRuntimeOptions(engine: .swift, magnetMetadataTimeoutSeconds: 2),
+            runtimeOptions: TorrentRuntimeOptions(
+                engine: .swift,
+                magnetMetadataTimeoutSeconds: 2,
+                seedingLimitMode: .stopWhenComplete
+            ),
             downloadLimitBytesPerSecond: 0,
             uploadLimitBytesPerSecond: 0
         )
@@ -420,13 +428,17 @@ struct TorrentDownloadEngineTests {
                 await store.append(snapshot)
             }
         }
-        let snapshots = try await store.snapshots(count: 6)
-        let final = try #require(snapshots.last)
+        let snapshots = try await store.snapshots(untilStatus: .completed)
+        let final = try #require(snapshots.last { $0.status == .completed })
         let savedData = try Data(contentsOf: directory.appendingPathComponent("payload.bin"))
 
-        #expect(snapshots.map(\.status) == [.fetchingMetadata, .fetchingMetadata, .connectingPeers, .running, .running, .completed])
-        #expect(snapshots[1].torrentMetadataStatus == .fetching)
-        #expect(snapshots[2].torrentMetadataStatus == .available)
+        let statuses = snapshots.map(\.status)
+        #expect(statuses.filter { $0 == .fetchingMetadata }.count >= 2)
+        #expect(statuses.contains(.connectingPeers))
+        #expect(statuses.contains(.running))
+        #expect(statuses.contains(.completed))
+        #expect(snapshots.contains { $0.torrentMetadataStatus == .fetching })
+        #expect(snapshots.contains { $0.torrentMetadataStatus == .available })
         #expect(final.torrentFiles == [
             TorrentFile(index: 0, path: "payload.bin", size: Int64(contents.count), priority: TorrentFilePriority.normal.rawValue, progress: 1)
         ])
@@ -524,7 +536,11 @@ struct TorrentDownloadEngineTests {
             hasExplicitFileSelection: false,
             filePriorities: [:],
             resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
-            runtimeOptions: TorrentRuntimeOptions(engine: .swift, magnetMetadataTimeoutSeconds: 1),
+            runtimeOptions: TorrentRuntimeOptions(
+                engine: .swift,
+                magnetMetadataTimeoutSeconds: 1,
+                seedingLimitMode: .stopWhenComplete
+            ),
             downloadLimitBytesPerSecond: 0,
             uploadLimitBytesPerSecond: 0
         )
@@ -689,7 +705,7 @@ struct TorrentDownloadEngineTests {
             hasExplicitFileSelection: false,
             filePriorities: [:],
             resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
-            runtimeOptions: TorrentRuntimeOptions(engine: .swift),
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift, seedingLimitMode: .stopWhenComplete),
             downloadLimitBytesPerSecond: 0,
             uploadLimitBytesPerSecond: 0
         )
@@ -718,6 +734,164 @@ struct TorrentDownloadEngineTests {
         let announceURLs = await httpTransport.requests.compactMap { $0.url?.absoluteString }
         #expect(announceURLs.contains { $0.contains("event=started") })
         #expect(announceURLs.contains { $0.contains("event=completed") })
+        #expect(announceURLs.contains { $0.contains("event=stopped") })
+    }
+
+    @Test("Swift adapter stops seeding after configured time")
+    func swiftAdapterStopsSeedingAfterConfiguredTime() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        let trackerURL = "http://tracker.local/announce"
+        let contents = Data((0..<12).map(UInt8.init))
+        try Self.singleFileTorrentData(
+            name: "payload.bin",
+            length: contents.count,
+            announce: trackerURL,
+            pieceLength: contents.count,
+            pieceHashes: Data(Insecure.SHA1.hash(data: contents))
+        ).write(to: torrentURL)
+        let metainfo = try TorrentMetainfo.parse(url: torrentURL)
+        let peerTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: metainfo.infoHashV1,
+                    peerID: Data((60..<80).map(UInt8.init))
+                ).encodedData(),
+                try TorrentPeerWireMessage.unchoke.encodedData(),
+                try TorrentPeerWireMessage.piece(pieceIndex: 0, begin: 0, block: contents).encodedData()
+            ]
+        )
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse())
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { _ in peerTransport },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
+        )
+        let store = SnapshotStore()
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
+            runtimeOptions: TorrentRuntimeOptions(
+                engine: .swift,
+                seedingLimitMode: .stopAfterTime,
+                stopSeedingAfterSeconds: 0.05
+            ),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 512
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshots = try await store.snapshots(count: 7)
+        let final = try #require(snapshots.last)
+
+        #expect(snapshots.map(\.status).contains(.seeding))
+        #expect(final.status == .completed)
+        #expect(final.torrentConnection?.seedingDurationSeconds ?? 0 >= 0.05)
+        #expect(final.torrentConnection?.shareRatio ?? 0 > 0)
+        let announceURLs = await httpTransport.requests.compactMap { $0.url?.absoluteString }
+        #expect(announceURLs.contains { $0.contains("event=completed") })
+        #expect(announceURLs.contains { $0.contains("event=stopped") })
+    }
+
+    @Test("Swift adapter applies seeding policy changes while seeding")
+    func swiftAdapterAppliesSeedingPolicyChangesWhileSeeding() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        let trackerURL = "http://tracker.local/announce"
+        let contents = Data((0..<12).map(UInt8.init))
+        try Self.singleFileTorrentData(
+            name: "payload.bin",
+            length: contents.count,
+            announce: trackerURL,
+            pieceLength: contents.count,
+            pieceHashes: Data(Insecure.SHA1.hash(data: contents))
+        ).write(to: torrentURL)
+        let metainfo = try TorrentMetainfo.parse(url: torrentURL)
+        let peerTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: metainfo.infoHashV1,
+                    peerID: Data((60..<80).map(UInt8.init))
+                ).encodedData(),
+                try TorrentPeerWireMessage.unchoke.encodedData(),
+                try TorrentPeerWireMessage.piece(pieceIndex: 0, begin: 0, block: contents).encodedData()
+            ]
+        )
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse())
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { _ in peerTransport },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
+        )
+        let store = SnapshotStore()
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
+            runtimeOptions: TorrentRuntimeOptions(
+                engine: .swift,
+                seedingLimitMode: .neverStop
+            ),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 512
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        _ = try await store.snapshots(untilStatus: .seeding)
+        await adapter.setRuntimeOptions(
+            id: request.id,
+            options: TorrentRuntimeOptions(
+                engine: .swift,
+                seedingLimitMode: .stopAfterTime,
+                stopSeedingAfterSeconds: 0.05
+            )
+        )
+        let snapshots = try await store.snapshots(untilStatus: .completed)
+        let final = try #require(snapshots.last)
+
+        #expect(snapshots.map(\.status).contains(.seeding))
+        #expect(final.status == .completed)
+        #expect(final.torrentConnection?.seedingDurationSeconds ?? 0 >= 0.05)
+        let announceURLs = await httpTransport.requests.compactMap { $0.url?.absoluteString }
         #expect(announceURLs.contains { $0.contains("event=stopped") })
     }
 
@@ -820,7 +994,7 @@ struct TorrentDownloadEngineTests {
         let final = try #require(snapshots.last)
         let savedData = try Data(contentsOf: directory.appendingPathComponent("payload.bin"))
 
-        #expect(snapshots.map(\.status) == [.fetchingPeers, .connectingPeers, .running, .running, .running, .completed])
+        #expect(snapshots.map(\.status) == [.fetchingPeers, .connectingPeers, .running, .running, .running, .seeding])
         #expect(savedData == firstPiece + secondPiece)
         #expect(final.downloadedBytes == Int64(firstPiece.count + secondPiece.count))
         #expect(final.torrentFiles.allSatisfy { $0.progress == 1 })
@@ -836,6 +1010,8 @@ struct TorrentDownloadEngineTests {
         } == true)
         #expect(snapshots[3].speedBytesPerSecond <= 4_000)
         #expect(final.torrentConnection?.uploadRate == 512)
+        #expect(final.torrentConnection?.shareRatio == 0)
+        #expect(final.torrentConnection?.seedingDurationSeconds == 0)
         let announceURLs = await httpTransport.requests.compactMap { $0.url?.absoluteString }
         #expect(announceURLs.contains { $0.contains("event=started") })
         #expect(announceURLs.contains { $0.contains("event=completed") })
@@ -1417,6 +1593,16 @@ private actor SnapshotStore {
         }
         throw SnapshotStoreError.missingSnapshot
     }
+
+    func snapshots(untilStatus status: DownloadStatus) async throws -> [DownloadSnapshot] {
+        for _ in 0..<40 {
+            if snapshots.contains(where: { $0.status == status }) {
+                return snapshots
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw SnapshotStoreError.missingSnapshot
+    }
 }
 
 private enum SnapshotStoreError: Error {
@@ -1602,6 +1788,7 @@ private actor RecordingTorrentAdapter: TorrentEngineAdapter {
     private(set) var removedTrackers = [String]()
     private(set) var reannounceCount = 0
     private(set) var runtimeConfigurations = [TorrentRuntimeOptions]()
+    private(set) var runtimeOptionChanges = [TorrentRuntimeOptions]()
 
     func start(
         _ request: TorrentStartRequest,
@@ -1633,6 +1820,10 @@ private actor RecordingTorrentAdapter: TorrentEngineAdapter {
 
     func setSequentialDownload(id: UUID, enabled: Bool) async {
         sequentialChanges.append(enabled)
+    }
+
+    func setRuntimeOptions(id: UUID, options: TorrentRuntimeOptions) async {
+        runtimeOptionChanges.append(options)
     }
 
     func addTracker(id: UUID, url: String) async {

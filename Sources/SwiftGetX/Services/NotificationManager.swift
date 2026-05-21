@@ -35,4 +35,20 @@ enum NotificationManager {
         )
         UNUserNotificationCenter.current().add(request)
     }
+
+    static func notifySeedingStopped(for task: DownloadTask) {
+        guard canUseUserNotifications else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = L10n.string("notification_seeding_stopped")
+        content.body = task.name
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "\(task.id.uuidString)-seeding-stopped",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+    }
 }

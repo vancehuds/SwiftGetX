@@ -189,6 +189,8 @@
 "inspector_tab_overview" = "概览";
 "log_download_completed" = "下载完成";
 "log_download_ready_seeding" = "下载完成，正在做种";
+"log_seeding_stopped" = "做种已停止";
+"log_updated_bt_seeding_policy" = "已更新 BT 做种策略：%@";
 "log_copied_error" = "已复制错误消息";
 "log_deleted_partial_data" = "已删除已下载数据";
 "log_paused" = "已暂停";
@@ -277,6 +279,7 @@
 "new_task_title" = "新建下载任务";
 "not_supported_or_unknown" = "不支持/未知";
 "notification_download_complete" = "下载完成";
+"notification_seeding_stopped" = "做种已停止";
 "save_directory" = "保存目录";
 "queue_auto_requeue_failed" = "失败后自动重新排队";
 "queue_move_down" = "下移";
@@ -312,6 +315,8 @@
 "status_ready" = "就绪";
 "status_save_failed" = "保存失败：%@";
 "stop_seeding_ratio_message" = "分享率达到 %.1f 后停止做种";
+"stop_seeding_time_limit" = "做种时长限制：%@";
+"stop_seeding_time_message" = "做种 %@ 后停止";
 "supported" = "支持";
 "task_failed_message" = "失败：%@";
 "task_list_summary" = "%d 个任务 · %d 下载中 · %d 已完成";
@@ -368,6 +373,8 @@
 "torrent_seeding_mode_complete" = "完成后停止";
 "torrent_seeding_mode_never" = "不自动停止";
 "torrent_seeding_mode_ratio" = "达到分享率后停止";
+"torrent_seeding_mode_time" = "达到做种时长后停止";
+"torrent_seeding_time" = "做种时长";
 "torrent_sequential_download" = "顺序下载";
 "torrent_share_ratio" = "分享率";
 "torrent_tracker_url" = "Tracker 地址";

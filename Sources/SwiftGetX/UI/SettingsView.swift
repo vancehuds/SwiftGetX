@@ -131,6 +131,7 @@ private struct SettingsSnapshot: Equatable {
     let automaticallyRequeuesFailedTasks: Bool
     let queueFailureRetryLimit: Int
     let stopSeedingAtRatio: Double
+    let stopSeedingAfterSeconds: TimeInterval
     let torrentDHTEnabled: Bool
     let torrentPEXEnabled: Bool
     let torrentLSDEnabled: Bool
@@ -159,6 +160,7 @@ private struct SettingsSnapshot: Equatable {
         automaticallyRequeuesFailedTasks = settings.automaticallyRequeuesFailedTasks
         queueFailureRetryLimit = settings.queueFailureRetryLimit
         stopSeedingAtRatio = settings.stopSeedingAtRatio
+        stopSeedingAfterSeconds = settings.stopSeedingAfterSeconds
         torrentDHTEnabled = settings.torrentDHTEnabled
         torrentPEXEnabled = settings.torrentPEXEnabled
         torrentLSDEnabled = settings.torrentLSDEnabled
@@ -363,6 +365,25 @@ private struct TorrentSettingsTab: View {
                         }
                         
                         Text(L10n.string("stop_seeding_ratio_message", settings.stopSeedingAtRatio))
+                            .font(layout.font(11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, layout.value(4))
+                }
+
+                if settings.torrentSeedingLimitMode == .stopAfterTime {
+                    VStack(alignment: .leading, spacing: layout.value(4)) {
+                        Stepper(
+                            L10n.string(
+                                "stop_seeding_time_limit",
+                                TimeFormatter.eta(settings.stopSeedingAfterSeconds)
+                            ),
+                            value: $settings.stopSeedingAfterSeconds,
+                            in: 60...604_800,
+                            step: 60
+                        )
+
+                        Text(L10n.string("stop_seeding_time_message", TimeFormatter.eta(settings.stopSeedingAfterSeconds)))
                             .font(layout.font(11))
                             .foregroundStyle(.secondary)
                     }

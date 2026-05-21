@@ -14,6 +14,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
     private var filePriorities: [UUID: [Int: Int]] = [:]
     private var resumeDataPaths: [UUID: String] = [:]
     private var runtimeOptionsByID: [UUID: TorrentRuntimeOptions] = [:]
+    private var seedingStartedAtByID: [UUID: Date] = [:]
 
     init?() {
         guard let sessionBox = LibtorrentSessionBox() else { return nil }
@@ -113,6 +114,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         filePriorities[id] = nil
         resumeDataPaths[id] = nil
         runtimeOptionsByID[id] = nil
+        seedingStartedAtByID[id] = nil
     }
 
     func remove(id: UUID, deletingFiles: Bool) async {
@@ -128,6 +130,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         filePriorities[id] = nil
         resumeDataPaths[id] = nil
         runtimeOptionsByID[id] = nil
+        seedingStartedAtByID[id] = nil
     }
 
     func recheck(id: UUID) async {
@@ -173,6 +176,12 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         }
     }
 
+    func setRuntimeOptions(id: UUID, options: TorrentRuntimeOptions) async {
+        runtimeOptionsByID[id] = options
+        guard let handleID = handleIDs[id] else { return }
+        applyTorrentRuntimeOptions(handleID: handleID, options: options)
+    }
+
     func addTracker(id: UUID, url: String) async {
         guard let handleID = handleIDs[id] else { return }
         url.withCString { sgx_libtorrent_add_tracker(sessionBox.raw, handleID, $0) }
@@ -202,6 +211,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             options.maxUploadSlots = runtimeOptions.maxUploadSlots
             options.seedingLimitMode = runtimeOptions.seedingLimitMode
             options.stopSeedingAtRatio = runtimeOptions.stopSeedingAtRatio
+            options.stopSeedingAfterSeconds = runtimeOptions.stopSeedingAfterSeconds
             options.isSequentialDownloadEnabled = sequentialDownloadEnabled
             runtimeOptionsByID[id] = options
             applyTorrentRuntimeOptions(handleID: handleID, options: options)
@@ -307,7 +317,15 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             let shouldRefreshDetails = detailTick % 3 == 0
             let trackers = shouldRefreshDetails ? copyTrackers(handleID: handleID) : nil
             let peers = shouldRefreshDetails ? copyPeers(handleID: handleID) : nil
-            let health = healthInfo(from: nativeStatus, trackerCount: trackers?.count)
+            let seedingDurationSeconds = seedingDurationSeconds(
+                id: request.id,
+                isSeeding: nativeStatus.is_seeding != 0
+            )
+            let health = healthInfo(
+                from: nativeStatus,
+                trackerCount: trackers?.count,
+                seedingDurationSeconds: seedingDurationSeconds
+            )
             let currentOptions = runtimeOptionsByID[request.id] ?? request.runtimeOptions
             detailTick += 1
 
@@ -328,7 +346,11 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                         torrentFiles: files,
                         connectionSummary: connectionSummary(from: nativeStatus),
                         torrentMetadataStatus: metadataStatus(from: nativeStatus),
-                        torrentConnection: connectionInfo(from: nativeStatus, options: currentOptions),
+                        torrentConnection: connectionInfo(
+                            from: nativeStatus,
+                            options: currentOptions,
+                            seedingDurationSeconds: seedingDurationSeconds
+                        ),
                         torrentResumeState: resumeState,
                         torrentTrackers: trackers,
                         torrentPeers: peers,
@@ -342,6 +364,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                 filePriorities[request.id] = nil
                 resumeDataPaths[request.id] = nil
                 runtimeOptionsByID[request.id] = nil
+                seedingStartedAtByID[request.id] = nil
                 return
             }
 
@@ -351,7 +374,8 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             if currentOptions.shouldStopSeeding(
                 isSeeding: nativeStatus.is_seeding != 0,
                 shareRatio: Double(nativeStatus.share_ratio),
-                completed: completed
+                completed: completed,
+                seedingDurationSeconds: seedingDurationSeconds
             ) {
                 sgx_libtorrent_pause(sessionBox.raw, handleID)
                 let resumeState = saveResumeData(id: request.id, handleID: handleID)
@@ -370,7 +394,11 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                         torrentFiles: files,
                         connectionSummary: connectionSummary(from: nativeStatus),
                         torrentMetadataStatus: metadataStatus(from: nativeStatus),
-                        torrentConnection: connectionInfo(from: nativeStatus, options: currentOptions),
+                        torrentConnection: connectionInfo(
+                            from: nativeStatus,
+                            options: currentOptions,
+                            seedingDurationSeconds: seedingDurationSeconds
+                        ),
                         torrentResumeState: resumeState,
                         torrentTrackers: trackers,
                         torrentPeers: peers,
@@ -379,6 +407,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                     )
                 )
                 pollingTasks[request.id] = nil
+                seedingStartedAtByID[request.id] = nil
                 return
             }
 
@@ -406,7 +435,11 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                     torrentFiles: files,
                     connectionSummary: connectionSummary(from: nativeStatus),
                     torrentMetadataStatus: metadataStatus(from: nativeStatus),
-                    torrentConnection: connectionInfo(from: nativeStatus, options: currentOptions),
+                    torrentConnection: connectionInfo(
+                        from: nativeStatus,
+                        options: currentOptions,
+                        seedingDurationSeconds: seedingDurationSeconds
+                    ),
                     torrentResumeState: resumeState,
                     torrentTrackers: trackers,
                     torrentPeers: peers,
@@ -418,6 +451,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             if status == .completed {
                 _ = saveResumeData(id: request.id, handleID: handleID)
                 pollingTasks[request.id] = nil
+                seedingStartedAtByID[request.id] = nil
                 return
             }
 
@@ -448,7 +482,11 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         nativeStatus.has_metadata != 0 ? .available : .fetching
     }
 
-    private func connectionInfo(from nativeStatus: SGXTorrentStatus, options: TorrentRuntimeOptions) -> TorrentConnectionInfo {
+    private func connectionInfo(
+        from nativeStatus: SGXTorrentStatus,
+        options: TorrentRuntimeOptions,
+        seedingDurationSeconds: TimeInterval
+    ) -> TorrentConnectionInfo {
         TorrentConnectionInfo(
             metadataStatus: metadataStatus(from: nativeStatus),
             engine: .libtorrent,
@@ -457,6 +495,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             downloadRate: nativeStatus.download_rate,
             uploadRate: nativeStatus.upload_rate,
             shareRatio: Double(nativeStatus.share_ratio),
+            seedingDurationSeconds: seedingDurationSeconds,
             distributedCopies: Double(nativeStatus.distributed_copies),
             isDHTEnabled: options.isDHTEnabled,
             isPEXEnabled: options.isPEXEnabled,
@@ -468,7 +507,21 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         )
     }
 
-    private func healthInfo(from nativeStatus: SGXTorrentStatus, trackerCount: Int?) -> TorrentHealthInfo {
+    private func seedingDurationSeconds(id: UUID, isSeeding: Bool) -> TimeInterval {
+        guard isSeeding else {
+            seedingStartedAtByID[id] = nil
+            return 0
+        }
+        let startedAt = seedingStartedAtByID[id] ?? Date()
+        seedingStartedAtByID[id] = startedAt
+        return Date().timeIntervalSince(startedAt)
+    }
+
+    private func healthInfo(
+        from nativeStatus: SGXTorrentStatus,
+        trackerCount: Int?,
+        seedingDurationSeconds: TimeInterval
+    ) -> TorrentHealthInfo {
         TorrentHealthInfo(
             nativeEngineAvailable: true,
             engine: .libtorrent,
@@ -483,6 +536,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             dhtNodeCount: Int(nativeStatus.dht_nodes),
             distributedCopies: Double(nativeStatus.distributed_copies),
             trackerCount: trackerCount ?? 0,
+            seedingDurationSeconds: seedingDurationSeconds,
             lastError: nativeStatus.has_error != 0 ? lastError() : nil
         )
     }

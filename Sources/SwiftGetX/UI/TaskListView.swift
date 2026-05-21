@@ -259,6 +259,30 @@ private struct TaskRowView: View {
                         }
                         .font(layout.font(11, design: .monospaced))
                         .foregroundStyle(.secondary)
+                    } else if task.status == .seeding {
+                        HStack(spacing: layout.value(3)) {
+                            Image(systemName: "arrow.up")
+                                .font(layout.font(9, weight: .bold))
+                            Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: task.torrentConnection?.uploadRate ?? 0) + "/s")
+                        }
+                        .font(layout.font(11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.mint)
+
+                        HStack(spacing: layout.value(3)) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(layout.font(9))
+                            Text(String(format: "%.2f", task.torrentConnection?.shareRatio ?? 0))
+                        }
+                        .font(layout.font(11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+
+                        HStack(spacing: layout.value(3)) {
+                            Image(systemName: "clock")
+                                .font(layout.font(9))
+                            Text(TimeFormatter.eta(task.torrentConnection?.seedingDurationSeconds ?? task.torrentHealth?.seedingDurationSeconds ?? 0))
+                        }
+                        .font(layout.font(11, design: .monospaced))
+                        .foregroundStyle(.secondary)
                     } else if task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers {
                         Text(task.status.title)
                             .font(layout.font(11, weight: .medium))

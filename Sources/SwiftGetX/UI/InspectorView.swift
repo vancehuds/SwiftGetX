@@ -409,6 +409,7 @@ private struct ConnectionsPanel: View {
                 DetailRow(title: L10n.string("torrent_peer_count"), value: "\(connection.peerCount)")
                 DetailRow(title: L10n.string("torrent_upload_speed"), value: ByteCountFormatter.downloadFormatter.string(fromByteCount: connection.uploadRate) + "/s")
                 DetailRow(title: L10n.string("torrent_share_ratio"), value: String(format: "%.2f", connection.shareRatio))
+                DetailRow(title: L10n.string("torrent_seeding_time"), value: TimeFormatter.eta(connection.seedingDurationSeconds))
                 DetailRow(title: L10n.string("detail_connection"), value: connection.summary)
             } else {
                 DetailRow(title: L10n.string("torrent_metadata_status"), value: task.torrentMetadataStatus.title)
@@ -418,7 +419,7 @@ private struct ConnectionsPanel: View {
                 DetailRow(title: L10n.string("connection_local_port"), value: L10n.string("unknown"))
                 DetailRow(title: L10n.string("detail_connection"), value: task.connectionSummary ?? L10n.string("connection_waiting_peers"))
             }
-            DetailRow(title: L10n.string("connection_seed_limit"), value: L10n.string("connection_seed_limit_value"))
+            seedingPolicyPanel
             if let health = task.torrentHealth {
                 healthPanel(health)
             }
@@ -439,11 +440,74 @@ private struct ConnectionsPanel: View {
             DetailRow(title: L10n.string("torrent_dht_nodes"), value: "\(health.dhtNodeCount)")
             DetailRow(title: L10n.string("torrent_peer_sources"), value: peerSourceSummary(health))
             DetailRow(title: L10n.string("torrent_distributed_copies"), value: String(format: "%.2f", health.distributedCopies))
+            DetailRow(title: L10n.string("torrent_seeding_time"), value: TimeFormatter.eta(health.seedingDurationSeconds))
             DetailRow(title: L10n.string("torrent_resume_data"), value: health.needsResumeDataSave ? L10n.string("torrent_resume_data_dirty") : L10n.string("torrent_resume_data_clean"))
             if let lastError = health.lastError {
                 DetailRow(title: L10n.string("detail_error"), value: lastError, color: .red)
             }
         }
+    }
+
+    private var seedingPolicyPanel: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            Text(L10n.string("connection_seed_limit"))
+                .font(layout.font(10, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Picker(L10n.string("torrent_seeding_mode"), selection: seedingModeBinding) {
+                ForEach(TorrentSeedingLimitMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .labelsHidden()
+
+            let options = task.torrentRuntimeOptions ?? TorrentRuntimeOptions()
+            if options.seedingLimitMode == .stopAtRatio {
+                Slider(value: seedingRatioBinding, in: 0...5, step: 0.1) {
+                    Text(L10n.string("share_ratio_limit"))
+                }
+                Text(L10n.string("stop_seeding_ratio_message", options.stopSeedingAtRatio))
+                    .font(layout.font(10.5))
+                    .foregroundStyle(.secondary)
+            } else if options.seedingLimitMode == .stopAfterTime {
+                Stepper(
+                    L10n.string("stop_seeding_time_limit", TimeFormatter.eta(options.stopSeedingAfterSeconds)),
+                    value: seedingTimeBinding,
+                    in: 60...604_800,
+                    step: 60
+                )
+                Text(L10n.string("stop_seeding_time_message", TimeFormatter.eta(options.stopSeedingAfterSeconds)))
+                    .font(layout.font(10.5))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(options.seedingPolicyDescription)
+                    .font(layout.font(10.5))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(layout.value(10))
+        .background(ContentSurfaceBackground(cornerRadius: 8))
+    }
+
+    private var seedingModeBinding: Binding<TorrentSeedingLimitMode> {
+        Binding(
+            get: { task.torrentRuntimeOptions?.seedingLimitMode ?? .stopAtRatio },
+            set: { coordinator.setTorrentSeedingLimitMode(task, mode: $0) }
+        )
+    }
+
+    private var seedingRatioBinding: Binding<Double> {
+        Binding(
+            get: { task.torrentRuntimeOptions?.stopSeedingAtRatio ?? 1.0 },
+            set: { coordinator.setTorrentStopSeedingAtRatio(task, ratio: $0) }
+        )
+    }
+
+    private var seedingTimeBinding: Binding<TimeInterval> {
+        Binding(
+            get: { task.torrentRuntimeOptions?.stopSeedingAfterSeconds ?? 3600 },
+            set: { coordinator.setTorrentStopSeedingAfterSeconds(task, seconds: $0) }
+        )
     }
 
     private var trackerPanel: some View {
