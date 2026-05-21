@@ -28,7 +28,7 @@
     <key>SUFeedURL</key>
     <string>https://raw.githubusercontent.com/vancehudson/SwiftGetX/gh-pages/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>REPLACE_WITH_YOUR_EDDSA_PUBLIC_KEY</string>
+    <string>HcyPOd1A9bPy5IVujns0AXTxbzwXTobtNFjesFWNwTY=</string>
     <key>SUEnableAutomaticChecks</key>
     <true/>
 </dict>
