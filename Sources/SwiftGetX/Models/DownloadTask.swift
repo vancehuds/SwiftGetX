@@ -666,7 +666,7 @@ struct TorrentFile: Codable, Identifiable, Equatable, Sendable {
     }
 
     var priorityLevel: TorrentFilePriority {
-        get { TorrentFilePriority(rawValue: priority) ?? .normal }
+        get { TorrentFilePriority(rawValue: priority) ?? TorrentFilePriority.fromEnginePriority(priority) }
         set { priority = newValue.rawValue }
     }
 
@@ -677,14 +677,51 @@ struct TorrentFile: Codable, Identifiable, Equatable, Sendable {
 
 enum TorrentFilePriority: Int, Codable, CaseIterable, Identifiable, Sendable {
     case skip = 0
+    case low = -1
     case normal = 1
     case high = 2
     case maximum = 7
 
     var id: Int { rawValue }
 
+    var isWanted: Bool {
+        self != .skip
+    }
+
+    var enginePriority: Int {
+        switch self {
+        case .skip:
+            0
+        case .low:
+            1
+        case .normal:
+            4
+        case .high:
+            6
+        case .maximum:
+            7
+        }
+    }
+
+    static func fromEnginePriority(_ priority: Int) -> TorrentFilePriority {
+        switch priority {
+        case ...0:
+            .skip
+        case 1:
+            .low
+        case 2...5:
+            .normal
+        case 6:
+            .high
+        default:
+            .maximum
+        }
+    }
+
     var title: String {
         switch self {
+        case .low:
+            L10n.string("torrent_file_priority_low")
         case .skip:
             L10n.string("torrent_file_priority_skip")
         case .normal:

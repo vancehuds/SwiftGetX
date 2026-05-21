@@ -274,6 +274,9 @@ private struct MetricCard: View {
 private struct FilesPanel: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var layout
+    @State private var extensionFilter = ""
+    @State private var extensionPriority: TorrentFilePriority = .normal
+    @State private var relocatePath = ""
     let task: DownloadTask
 
     var body: some View {
@@ -317,6 +320,9 @@ private struct FilesPanel: View {
                         .foregroundStyle(.secondary)
                 }
 
+                batchControls
+                folderControls
+
                 ForEach(task.torrentFiles) { file in
                     HStack(spacing: layout.value(12)) {
                         Button {
@@ -340,7 +346,7 @@ private struct FilesPanel: View {
                         Spacer()
 
                         Picker("", selection: Binding(
-                            get: { TorrentFilePriority(rawValue: file.priority) ?? .normal },
+                            get: { file.priorityLevel },
                             set: { coordinator.setTorrentFilePriority(task, fileIndex: file.index, priority: $0) }
                         )) {
                             ForEach(TorrentFilePriority.allCases) { priority in
@@ -364,6 +370,103 @@ private struct FilesPanel: View {
         }
     }
 
+    private var batchControls: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            HStack(spacing: layout.value(8)) {
+                TextField(L10n.string("torrent_extension_filter"), text: $extensionFilter)
+                    .textFieldStyle(.roundedBorder)
+                    .font(layout.font(11))
+
+                Picker("", selection: $extensionPriority) {
+                    ForEach(TorrentFilePriority.allCases) { priority in
+                        Text(priority.title).tag(priority)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: layout.value(108))
+
+                Button {
+                    coordinator.setTorrentExtensionPriority(
+                        task,
+                        extensionFilter: extensionFilter,
+                        priority: extensionPriority
+                    )
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                }
+                .disabled(extensionFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help(L10n.string("torrent_apply_extension_filter"))
+            }
+
+            HStack(spacing: layout.value(8)) {
+                TextField(L10n.string("torrent_relocate_path"), text: $relocatePath)
+                    .textFieldStyle(.roundedBorder)
+                    .font(layout.font(11))
+                Button {
+                    coordinator.relocateTorrent(task, toSaveDirectoryPath: relocatePath)
+                    relocatePath = ""
+                } label: {
+                    Image(systemName: "folder.badge.gearshape")
+                }
+                .disabled(relocatePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help(L10n.string("torrent_relocate_download"))
+            }
+        }
+        .padding(layout.value(10))
+        .background(ContentSurfaceBackground(cornerRadius: 8))
+    }
+
+    private var folderControls: some View {
+        let folders = torrentFolders
+        return Group {
+            if !folders.isEmpty {
+                VStack(alignment: .leading, spacing: layout.value(6)) {
+                    Text(L10n.string("torrent_folders"))
+                        .font(layout.font(10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(folders.prefix(6), id: \.self) { folder in
+                        HStack(spacing: layout.value(8)) {
+                            Image(systemName: "folder")
+                                .font(layout.font(11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Text(folder)
+                                .font(layout.font(11, weight: .medium))
+                                .lineLimit(1)
+                            Spacer()
+                            Menu {
+                                ForEach(TorrentFilePriority.allCases) { priority in
+                                    Button(priority.title) {
+                                        coordinator.setTorrentFolderPriority(
+                                            task,
+                                            folderPath: folder,
+                                            priority: priority
+                                        )
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "slider.horizontal.3")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .help(L10n.string("torrent_folder_priority"))
+                        }
+                    }
+                }
+                .padding(layout.value(10))
+                .background(ContentSurfaceBackground(cornerRadius: 8))
+            }
+        }
+    }
+
+    private var torrentFolders: [String] {
+        let folders = task.torrentFiles.flatMap { file -> [String] in
+            let components = file.path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+            guard components.count > 1 else { return [] }
+            return (1..<components.count).map { components.prefix($0).joined(separator: "/") }
+        }
+        return Array(Set(folders)).sorted()
+    }
+
     private func toggle(_ file: TorrentFile) {
         var selected = Set(task.selectedFileIndexes)
         if selected.contains(file.index) {
@@ -379,6 +482,7 @@ private struct ConnectionsPanel: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var layout
     @State private var trackerURL = ""
+    @State private var trackerBatchText = ""
     let task: DownloadTask
 
     var body: some View {
@@ -539,6 +643,53 @@ private struct ConnectionsPanel: View {
                 .disabled(trackerURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
+            VStack(alignment: .leading, spacing: layout.value(6)) {
+                TextEditor(text: $trackerBatchText)
+                    .font(layout.font(11, design: .monospaced))
+                    .frame(minHeight: layout.value(54), maxHeight: layout.value(76))
+                    .scrollContentBackground(.hidden)
+                    .padding(layout.value(6))
+                    .background(ContentSurfaceBackground(cornerRadius: 6))
+                    .overlay(alignment: .topLeading) {
+                        if trackerBatchText.isEmpty {
+                            Text(L10n.string("torrent_tracker_batch_placeholder"))
+                                .font(layout.font(11, design: .monospaced))
+                                .foregroundStyle(.secondary.opacity(0.75))
+                                .padding(.horizontal, layout.value(10))
+                                .padding(.vertical, layout.value(12))
+                                .allowsHitTesting(false)
+                        }
+                    }
+
+                HStack(spacing: layout.value(8)) {
+                    Button {
+                        coordinator.addTorrentTrackers(task, urlsText: trackerBatchText)
+                        trackerBatchText = ""
+                    } label: {
+                        Label(L10n.string("torrent_add_trackers"), systemImage: "plus.rectangle.on.rectangle")
+                    }
+                    .disabled(trackerBatchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button {
+                        coordinator.removeTorrentTrackers(task, urls: trackerBatchURLs)
+                        trackerBatchText = ""
+                    } label: {
+                        Label(L10n.string("torrent_remove_listed_trackers"), systemImage: "minus.rectangle")
+                    }
+                    .disabled(trackerBatchURLs.isEmpty)
+
+                    Spacer()
+
+                    Button(role: .destructive) {
+                        coordinator.removeTorrentTrackers(task, urls: task.torrentTrackers.map(\.url))
+                    } label: {
+                        Label(L10n.string("torrent_remove_all_trackers"), systemImage: "trash")
+                    }
+                    .disabled(task.torrentTrackers.isEmpty)
+                }
+                .font(layout.font(11, weight: .semibold))
+            }
+
             if task.torrentTrackers.isEmpty {
                 Text(L10n.string("torrent_trackers_empty"))
                     .font(layout.font(11))
@@ -568,6 +719,13 @@ private struct ConnectionsPanel: View {
                 }
             }
         }
+    }
+
+    private var trackerBatchURLs: [String] {
+        trackerBatchText
+            .components(separatedBy: CharacterSet(charactersIn: ", \n\t"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private var peerPanel: some View {

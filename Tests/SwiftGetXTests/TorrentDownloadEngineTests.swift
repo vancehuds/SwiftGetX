@@ -737,6 +737,94 @@ struct TorrentDownloadEngineTests {
         #expect(announceURLs.contains { $0.contains("event=stopped") })
     }
 
+    @Test("Swift adapter downloads only wanted file pieces")
+    func swiftAdapterDownloadsOnlyWantedFilePieces() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        let trackerURL = "http://tracker.local/announce"
+        let firstFile = Data((0..<4).map(UInt8.init))
+        let secondFile = Data((4..<8).map(UInt8.init))
+        try Self.multiFileTorrentData(
+            rootName: "album",
+            files: [
+                (["first.bin"], firstFile),
+                (["second.bin"], secondFile)
+            ],
+            announce: trackerURL,
+            pieceLength: firstFile.count
+        ).write(to: torrentURL)
+        let metainfo = try TorrentMetainfo.parse(url: torrentURL)
+        let peerTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: metainfo.infoHashV1,
+                    peerID: Data((60..<80).map(UInt8.init))
+                ).encodedData(),
+                try TorrentPeerWireMessage.unchoke.encodedData(),
+                try TorrentPeerWireMessage.piece(pieceIndex: 0, begin: 0, block: firstFile).encodedData()
+            ]
+        )
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse())
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { _ in peerTransport },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
+        )
+        let store = SnapshotStore()
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "album",
+            contentRootPath: directory.appendingPathComponent("album").path,
+            finalFilePath: nil,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [0],
+            hasExplicitFileSelection: true,
+            filePriorities: [
+                0: TorrentFilePriority.normal.rawValue,
+                1: TorrentFilePriority.skip.rawValue
+            ],
+            resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift, seedingLimitMode: .stopWhenComplete),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshots = try await store.snapshots(count: 5)
+        let completed = try #require(snapshots.last)
+        let writtenFirstFile = try Data(contentsOf: directory.appendingPathComponent("album/first.bin"))
+        let secondFileURL = directory.appendingPathComponent("album/second.bin")
+        let sentFrames = await peerTransport.sentFrames
+        let requestedPieces = try sentFrames.dropFirst().compactMap { frame -> Int? in
+            if case .request(let pieceIndex, _, _) = try TorrentPeerWireMessage.decodeFrame(frame) {
+                return pieceIndex
+            }
+            return nil
+        }
+
+        #expect(snapshots.map(\.status) == [.fetchingPeers, .connectingPeers, .running, .running, .completed])
+        #expect(writtenFirstFile == firstFile)
+        #expect(!FileManager.default.fileExists(atPath: secondFileURL.path))
+        #expect(completed.downloadedBytes == Int64(firstFile.count))
+        #expect(completed.totalBytes == Int64(firstFile.count))
+        #expect(completed.torrentFiles.map(\.progress) == [1, 0])
+        #expect(completed.torrentFiles.map(\.priorityLevel) == [.normal, .skip])
+        #expect(requestedPieces == [0])
+    }
+
     @Test("Swift adapter stops seeding after configured time")
     func swiftAdapterStopsSeedingAfterConfiguredTime() async throws {
         let directory = try Self.makeTemporaryDirectory()
@@ -1110,6 +1198,162 @@ struct TorrentDownloadEngineTests {
         #expect(completed.torrentFiles.map(\.progress) == [1, 1])
         #expect(completed.torrentHealth?.hasMetadata == true)
         #expect(completed.torrentHealth?.trackerCount == 1)
+    }
+
+    @Test("Swift adapter skips unwanted files and reports selected content totals")
+    func swiftAdapterSkipsUnwantedFilesAndReportsSelectedContentTotals() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        let trackerURL = "http://tracker.local/announce"
+        let wantedFile = Data([0, 1, 2, 3])
+        let skippedFile = Data([4, 5, 6, 7])
+        let pieceLength = 4
+        try Self.multiFileTorrentData(
+            rootName: "album",
+            files: [
+                (["wanted.bin"], wantedFile),
+                (["skipped.bin"], skippedFile)
+            ],
+            announce: trackerURL,
+            pieceLength: pieceLength
+        ).write(to: torrentURL)
+        let metainfo = try TorrentMetainfo.parse(url: torrentURL)
+        let peerTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: metainfo.infoHashV1,
+                    peerID: Data((60..<80).map(UInt8.init))
+                ).encodedData(),
+                try TorrentPeerWireMessage.unchoke.encodedData(),
+                try TorrentPeerWireMessage.piece(
+                    pieceIndex: 0,
+                    begin: 0,
+                    block: wantedFile
+                ).encodedData()
+            ]
+        )
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse())
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { _ in peerTransport },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
+        )
+        let store = SnapshotStore()
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "album",
+            contentRootPath: directory.appendingPathComponent("album").path,
+            finalFilePath: nil,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [0],
+            hasExplicitFileSelection: true,
+            filePriorities: [0: TorrentFilePriority.low.rawValue, 1: TorrentFilePriority.skip.rawValue],
+            resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
+            runtimeOptions: TorrentRuntimeOptions(
+                engine: .swift,
+                isSequentialDownloadEnabled: true,
+                seedingLimitMode: .stopWhenComplete
+            ),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshots = try await store.snapshots(untilStatus: .completed)
+        let completed = try #require(snapshots.last { $0.status == .completed })
+        let savedWantedFile = try Data(contentsOf: directory.appendingPathComponent("album/wanted.bin"))
+
+        #expect(completed.totalBytes == Int64(wantedFile.count))
+        #expect(completed.downloadedBytes == Int64(wantedFile.count))
+        #expect(savedWantedFile == wantedFile)
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("album/skipped.bin").path))
+        #expect(completed.torrentFiles.map(\.priorityLevel) == [.low, .skip])
+        #expect(completed.torrentFiles.map(\.progress) == [1, 0])
+        let sentFrames = await peerTransport.sentFrames
+        #expect(sentFrames.count == 3)
+        #expect(try TorrentPeerWireMessage.decodeFrame(sentFrames[2]) == .request(pieceIndex: 0, begin: 0, length: pieceLength))
+        let announceURLs = await httpTransport.requests.compactMap { $0.url?.absoluteString }
+        #expect(announceURLs.contains { $0.contains("left=4") })
+        #expect(announceURLs.contains { $0.contains("event=completed") })
+    }
+
+    @Test("Swift adapter recheck verifies existing wanted files and saves resume state")
+    func swiftAdapterRecheckVerifiesExistingWantedFilesAndSavesResumeState() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        let contents = Data([10, 11, 12, 13])
+        let pieceHash = Data(Insecure.SHA1.hash(data: contents))
+        try Self.singleFileTorrentData(
+            name: "payload.bin",
+            length: contents.count,
+            announce: nil,
+            pieceLength: contents.count,
+            pieceHashes: pieceHash
+        ).write(to: torrentURL)
+        try contents.write(to: directory.appendingPathComponent("payload.bin"))
+        let adapter = SwiftTorrentEngineAdapter(
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
+        )
+        let store = SnapshotStore()
+        let resumeURL = directory.appendingPathComponent("fixture.resume.json")
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: Int64(contents.count),
+            downloadedBytes: 0,
+            selectedFileIndexes: [0],
+            hasExplicitFileSelection: true,
+            filePriorities: [0: TorrentFilePriority.normal.rawValue],
+            resumeDataPath: resumeURL.path,
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        await adapter.recheck(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshot = try await store.firstSnapshot()
+        let metainfo = try TorrentMetainfo.parse(url: torrentURL)
+        let layout = try TorrentContentLayout(
+            metainfo: metainfo,
+            saveDirectory: directory,
+            outputName: "payload.bin"
+        )
+        let resumeState = try TorrentCoreResumeState.decodeJSON(
+            Data(contentsOf: resumeURL),
+            expectedInfoHashV1Hex: metainfo.infoHashV1Hex,
+            expectedLayout: layout
+        )
+
+        #expect(snapshot.status == .completed)
+        #expect(snapshot.totalBytes == Int64(contents.count))
+        #expect(snapshot.downloadedBytes == Int64(contents.count))
+        #expect(snapshot.torrentFiles.first?.progress == 1)
+        #expect(snapshot.torrentResumeState?.status == .saved)
+        #expect(resumeState.completedPieces.completedPieceIndexes == [0])
     }
 
     @Test("Swift adapter tracks peers from DHT, PEX, and LSD discovery sources")
@@ -1807,7 +2051,10 @@ private actor RecordingTorrentAdapter: TorrentEngineAdapter {
     func pause(id: UUID) async {}
     func cancel(id: UUID) async {}
     func remove(id: UUID, deletingFiles: Bool) async {}
-    func recheck(id: UUID) async {}
+    func recheck(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async {}
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async {}
 
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {

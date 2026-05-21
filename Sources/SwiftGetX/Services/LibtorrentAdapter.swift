@@ -50,7 +50,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         let selected = request.selectedFileIndexes.map(Int32.init)
         let priorityPairs = request.filePriorities.sorted { $0.key < $1.key }
         let priorityIndexes = priorityPairs.map { Int32($0.key) }
-        let priorityValues = priorityPairs.map { Int32($0.value) }
+        let priorityValues = priorityPairs.map { Int32(Self.enginePriority(forStoredPriority: $0.value)) }
         let handleID: Int32
 
         if request.displaySource.hasPrefix("magnet:") {
@@ -133,7 +133,11 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         seedingStartedAtByID[id] = nil
     }
 
-    func recheck(id: UUID) async {
+    func recheck(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async {
+        let id = request.id
         guard let handleID = handleIDs[id] else { return }
         sgx_libtorrent_recheck(sessionBox.raw, handleID)
     }
@@ -161,7 +165,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             sessionBox.raw,
             handleID,
             Int32(clamping: fileIndex),
-            Int32(clamping: priority)
+            Int32(clamping: Self.enginePriority(forStoredPriority: priority))
         )
     }
 
@@ -286,7 +290,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                 sessionBox.raw,
                 handleID,
                 Int32(clamping: fileIndex),
-                Int32(clamping: priority)
+                Int32(clamping: Self.enginePriority(forStoredPriority: priority))
             )
         }
     }
@@ -580,7 +584,7 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
                 index: Int(file.index),
                 path: file.path.map { String(cString: $0) } ?? "file-\(index)",
                 size: file.size,
-                priority: Int(file.priority),
+                priority: Self.storedPriority(forEnginePriority: Int(file.priority)),
                 progress: Double(file.progress)
             )
         }
@@ -671,6 +675,14 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             updatedAt: .now,
             errorMessage: lastError()
         )
+    }
+
+    private nonisolated static func enginePriority(forStoredPriority priority: Int) -> Int {
+        (TorrentFilePriority(rawValue: priority) ?? TorrentFilePriority.fromEnginePriority(priority)).enginePriority
+    }
+
+    private nonisolated static func storedPriority(forEnginePriority priority: Int) -> Int {
+        TorrentFilePriority.fromEnginePriority(priority).rawValue
     }
 
     private func lastError() -> String {
@@ -860,10 +872,18 @@ actor LibtorrentMetadataPreviewer {
                 index: Int(file.index),
                 path: file.path.map { String(cString: $0) } ?? "file-\(index)",
                 size: file.size,
-                priority: Int(file.priority),
+                priority: Self.storedPriority(forEnginePriority: Int(file.priority)),
                 progress: Double(file.progress)
             )
         }
+    }
+
+    private nonisolated static func enginePriority(forStoredPriority priority: Int) -> Int {
+        (TorrentFilePriority(rawValue: priority) ?? TorrentFilePriority.fromEnginePriority(priority)).enginePriority
+    }
+
+    private nonisolated static func storedPriority(forEnginePriority priority: Int) -> Int {
+        TorrentFilePriority.fromEnginePriority(priority).rawValue
     }
 
     private func lastError() -> String {

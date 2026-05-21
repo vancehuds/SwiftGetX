@@ -23,6 +23,30 @@ struct TorrentFileTests {
         ])
     }
 
+    @Test("torrent file priority preserves legacy raws and maps engine priorities")
+    func torrentFilePriorityPreservesLegacyRawsAndMapsEnginePriorities() {
+        var low = TorrentFile(index: 0, path: "low.bin", size: 1, priority: TorrentFilePriority.low.rawValue)
+        let legacyNormal = TorrentFile(index: 1, path: "normal.bin", size: 1, priority: 1)
+        let legacyHigh = TorrentFile(index: 2, path: "high.bin", size: 1, priority: 2)
+        let engineNormal = TorrentFile(index: 3, path: "engine-normal.bin", size: 1, priority: 4)
+        let engineHigh = TorrentFile(index: 4, path: "engine-high.bin", size: 1, priority: 6)
+
+        #expect(low.priorityLevel == .low)
+        #expect(low.priorityLevel.isWanted)
+        #expect(legacyNormal.priorityLevel == .normal)
+        #expect(legacyHigh.priorityLevel == .high)
+        #expect(engineNormal.priorityLevel == .normal)
+        #expect(engineHigh.priorityLevel == .high)
+        #expect(TorrentFilePriority.low.enginePriority == 1)
+        #expect(TorrentFilePriority.normal.enginePriority == 4)
+        #expect(TorrentFilePriority.high.enginePriority == 6)
+        #expect(TorrentFilePriority.fromEnginePriority(0) == .skip)
+        #expect(TorrentFilePriority.fromEnginePriority(7) == .maximum)
+
+        low.priorityLevel = .maximum
+        #expect(low.priority == TorrentFilePriority.maximum.rawValue)
+    }
+
     @Test("task persists torrent diagnostics as json")
     func persistsTorrentDiagnostics() {
         let task = DownloadTask(

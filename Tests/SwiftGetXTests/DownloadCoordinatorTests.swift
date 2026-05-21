@@ -531,6 +531,133 @@ struct DownloadCoordinatorTests {
         #expect(FileManager.default.fileExists(atPath: directory.path))
     }
 
+    @Test("torrent folder and extension priority updates keep low priority selected")
+    func torrentFolderAndExtensionPriorityUpdatesKeepLowPrioritySelected() throws {
+        let fixture = try makeFixture()
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let task = DownloadTask(
+            name: "album",
+            source: "file:///tmp/album.torrent",
+            kind: .torrentFile,
+            savePath: directory.path,
+            torrentSaveDirectoryPath: directory.path,
+            torrentOutputName: "album",
+            torrentContentRootPath: directory.appendingPathComponent("album").path
+        )
+        task.torrentFiles = [
+            TorrentFile(index: 0, path: "album/video.mkv", size: 10, priority: TorrentFilePriority.normal.rawValue),
+            TorrentFile(index: 1, path: "album/extras/clip.mkv", size: 20, priority: TorrentFilePriority.normal.rawValue),
+            TorrentFile(index: 2, path: "album/extras/readme.txt", size: 5, priority: TorrentFilePriority.normal.rawValue)
+        ]
+        task.selectedFileIndexes = [0, 1, 2]
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.setTorrentFolderPriority(task, folderPath: "album/extras", priority: .skip)
+
+        #expect(task.torrentFiles.map(\.priorityLevel) == [.normal, .skip, .skip])
+        #expect(task.selectedFileIndexes == [0])
+
+        fixture.coordinator.setTorrentExtensionPriority(task, extensionFilter: "*.mkv, zip", priority: .low)
+
+        #expect(task.torrentFiles.map(\.priorityLevel) == [.low, .low, .skip])
+        #expect(task.selectedFileIndexes == [0, 1])
+        #expect(task.logEntries.contains { $0.contains(L10n.string("torrent_file_priority_low")) })
+    }
+
+    @Test("batch tracker operations validate dedupe and remove trackers")
+    func batchTrackerOperationsValidateDedupeAndRemoveTrackers() throws {
+        let fixture = try makeFixture()
+        let task = DownloadTask(
+            name: "Magnet",
+            source: "magnet:?xt=urn:btih:abcdef",
+            kind: .torrentMagnet,
+            savePath: "/tmp/Magnet"
+        )
+        task.torrentTrackers = [
+            TorrentTrackerInfo(url: "udp://tracker.example:80", tier: 0, status: "working")
+        ]
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.addTorrentTrackers(
+            task,
+            urlsText: """
+            udp://tracker.example:80
+            http://tracker.example/announce, ftp://invalid.example/announce
+            https://tracker.example/announce http://tracker.example/announce
+            """
+        )
+
+        #expect(task.torrentTrackers.map(\.url) == [
+            "udp://tracker.example:80",
+            "http://tracker.example/announce",
+            "https://tracker.example/announce"
+        ])
+        #expect(task.logEntries.contains { $0.contains(L10n.string("log_added_trackers", 2)) })
+
+        fixture.coordinator.removeTorrentTrackers(
+            task,
+            urls: [
+                "udp://tracker.example:80",
+                "https://missing.example/announce",
+                "https://tracker.example/announce"
+            ]
+        )
+
+        #expect(task.torrentTrackers.map(\.url) == ["http://tracker.example/announce"])
+        #expect(task.logEntries.contains { $0.contains(L10n.string("log_removed_trackers", 2)) })
+    }
+
+    @Test("relocating torrent updates paths and moves exact known content")
+    func relocatingTorrentUpdatesPathsAndMovesExactKnownContent() throws {
+        let fixture = try makeFixture()
+        let oldDirectory = try makeTemporaryDirectory()
+        let newDirectory = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: oldDirectory)
+            try? FileManager.default.removeItem(at: newDirectory)
+        }
+        let oldRoot = oldDirectory.appendingPathComponent("album", isDirectory: true)
+        try FileManager.default.createDirectory(at: oldRoot, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: oldRoot.appendingPathComponent("a.bin"))
+        try Data([4]).write(to: oldDirectory.appendingPathComponent("keep.txt"))
+        let task = DownloadTask(
+            name: "album",
+            source: "file:///tmp/album.torrent",
+            kind: .torrentFile,
+            status: .running,
+            savePath: oldDirectory.path,
+            torrentSaveDirectoryPath: oldDirectory.path,
+            torrentOutputName: "album",
+            torrentContentRootPath: oldRoot.path,
+            torrentFinalFilePath: nil
+        )
+        task.torrentFiles = [
+            TorrentFile(index: 0, path: "album/a.bin", size: 3)
+        ]
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.relocateTorrent(task, toSaveDirectory: newDirectory)
+
+        let newRoot = newDirectory.appendingPathComponent("album", isDirectory: true)
+        #expect(task.status == .paused)
+        #expect(task.savePath == newDirectory.path)
+        #expect(task.torrentSaveDirectoryPath == newDirectory.path)
+        #expect(task.torrentContentRootPath == newRoot.path)
+        #expect(task.torrentFinalFilePath == nil)
+        #expect(try Data(contentsOf: newRoot.appendingPathComponent("a.bin")) == Data([1, 2, 3]))
+        #expect(!FileManager.default.fileExists(atPath: oldRoot.path))
+        #expect(FileManager.default.fileExists(atPath: oldDirectory.appendingPathComponent("keep.txt").path))
+        #expect(task.logEntries.contains { $0.contains(L10n.string("log_paused_for_relocation")) })
+        #expect(task.logEntries.contains { $0.contains(L10n.string("log_moved_torrent_content", 1)) })
+    }
+
     @Test("restart policy queues unfinished active tasks")
     func restartPolicyQueuesUnfinishedActiveTasks() throws {
         let fixture = try makeFixture()

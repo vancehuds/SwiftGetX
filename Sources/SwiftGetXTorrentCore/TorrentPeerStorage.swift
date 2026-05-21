@@ -99,6 +99,34 @@ public final class TorrentContentStorage: @unchecked Sendable {
         try write(data, atGlobalOffset: offset)
     }
 
+    public func read(atGlobalOffset globalOffset: Int64, length: Int64) throws -> Data {
+        guard globalOffset >= 0, length >= 0 else {
+            throw TorrentContentLayoutError.totalLengthOverflow
+        }
+        guard length > 0 else { return Data() }
+        guard length <= layout.totalLength - globalOffset else {
+            throw TorrentContentLayoutError.totalLengthOverflow
+        }
+
+        var result = Data()
+        result.reserveCapacity(Int(length))
+        var remainingLength = length
+        var currentOffset = globalOffset
+        while remainingLength > 0 {
+            guard let file = layout.file(containingGlobalOffset: currentOffset) else {
+                throw TorrentContentLayoutError.totalLengthOverflow
+            }
+            let fileOffset = currentOffset - file.offset
+            let remainingInFile = file.length - fileOffset
+            let chunkLength = min(remainingLength, remainingInFile)
+            let chunk = try read(from: file.fileURL, fileOffset: fileOffset, length: chunkLength)
+            result.append(chunk)
+            currentOffset += chunkLength
+            remainingLength -= chunkLength
+        }
+        return result
+    }
+
     public func deletePartialData() throws {
         if layout.isMultiFile {
             if fileManager.fileExists(atPath: layout.contentRoot.path) {
@@ -111,6 +139,41 @@ public final class TorrentContentStorage: @unchecked Sendable {
         if fileManager.fileExists(atPath: finalFileURL.path) {
             try fileManager.removeItem(at: finalFileURL)
         }
+    }
+
+    private func read(from fileURL: URL, fileOffset: Int64, length: Int64) throws -> Data {
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        let fd = open(fileURL.path, O_RDONLY)
+        guard fd >= 0 else {
+            throw makePOSIXError()
+        }
+        defer { close(fd) }
+
+        var data = Data(count: Int(length))
+        try data.withUnsafeMutableBytes { (buffer: UnsafeMutableRawBufferPointer) in
+            guard let baseAddress = buffer.baseAddress else { return }
+            var remaining = Int(length)
+            var readCount = 0
+            while remaining > 0 {
+                let result = pread(
+                    fd,
+                    baseAddress.advanced(by: readCount),
+                    remaining,
+                    off_t(fileOffset + Int64(readCount))
+                )
+                if result < 0 {
+                    throw makePOSIXError()
+                }
+                guard result > 0 else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))
+                }
+                readCount += result
+                remaining -= result
+            }
+        }
+        return data
     }
 
     private func write(_ bytes: Data.SubSequence, to fileURL: URL, fileOffset: Int64) throws {

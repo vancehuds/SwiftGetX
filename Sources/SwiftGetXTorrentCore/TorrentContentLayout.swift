@@ -2,9 +2,14 @@ import Foundation
 
 public enum TorrentContentPriority: Int, Codable, CaseIterable, Sendable {
     case skip = 0
+    case low = -1
     case normal = 1
     case high = 2
     case maximum = 7
+
+    public var isWanted: Bool {
+        self != .skip
+    }
 }
 
 public enum TorrentContentLayoutError: Error, Equatable, Sendable, LocalizedError {

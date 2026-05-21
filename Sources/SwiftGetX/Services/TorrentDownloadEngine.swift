@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import SwiftGetXTorrentCore
 
@@ -137,7 +138,6 @@ final class TorrentDownloadEngine: DownloadEngine {
     }
 
     func recheck(_ request: DownloadRequest) async {
-        await adapter.recheck(id: request.id)
         onSnapshot?(
             DownloadSnapshot(
                 taskID: request.id,
@@ -152,6 +152,32 @@ final class TorrentDownloadEngine: DownloadEngine {
                 lastModified: nil
             )
         )
+        do {
+            let torrentRequest = try await resolvedRequest(from: request)
+            await adapter.recheck(
+                torrentRequest,
+                onSnapshot: { snapshot in
+                    Task { @MainActor in
+                        self.onSnapshot?(snapshot)
+                    }
+                }
+            )
+        } catch {
+            onSnapshot?(
+                DownloadSnapshot(
+                    taskID: request.id,
+                    status: .failed,
+                    totalBytes: request.totalBytes,
+                    downloadedBytes: request.downloadedBytes,
+                    speedBytesPerSecond: 0,
+                    etaSeconds: nil,
+                    errorMessage: error.localizedDescription,
+                    supportsResume: true,
+                    eTag: nil,
+                    lastModified: nil
+                )
+            )
+        }
     }
 
     func setFileSelection(_ request: DownloadRequest, selectedFileIndexes: [Int]) async {
@@ -375,13 +401,14 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 trackerSummary: initialTrackerSummary
             ))
         }
+        let initialWantedBytes = wantedTotalBytes(metadata: metadata, request: request)
         let trackerSummary = await announceTrackers(
             for: request,
             metadata: metadata,
             trackerSession: trackerSession,
             event: request.downloadedBytes > 0 ? .none : .started,
             downloaded: request.downloadedBytes,
-            left: max(0, metadata.totalBytes - request.downloadedBytes)
+            left: max(0, initialWantedBytes - request.downloadedBytes)
         ) ?? initialTrackerSummary
         let discoveredTrackerSummary = await discoverPeers(
             for: request,
@@ -541,14 +568,140 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         seedingContexts[id] = nil
     }
 
-    func recheck(id: UUID) async {}
+    func recheck(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async {
+        requests[request.id] = request
+        var metadata = metadataSnapshot(for: request)
+        metadataByID[request.id] = metadata
+        guard let metainfo = metadata.metainfo,
+              let layout = metadata.layout
+        else {
+            return
+        }
+        do {
+            let resumeURL = request.resumeDataPath.map(URL.init(fileURLWithPath:))
+                ?? layout.saveDirectory.appendingPathComponent(".swiftgetx-\(request.id.uuidString).resume.json")
+            let workspace = TorrentPeerWorkspace(
+                metainfo: metainfo,
+                layout: layout,
+                resumeStateURL: resumeURL
+            )
+            peerWorkspaces[request.id] = workspace
+            let wanted = wantedContent(in: layout, metainfo: metainfo, request: request)
+            let completedPieces = verifiedPieceIndexes(
+                in: wanted.pieceIndexes,
+                metainfo: metainfo,
+                layout: layout
+            )
+            let resumeState = try TorrentCoreResumeState(
+                infoHashV1Hex: metainfo.infoHashV1Hex,
+                pieceCount: metainfo.pieces.count,
+                layoutTotalLength: layout.totalLength,
+                completedPieceIndexes: completedPieces.sorted(),
+                fileChecks: layout.files.map {
+                    try TorrentResumeFileCheck(
+                        fileIndex: $0.index,
+                        path: $0.relativePath,
+                        length: $0.length
+                    )
+                },
+                updatedAt: .now
+            )
+            try workspace.saveResumeState(resumeState)
+            let downloadedBytes = completedBytes(in: resumeState, metainfo: metainfo, layout: layout, wantedFiles: wanted.files)
+            let status: DownloadStatus = wanted.totalBytes > 0 && downloadedBytes < wanted.totalBytes
+                ? .paused
+                : .completed
+            metadata = metadataSnapshot(for: request, metainfo: metainfo)
+            metadataByID[request.id] = metadata
+            let discoveryState = peerDiscoveryStates[request.id]
+            let trackerInfos: [TorrentTrackerInfo]
+            if let trackerSession = trackerSessions[request.id] {
+                trackerInfos = await trackerSession.trackerInfos()
+            } else {
+                trackerInfos = metadata.trackers
+            }
+            let trackerSummary = SwiftTorrentTrackerAnnounceSummary(
+                trackers: trackerInfos,
+                peers: discoveryState?.peers ?? [],
+                successfulTrackerURL: nil,
+                dhtNodeCount: discoveryState?.dhtNodeCount ?? 0,
+                lastDiscoveryError: discoveryState?.lastError
+            )
+            onSnapshot(snapshot(
+                for: request,
+                status: status,
+                metadata: metadata,
+                trackerSummary: trackerSummary,
+                downloadedBytes: downloadedBytes,
+                resumeState: resumeState,
+                metainfo: metainfo,
+                layout: layout,
+                resumeStateStatus: .saved,
+                totalBytesOverride: wanted.totalBytes
+            ))
+        } catch {
+            onSnapshot(snapshot(
+                for: request,
+                status: .failed,
+                metadata: metadata,
+                trackerSummary: nil,
+                errorMessageOverride: error.localizedDescription
+            ))
+        }
+    }
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async {
         globalDownloadLimitBytesPerSecond = max(0, downloadBytesPerSecond)
         globalUploadLimitBytesPerSecond = max(0, uploadBytesPerSecond)
     }
-    func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {}
-    func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {}
-    func setSequentialDownload(id: UUID, enabled: Bool) async {}
+    func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {
+        guard var request = requests[id] else { return }
+        request.selectedFileIndexes = selectedFileIndexes.sorted()
+        request.hasExplicitFileSelection = true
+        if let metadata = metadataByID[id], !metadata.files.isEmpty {
+            let selected = Set(selectedFileIndexes)
+            for file in metadata.files {
+                request.filePriorities[file.index] = selected.contains(file.index)
+                    ? maxWantedPriority(request.filePriorities[file.index])
+                    : TorrentFilePriority.skip.rawValue
+            }
+        }
+        requests[id] = request
+        refreshMetadata(for: request)
+    }
+
+    func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {
+        guard var request = requests[id] else { return }
+        request.filePriorities[fileIndex] = priority
+        if let metadata = metadataByID[id], !metadata.files.isEmpty {
+            request.selectedFileIndexes = metadata.files
+                .filter { file in
+                    let rawPriority = request.filePriorities[file.index] ?? file.priority
+                    return appFilePriority(rawPriority).isWanted
+                }
+                .map(\.index)
+                .sorted()
+        } else {
+            request.selectedFileIndexes = request.filePriorities
+                .filter { appFilePriority($0.value).isWanted }
+                .map(\.key)
+                .sorted()
+        }
+        request.hasExplicitFileSelection = true
+        requests[id] = request
+        refreshMetadata(for: request)
+    }
+
+    func setSequentialDownload(id: UUID, enabled: Bool) async {
+        guard var request = requests[id] else { return }
+        request.runtimeOptions.isSequentialDownloadEnabled = enabled
+        requests[id] = request
+        if let context = seedingContexts[id] {
+            await reevaluateSeedingPolicy(context: context, options: request.runtimeOptions)
+        }
+    }
     func setRuntimeOptions(id: UUID, options: TorrentRuntimeOptions) async {
         if var request = requests[id] {
             request.runtimeOptions = options
@@ -739,13 +892,15 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 ($0.endpoint.address, SwiftTorrentPeerRuntimeState(endpoint: $0.endpoint, source: $0.source))
             }
         )
+        var activeRequest = requests[request.id] ?? request
+        var wanted = wantedContent(in: layout, metainfo: metainfo, request: activeRequest)
         swarmStates[request.id] = SwiftTorrentSwarmRuntimeState(
             peers: Array(peerStates.values),
-            downloadedBytes: completedBytes(in: resumeState, metainfo: metainfo)
+            downloadedBytes: completedBytes(in: resumeState, metainfo: metainfo, layout: layout, wantedFiles: wanted.files)
         )
-        var downloadedBytes = completedBytes(in: resumeState, metainfo: metainfo)
+        var downloadedBytes = completedBytes(in: resumeState, metainfo: metainfo, layout: layout, wantedFiles: wanted.files)
         onSnapshot(snapshot(
-            for: request,
+            for: activeRequest,
             status: .running,
             metadata: metadata,
             trackerSummary: trackerSummary,
@@ -754,28 +909,36 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             resumeState: resumeState,
             metainfo: metainfo,
             layout: layout,
-            resumeStateStatus: request.resumeDataPath == nil ? .missing : .loaded
+            resumeStateStatus: activeRequest.resumeDataPath == nil ? .missing : .loaded,
+            totalBytesOverride: wanted.totalBytes
         ))
 
         let pieceAvailability = pieceAvailabilityMap(
             pieceCount: metainfo.pieces.count,
             peerCount: peers.count
         )
-        while let pieceIndex = try TorrentPieceSelector.nextPieceIndex(
-            pieceCount: metainfo.pieces.count,
-            completedPieceIndexes: completedPieceIndexes,
-            availability: pieceAvailability,
-            mode: request.runtimeOptions.isSequentialDownloadEnabled ? .sequential : .rarestFirst
-        ) {
+        while true {
             try Task.checkCancellation()
-            let isEndgame = TorrentPieceSelector.isEndgame(
+            activeRequest = requests[request.id] ?? activeRequest
+            wanted = wantedContent(in: layout, metainfo: metainfo, request: activeRequest)
+            guard !wanted.pieceIndexes.isEmpty else { break }
+            let orderedPieces = try TorrentPieceSelector.orderedPieceIndexes(
                 pieceCount: metainfo.pieces.count,
                 completedPieceIndexes: completedPieceIndexes,
+                availability: pieceAvailability,
+                mode: activeRequest.runtimeOptions.isSequentialDownloadEnabled ? .sequential : .rarestFirst
+            )
+            guard let pieceIndex = orderedPieces.first(where: { wanted.pieceIndexes.contains($0) }) else {
+                break
+            }
+            let isEndgame = TorrentPieceSelector.isEndgame(
+                pieceCount: wanted.pieceIndexes.count,
+                completedPieceIndexes: completedPieceIndexes.intersection(wanted.pieceIndexes),
                 activePeerCount: max(1, peerStates.values.filter(\.isConnected).count)
             )
             let result = try await downloadPieceFromSwarm(
                 pieceIndex: pieceIndex,
-                request: request,
+                request: activeRequest,
                 metainfo: metainfo,
                 layout: layout,
                 workspace: workspace,
@@ -784,27 +947,27 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             )
             resumeState = result.resumeState
             completedPieceIndexes = Set(resumeState.completedPieces.completedPieceIndexes)
-            downloadedBytes = completedBytes(in: resumeState, metainfo: metainfo)
+            downloadedBytes = completedBytes(in: resumeState, metainfo: metainfo, layout: layout, wantedFiles: wanted.files)
             let speed = cappedSpeed(
                 observedSpeed(
                     downloadedBytes: downloadedBytes,
-                    initialDownloadedBytes: request.downloadedBytes,
+                    initialDownloadedBytes: activeRequest.downloadedBytes,
                     startDate: startDate
                 ),
-                limit: effectiveDownloadLimit(for: request)
+                limit: effectiveDownloadLimit(for: activeRequest)
             )
             try await throttleIfNeeded(
-                downloadedBytes: max(0, downloadedBytes - request.downloadedBytes),
+                downloadedBytes: max(0, downloadedBytes - activeRequest.downloadedBytes),
                 startDate: startDate,
-                limit: effectiveDownloadLimit(for: request)
+                limit: effectiveDownloadLimit(for: activeRequest)
             )
-            let remainingBytes = max(0, metadata.totalBytes - downloadedBytes)
+            let remainingBytes = max(0, wanted.totalBytes - downloadedBytes)
             swarmStates[request.id] = SwiftTorrentSwarmRuntimeState(
                 peers: Array(peerStates.values),
                 downloadedBytes: downloadedBytes
             )
             onSnapshot(snapshot(
-                for: request,
+                for: activeRequest,
                 status: .running,
                 metadata: metadata,
                 trackerSummary: trackerSummary,
@@ -815,23 +978,28 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 resumeState: resumeState,
                 metainfo: metainfo,
                 layout: layout,
-                resumeStateStatus: request.resumeDataPath == nil ? .missing : .saved
+                resumeStateStatus: activeRequest.resumeDataPath == nil ? .missing : .saved,
+                totalBytesOverride: wanted.totalBytes
             ))
         }
 
         peerSessions[request.id] = nil
+        activeRequest = requests[request.id] ?? activeRequest
+        wanted = wantedContent(in: layout, metainfo: metainfo, request: activeRequest)
+        var completionMetadata = metadata
+        completionMetadata.totalBytes = wanted.totalBytes
         let completedTrackerSummary = await announceTrackers(
-            for: request,
-            metadata: metadata,
+            for: activeRequest,
+            metadata: completionMetadata,
             trackerSession: trackerSessions[request.id],
             event: .completed,
-            downloaded: metadata.totalBytes,
+            downloaded: wanted.totalBytes,
             left: 0,
             force: true
         ) ?? trackerSummary
         await completeOrSeedTorrent(
-            request: request,
-            metadata: metadata,
+            request: activeRequest,
+            metadata: completionMetadata,
             trackerSummary: completedTrackerSummary,
             peerStates: Array(peerStates.values),
             resumeState: resumeState,
@@ -1315,6 +1483,95 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         Dictionary(uniqueKeysWithValues: (0..<pieceCount).map { ($0, max(1, peerCount)) })
     }
 
+    private func refreshMetadata(for request: TorrentStartRequest) {
+        guard let metadata = metadataByID[request.id],
+              let metainfo = metadata.metainfo
+        else { return }
+        metadataByID[request.id] = metadataSnapshot(for: request, metainfo: metainfo)
+    }
+
+    private func maxWantedPriority(_ priority: Int?) -> Int {
+        let current = priority.map(appFilePriority) ?? .normal
+        return current.isWanted ? current.rawValue : TorrentFilePriority.normal.rawValue
+    }
+
+    private func appFilePriority(_ priority: Int) -> TorrentFilePriority {
+        TorrentFilePriority(rawValue: priority) ?? TorrentFilePriority.fromEnginePriority(priority)
+    }
+
+    private func wantedTotalBytes(
+        metadata: SwiftTorrentMetadataSnapshot,
+        request: TorrentStartRequest
+    ) -> Int64 {
+        guard let metainfo = metadata.metainfo,
+              let layout = metadata.layout
+        else {
+            return metadata.totalBytes > 0 ? metadata.totalBytes : request.totalBytes
+        }
+        return wantedContent(in: layout, metainfo: metainfo, request: request).totalBytes
+    }
+
+    private func wantedContent(
+        in layout: TorrentContentLayout,
+        metainfo: TorrentMetainfo,
+        request: TorrentStartRequest
+    ) -> SwiftTorrentWantedContent {
+        let explicitWanted = request.hasExplicitFileSelection ? Set(request.selectedFileIndexes) : nil
+        let files = layout.files.filter { file in
+            if let priority = request.filePriorities[file.index] {
+                return appFilePriority(priority).isWanted
+            }
+            if let explicitWanted {
+                return explicitWanted.contains(file.index)
+            }
+            return file.priority.isWanted
+        }
+        let ranges = files.map { $0.offset..<$0.endOffset }
+        let wantedPieceIndexes = Set(ranges.flatMap { range in
+            pieceIndexes(overlapping: range, in: metainfo)
+        })
+        let totalBytes = files.reduce(Int64(0)) { $0 + $1.length }
+        return SwiftTorrentWantedContent(files: files, pieceIndexes: wantedPieceIndexes, totalBytes: totalBytes)
+    }
+
+    private func pieceIndexes(overlapping range: Range<Int64>, in metainfo: TorrentMetainfo) -> [Int] {
+        guard range.lowerBound < range.upperBound,
+              metainfo.pieceLength > 0,
+              !metainfo.pieces.isEmpty
+        else {
+            return []
+        }
+        let first = max(0, Int(range.lowerBound / metainfo.pieceLength))
+        let last = min(
+            metainfo.pieces.count - 1,
+            Int((range.upperBound - 1) / metainfo.pieceLength)
+        )
+        guard first <= last else { return [] }
+        return Array(first...last)
+    }
+
+    private func verifiedPieceIndexes(
+        in pieceIndexes: Set<Int>,
+        metainfo: TorrentMetainfo,
+        layout: TorrentContentLayout
+    ) -> Set<Int> {
+        let storage = TorrentContentStorage(layout: layout)
+        var verified = Set<Int>()
+        for pieceIndex in pieceIndexes.sorted() {
+            let length = pieceLength(in: metainfo, pieceIndex: pieceIndex)
+            guard let data = try? storage.read(
+                atGlobalOffset: Int64(pieceIndex) * metainfo.pieceLength,
+                length: length
+            ) else {
+                continue
+            }
+            if Data(Insecure.SHA1.hash(data: data)) == metainfo.pieces[pieceIndex] {
+                verified.insert(pieceIndex)
+            }
+        }
+        return verified
+    }
+
     private func effectiveDownloadLimit(for request: TorrentStartRequest) -> Int64 {
         [globalDownloadLimitBytesPerSecond, request.downloadLimitBytesPerSecond]
             .filter { $0 > 0 }
@@ -1461,16 +1718,30 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         )
     }
 
-    private func pieceIndexesToDownload(
-        in metainfo: TorrentMetainfo,
-        resumeState: TorrentCoreResumeState
-    ) -> [Int] {
-        (0..<metainfo.pieces.count).filter { !resumeState.completedPieces.contains($0) }
-    }
-
     private func completedBytes(in state: TorrentCoreResumeState, metainfo: TorrentMetainfo) -> Int64 {
         state.completedPieces.completedPieceIndexes.reduce(Int64(0)) { total, pieceIndex in
             total + pieceLength(in: metainfo, pieceIndex: pieceIndex)
+        }
+    }
+
+    private func completedBytes(
+        in state: TorrentCoreResumeState,
+        metainfo: TorrentMetainfo,
+        layout: TorrentContentLayout,
+        wantedFiles: [TorrentContentFile]
+    ) -> Int64 {
+        guard !wantedFiles.isEmpty else { return 0 }
+        let wantedRanges = wantedFiles.map { $0.offset..<$0.endOffset }
+        return state.completedPieces.completedPieceIndexes.reduce(Int64(0)) { total, pieceIndex in
+            let pieceStart = Int64(pieceIndex) * metainfo.pieceLength
+            let pieceEnd = min(pieceStart + pieceLength(in: metainfo, pieceIndex: pieceIndex), layout.totalLength)
+            let pieceRange = pieceStart..<pieceEnd
+            let wantedBytes = wantedRanges.reduce(Int64(0)) { subtotal, range in
+                let lower = max(pieceRange.lowerBound, range.lowerBound)
+                let upper = min(pieceRange.upperBound, range.upperBound)
+                return upper > lower ? subtotal + (upper - lower) : subtotal
+            }
+            return total + wantedBytes
         }
     }
 
@@ -1496,7 +1767,8 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         resumeStateStatus: TorrentResumeState.Status = .missing,
         uploadRateBytesPerSecond: Int64? = nil,
         shareRatio: Double? = nil,
-        seedingDurationSeconds: TimeInterval = 0
+        seedingDurationSeconds: TimeInterval = 0,
+        totalBytesOverride: Int64? = nil
     ) -> DownloadSnapshot {
         let options = effectiveRuntimeOptions(for: request, metadata: metadata)
         let isMagnet = request.displaySource.lowercased().hasPrefix("magnet:")
@@ -1538,7 +1810,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         return DownloadSnapshot(
             taskID: request.id,
             status: status,
-            totalBytes: metadata.totalBytes > 0 ? metadata.totalBytes : request.totalBytes,
+            totalBytes: totalBytesOverride ?? (metadata.totalBytes > 0 ? metadata.totalBytes : request.totalBytes),
             downloadedBytes: downloadedBytes ?? request.downloadedBytes,
             speedBytesPerSecond: speedBytesPerSecond,
             etaSeconds: etaSeconds,
@@ -1707,7 +1979,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             saveDirectory: URL(fileURLWithPath: request.savePath, isDirectory: true),
             outputName: request.outputName,
             priorities: Dictionary(uniqueKeysWithValues: request.filePriorities.map {
-                ($0.key, TorrentContentPriority(rawValue: $0.value) ?? .normal)
+                ($0.key, TorrentContentPriority(rawValue: appFilePriority($0.value).rawValue) ?? .normal)
             })
         )
         let files = (layout?.files.map {
@@ -1715,7 +1987,8 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 index: $0.index,
                 path: $0.relativePath,
                 size: $0.length,
-                priority: request.filePriorities[$0.index] ?? TorrentFilePriority.normal.rawValue,
+                priority: request.filePriorities[$0.index].map { appFilePriority($0).rawValue }
+                    ?? TorrentFilePriority.normal.rawValue,
                 progress: 0
             )
         } ?? metainfo.files.map { info in
@@ -1723,7 +1996,8 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 index: info.index,
                 path: info.path,
                 size: info.length,
-                priority: request.filePriorities[info.index] ?? TorrentFilePriority.normal.rawValue,
+                priority: request.filePriorities[info.index].map { appFilePriority($0).rawValue }
+                    ?? TorrentFilePriority.normal.rawValue,
                 progress: 0
             )
         })
@@ -1749,6 +2023,12 @@ private struct SwiftTorrentMetadataSnapshot: Sendable {
     var infoHashV1: Data?
     var metainfo: TorrentMetainfo?
     var layout: TorrentContentLayout?
+}
+
+private struct SwiftTorrentWantedContent: Sendable {
+    var files: [TorrentContentFile]
+    var pieceIndexes: Set<Int>
+    var totalBytes: Int64
 }
 
 private struct SwiftTorrentSwarmRuntimeState: Sendable {
@@ -2058,7 +2338,10 @@ protocol TorrentEngineAdapter: Sendable {
     func pause(id: UUID) async
     func cancel(id: UUID) async
     func remove(id: UUID, deletingFiles: Bool) async
-    func recheck(id: UUID) async
+    func recheck(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async
     func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async
@@ -2080,9 +2363,9 @@ struct TorrentStartRequest: Sendable {
     let finalFilePath: String?
     let totalBytes: Int64
     let downloadedBytes: Int64
-    let selectedFileIndexes: [Int]
-    let hasExplicitFileSelection: Bool
-    let filePriorities: [Int: Int]
+    var selectedFileIndexes: [Int]
+    var hasExplicitFileSelection: Bool
+    var filePriorities: [Int: Int]
     let resumeDataPath: String?
     var runtimeOptions: TorrentRuntimeOptions
     let downloadLimitBytesPerSecond: Int64
@@ -2150,7 +2433,10 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
     func pause(id: UUID) async {}
     func cancel(id: UUID) async {}
     func remove(id: UUID, deletingFiles: Bool) async {}
-    func recheck(id: UUID) async {}
+    func recheck(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async {}
     func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async {}
     func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {}
     func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {}

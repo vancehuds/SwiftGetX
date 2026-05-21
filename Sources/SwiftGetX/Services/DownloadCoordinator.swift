@@ -586,41 +586,88 @@ final class DownloadCoordinator {
         var files = task.torrentFiles
         let selected = Set(selectedFileIndexes)
         for index in files.indices {
-            files[index].priority = selected.contains(files[index].index)
-                ? max(files[index].priority, TorrentFilePriority.normal.rawValue)
-                : TorrentFilePriority.skip.rawValue
+            if selected.contains(files[index].index) {
+                files[index].priority = files[index].priorityLevel.isWanted
+                    ? files[index].priority
+                    : TorrentFilePriority.normal.rawValue
+            } else {
+                files[index].priority = TorrentFilePriority.skip.rawValue
+            }
         }
         task.torrentFiles = files
         task.appendLog(L10n.string("log_updated_bt_file_selection", selectedFileIndexes.count))
         let request = DownloadRequest(task: task)
         save()
 
+        guard runsEngines else { return }
         Task {
             await engine(for: request.kind).setFileSelection(request, selectedFileIndexes: selectedFileIndexes)
         }
     }
 
     func setTorrentFilePriority(_ task: DownloadTask, fileIndex: Int, priority: TorrentFilePriority) {
+        setTorrentFilePriorities(task, fileIndexes: [fileIndex], priority: priority)
+    }
+
+    func setTorrentFilePriorities(_ task: DownloadTask, fileIndexes: [Int], priority: TorrentFilePriority) {
         guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        let targetIndexes = Set(fileIndexes)
+        guard !targetIndexes.isEmpty else { return }
         var files = task.torrentFiles
-        guard let index = files.firstIndex(where: { $0.index == fileIndex }) else { return }
-        files[index].priority = priority.rawValue
+        var updated = [TorrentFile]()
+        for index in files.indices where targetIndexes.contains(files[index].index) {
+            files[index].priority = priority.rawValue
+            updated.append(files[index])
+        }
+        guard !updated.isEmpty else { return }
         task.torrentFiles = files
         task.selectedFileIndexes = files
-            .filter { $0.priority > TorrentFilePriority.skip.rawValue }
+            .filter { $0.priorityLevel.isWanted }
             .map(\.index)
             .sorted()
-        task.appendLog(L10n.string("log_updated_bt_file_priority", files[index].path, priority.title))
+        if updated.count == 1, let file = updated.first {
+            task.appendLog(L10n.string("log_updated_bt_file_priority", file.path, priority.title))
+        } else {
+            task.appendLog(L10n.string("log_updated_bt_file_priorities", updated.count, priority.title))
+        }
         let request = DownloadRequest(task: task)
         save()
 
+        guard runsEngines else { return }
         Task {
-            await engine(for: request.kind).setTorrentFilePriority(
-                request,
-                fileIndex: fileIndex,
-                priority: priority.rawValue
-            )
+            for file in updated {
+                await engine(for: request.kind).setTorrentFilePriority(
+                    request,
+                    fileIndex: file.index,
+                    priority: priority.rawValue
+                )
+            }
         }
+    }
+
+    func setTorrentFolderPriority(_ task: DownloadTask, folderPath: String, priority: TorrentFilePriority) {
+        let normalizedFolder = Self.normalizedTorrentFolderPath(folderPath)
+        guard !normalizedFolder.isEmpty else { return }
+        let indexes = task.torrentFiles
+            .filter { Self.torrentFile($0, isInFolder: normalizedFolder) }
+            .map(\.index)
+        setTorrentFilePriorities(task, fileIndexes: indexes, priority: priority)
+    }
+
+    func setTorrentExtensionPriority(_ task: DownloadTask, extensionFilter: String, priority: TorrentFilePriority) {
+        let extensions = Self.normalizedTorrentExtensions(from: extensionFilter)
+        guard !extensions.isEmpty else { return }
+        let indexes = task.torrentFiles
+            .filter { file in
+                extensions.contains(URL(fileURLWithPath: file.path).pathExtension.lowercased())
+            }
+            .map(\.index)
+        guard !indexes.isEmpty else {
+            task.appendLog(L10n.string("log_no_bt_files_matched_filter", extensionFilter))
+            save()
+            return
+        }
+        setTorrentFilePriorities(task, fileIndexes: indexes, priority: priority)
     }
 
     func setTorrentSequentialDownload(_ task: DownloadTask, enabled: Bool) {
@@ -632,6 +679,7 @@ final class DownloadCoordinator {
         let request = DownloadRequest(task: task)
         save()
 
+        guard runsEngines else { return }
         Task {
             await engine(for: request.kind).setTorrentSequentialDownload(request, enabled: enabled)
         }
@@ -668,6 +716,7 @@ final class DownloadCoordinator {
         let request = DownloadRequest(task: task)
         save()
 
+        guard runsEngines else { return }
         Task {
             await engine(for: request.kind).setTorrentRuntimeOptions(request, options: options)
         }
@@ -676,13 +725,43 @@ final class DownloadCoordinator {
     func addTorrentTracker(_ task: DownloadTask, url: String) {
         guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard Self.isValidTrackerURL(trimmed) else { return }
+        var trackers = task.torrentTrackers
+        if !trackers.contains(where: { $0.url == trimmed }) {
+            trackers.append(TorrentTrackerInfo(url: trimmed, tier: 0, status: L10n.string("torrent_tracker_waiting")))
+            task.torrentTrackers = trackers
+        }
         task.appendLog(L10n.string("log_added_tracker", trimmed))
         let request = DownloadRequest(task: task)
         save()
 
+        guard runsEngines else { return }
         Task {
             await engine(for: request.kind).addTorrentTracker(request, url: trimmed)
+        }
+    }
+
+    func addTorrentTrackers(_ task: DownloadTask, urlsText: String) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        let urls = Self.trackerURLs(from: urlsText)
+        guard !urls.isEmpty else { return }
+        let existing = Set(task.torrentTrackers.map(\.url))
+        let newURLs = urls.filter { !existing.contains($0) }
+        guard !newURLs.isEmpty else { return }
+        var trackers = task.torrentTrackers
+        trackers.append(contentsOf: newURLs.map {
+            TorrentTrackerInfo(url: $0, tier: 0, status: L10n.string("torrent_tracker_waiting"))
+        })
+        task.torrentTrackers = trackers
+        task.appendLog(L10n.string("log_added_trackers", newURLs.count))
+        let request = DownloadRequest(task: task)
+        save()
+
+        guard runsEngines else { return }
+        Task {
+            for url in newURLs {
+                await engine(for: request.kind).addTorrentTracker(request, url: url)
+            }
         }
     }
 
@@ -693,8 +772,73 @@ final class DownloadCoordinator {
         let request = DownloadRequest(task: task)
         save()
 
+        guard runsEngines else { return }
         Task {
             await engine(for: request.kind).removeTorrentTracker(request, url: url)
+        }
+    }
+
+    func removeTorrentTrackers(_ task: DownloadTask, urls: [String]) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        let removalURLs = Set(urls)
+        guard !removalURLs.isEmpty else { return }
+        let existingURLs = Set(task.torrentTrackers.map(\.url))
+        let removed = removalURLs.intersection(existingURLs)
+        guard !removed.isEmpty else { return }
+        task.torrentTrackers = task.torrentTrackers.filter { !removed.contains($0.url) }
+        task.appendLog(L10n.string("log_removed_trackers", removed.count))
+        let request = DownloadRequest(task: task)
+        save()
+
+        guard runsEngines else { return }
+        Task {
+            for url in removed {
+                await engine(for: request.kind).removeTorrentTracker(request, url: url)
+            }
+        }
+    }
+
+    func relocateTorrent(_ task: DownloadTask, toSaveDirectoryPath path: String) {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        relocateTorrent(task, toSaveDirectory: URL(fileURLWithPath: NSString(string: trimmed).expandingTildeInPath, isDirectory: true))
+    }
+
+    func relocateTorrent(_ task: DownloadTask, toSaveDirectory newSaveDirectory: URL) {
+        guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        let normalizedDirectory = newSaveDirectory.standardizedFileURL
+        guard normalizedDirectory.isFileURL, !normalizedDirectory.path.isEmpty else { return }
+        let wasActive = task.usesActiveDownloadSlot || task.status == .seeding
+        let oldContentURLs = task.localContentDeletionURLs
+        let outputName = task.effectiveTorrentOutputName
+        let oldRequest = DownloadRequest(task: task)
+        if wasActive {
+            task.status = .paused
+            task.speedBytesPerSecond = 0
+            task.appendLog(L10n.string("log_paused_for_relocation"))
+        }
+        task.applyTorrentLayout(
+            saveDirectory: normalizedDirectory,
+            outputName: outputName,
+            files: task.torrentFiles
+        )
+        let newContentURLs = task.localContentDeletionURLs
+        let movedCount = moveTorrentContentIfSafe(from: oldContentURLs, to: newContentURLs)
+        task.appendLog(L10n.string("log_relocated_torrent", normalizedDirectory.path))
+        if movedCount > 0 {
+            task.appendLog(L10n.string("log_moved_torrent_content", movedCount))
+        }
+        let request = DownloadRequest(task: task)
+        save()
+
+        guard runsEngines else { return }
+        if wasActive {
+            Task {
+                await engine(for: oldRequest.kind).pause(oldRequest)
+            }
+        }
+        Task {
+            await engine(for: request.kind).recheck(request)
         }
     }
 
@@ -704,6 +848,7 @@ final class DownloadCoordinator {
         let request = DownloadRequest(task: task)
         save()
 
+        guard runsEngines else { return }
         Task {
             await engine(for: request.kind).forceTorrentReannounce(request)
         }
@@ -823,7 +968,10 @@ final class DownloadCoordinator {
         if !snapshot.torrentFiles.isEmpty {
             task.torrentFiles = snapshot.torrentFiles
             if task.selectedFileIndexes.isEmpty {
-                task.selectedFileIndexes = snapshot.torrentFiles.map(\.index)
+                task.selectedFileIndexes = snapshot.torrentFiles
+                    .filter { $0.priorityLevel.isWanted }
+                    .map(\.index)
+                    .sorted()
             }
             if task.isTorrent {
                 task.applyTorrentLayout(
@@ -927,6 +1075,32 @@ final class DownloadCoordinator {
         } catch {
             statusMessage = L10n.string("status_save_failed", error.localizedDescription)
         }
+    }
+
+    private func moveTorrentContentIfSafe(from oldURLs: [URL], to newURLs: [URL]) -> Int {
+        guard oldURLs.count == newURLs.count else { return 0 }
+        var movedCount = 0
+        for (oldURL, newURL) in zip(oldURLs, newURLs) {
+            let oldURL = oldURL.standardizedFileURL
+            let newURL = newURL.standardizedFileURL
+            guard oldURL.path != newURL.path,
+                  FileManager.default.fileExists(atPath: oldURL.path),
+                  !FileManager.default.fileExists(atPath: newURL.path)
+            else {
+                continue
+            }
+            do {
+                try FileManager.default.createDirectory(
+                    at: newURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.moveItem(at: oldURL, to: newURL)
+                movedCount += 1
+            } catch {
+                statusMessage = L10n.string("status_save_failed", error.localizedDescription)
+            }
+        }
+        return movedCount
     }
 
     private func moveQueueItem(_ task: DownloadTask, offset: Int) {
@@ -1102,6 +1276,51 @@ final class DownloadCoordinator {
     private static func queueRetryDelay(for failureCount: Int) -> TimeInterval {
         let attempt = max(1, failureCount)
         return min(300, pow(2, Double(attempt - 1)) * 30)
+    }
+
+    private static func normalizedTorrentFolderPath(_ path: String) -> String {
+        path
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .map(String.init)
+            .joined(separator: "/")
+    }
+
+    private static func torrentFile(_ file: TorrentFile, isInFolder folderPath: String) -> Bool {
+        file.path == folderPath || file.path.hasPrefix(folderPath + "/")
+    }
+
+    private static func normalizedTorrentExtensions(from filter: String) -> Set<String> {
+        let separators = CharacterSet(charactersIn: ",; \n\t")
+        return Set(filter
+            .components(separatedBy: separators)
+            .map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "*."))
+                    .lowercased()
+            }
+            .filter { !$0.isEmpty })
+    }
+
+    private static func trackerURLs(from text: String) -> [String] {
+        var seen = Set<String>()
+        let separators = CharacterSet(charactersIn: ", \n\t")
+        return text
+            .components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { isValidTrackerURL($0) }
+            .filter { seen.insert($0).inserted }
+    }
+
+    private static func isValidTrackerURL(_ rawValue: String) -> Bool {
+        guard let components = URLComponents(string: rawValue),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https", "udp"].contains(scheme),
+              components.host?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        else {
+            return false
+        }
+        return true
     }
 }
 
