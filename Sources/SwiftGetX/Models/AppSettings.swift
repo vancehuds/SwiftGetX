@@ -34,6 +34,11 @@ final class AppSettings {
     var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
     var torrentEngine: TorrentEngineKind = .swift
     var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
+    var language: AppLanguage = .system {
+        didSet {
+            UserDefaults.standard.set(language.rawValue, forKey: "app_language")
+        }
+    }
 
 
     func apply(_ record: AppSettingsRecord) {
@@ -62,6 +67,7 @@ final class AppSettings {
         torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
         torrentEngine = TorrentEngineKind(rawValue: record.torrentEngineRawValue) ?? .swift
         torrentDHTBootstrapNodes = record.torrentDHTBootstrapNodes
+        language = AppLanguage(rawValue: record.languageRawValue) ?? .system
     }
 
     func makeRecord() -> AppSettingsRecord {
@@ -90,7 +96,8 @@ final class AppSettings {
             torrentMaxUploadSlots: torrentMaxUploadSlots,
             torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue,
             torrentEngineRawValue: torrentEngine.rawValue,
-            torrentDHTBootstrapNodes: torrentDHTBootstrapNodes
+            torrentDHTBootstrapNodes: torrentDHTBootstrapNodes,
+            languageRawValue: language.rawValue
         )
     }
 
@@ -120,6 +127,7 @@ final class AppSettings {
         record.torrentSeedingLimitModeRawValue = torrentSeedingLimitMode.rawValue
         record.torrentEngineRawValue = torrentEngine.rawValue
         record.torrentDHTBootstrapNodes = torrentDHTBootstrapNodes
+        record.languageRawValue = language.rawValue
     }
 
     var torrentRuntimeOptions: TorrentRuntimeOptions {
@@ -135,6 +143,25 @@ final class AppSettings {
             seedingLimitMode: torrentSeedingLimitMode,
             stopSeedingAtRatio: stopSeedingAtRatio
         )
+    }
+}
+
+enum AppLanguage: String, Codable, CaseIterable, Identifiable {
+    case system
+    case en
+    case zhHans = "zh-Hans"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system:
+            return L10n.string("language_system")
+        case .en:
+            return "English"
+        case .zhHans:
+            return "简体中文"
+        }
     }
 }
 
@@ -182,6 +209,7 @@ final class AppSettingsRecord {
     var torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
     var torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue
     var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
+    var languageRawValue: String = AppLanguage.system.rawValue
 
 
     init(
@@ -210,7 +238,8 @@ final class AppSettingsRecord {
         torrentMaxUploadSlots: Int = 8,
         torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue,
         torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue,
-        torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
+        torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"],
+        languageRawValue: String = AppLanguage.system.rawValue
     ) {
         self.id = id
         self.defaultDownloadDirectoryPath = defaultDownloadDirectoryPath
@@ -238,5 +267,6 @@ final class AppSettingsRecord {
         self.torrentSeedingLimitModeRawValue = torrentSeedingLimitModeRawValue
         self.torrentEngineRawValue = torrentEngineRawValue
         self.torrentDHTBootstrapNodes = torrentDHTBootstrapNodes
+        self.languageRawValue = languageRawValue
     }
 }

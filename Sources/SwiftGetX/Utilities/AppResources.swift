@@ -7,6 +7,17 @@ enum AppResources {
         resolvedBundle ?? .main
     }
 
+    static var localizationBundle: Bundle {
+        let baseBundle = bundle
+        if let langCode = UserDefaults.standard.string(forKey: "app_language"),
+           langCode != "system",
+           let path = baseBundle.path(forResource: langCode, ofType: "lproj"),
+           let languageBundle = Bundle(path: path) {
+            return languageBundle
+        }
+        return baseBundle
+    }
+
     static func url(forResource name: String, withExtension extensionName: String? = nil) -> URL? {
         if let url = bundle.url(forResource: name, withExtension: extensionName) {
             return url

@@ -93,6 +93,8 @@ private struct SettingsSnapshot: Equatable {
     let torrentMaxUploadSlots: Int
     let torrentSeedingLimitMode: TorrentSeedingLimitMode
     let torrentEngine: TorrentEngineKind
+    let language: AppLanguage
+
 
     @MainActor
     init(_ settings: AppSettings) {
@@ -120,6 +122,7 @@ private struct SettingsSnapshot: Equatable {
         torrentMaxUploadSlots = settings.torrentMaxUploadSlots
         torrentSeedingLimitMode = settings.torrentSeedingLimitMode
         torrentEngine = settings.torrentEngine
+        language = settings.language
     }
 }
 
@@ -375,6 +378,11 @@ private struct SystemSettingsSection: View {
 
     var body: some View {
         Section(L10n.string("settings_system_section")) {
+            Picker(L10n.string("settings_system_language"), selection: $settings.language) {
+                ForEach(AppLanguage.allCases) { language in
+                    Text(language.title).tag(language)
+                }
+            }
             Toggle(L10n.string("completion_notifications"), isOn: $settings.completionNotificationsEnabled)
             Toggle(L10n.string("clipboard_link_detection"), isOn: $settings.clipboardDetectionEnabled)
         }

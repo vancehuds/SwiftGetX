@@ -382,6 +382,9 @@
 "torrent_trackers_empty" = "暂未收到 Tracker 信息。";
 "torrent_upload_speed" = "上传速度";
 "torrent_upload_slots" = "上传槽";
+"settings_system_language" = "语言";
+"language_system" = "系统默认";
 "torrent_swift_engine_runtime_pending" = "Swift BT 引擎目前仅支持 metadata；Tracker、Peer 和存储任务实现后才会进行实际传输。";
 "unknown" = "未知";
 "upload_speed_limit" = "上传限速";
+

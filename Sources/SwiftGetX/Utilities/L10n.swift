@@ -3,11 +3,18 @@ import SwiftUI
 
 enum L10n {
     static func string(_ key: String) -> String {
-        NSLocalizedString(key, bundle: AppResources.bundle, comment: "")
+        NSLocalizedString(key, bundle: AppResources.localizationBundle, comment: "")
     }
 
     static func string(_ key: String, _ arguments: CVarArg...) -> String {
-        String(format: string(key), locale: Locale.current, arguments: arguments)
+        let locale: Locale
+        if let langCode = UserDefaults.standard.string(forKey: "app_language"),
+           langCode != "system" {
+            locale = Locale(identifier: langCode)
+        } else {
+            locale = Locale.current
+        }
+        return String(format: string(key), locale: locale, arguments: arguments)
     }
 }
 

@@ -382,6 +382,9 @@
 "torrent_trackers_empty" = "No trackers reported yet.";
 "torrent_upload_speed" = "Upload Speed";
 "torrent_upload_slots" = "Upload Slots";
+"settings_system_language" = "Language";
+"language_system" = "System Default";
 "torrent_swift_engine_runtime_pending" = "Swift torrent engine is metadata-only until tracker, peer, and storage tasks are implemented.";
 "unknown" = "Unknown";
 "upload_speed_limit" = "Upload Speed Limit";
+
