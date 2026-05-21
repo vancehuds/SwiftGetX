@@ -128,6 +128,8 @@ public struct TorrentPeerWireHandshake: Equatable, Sendable {
 }
 
 public enum TorrentPeerWireMessage: Equatable, Sendable {
+    public static let maximumFrameLength = 16 * 1024 * 1024
+
     case keepAlive
     case choke
     case unchoke
@@ -202,6 +204,9 @@ public enum TorrentPeerWireMessage: Equatable, Sendable {
         }
         let bytes = [UInt8](data)
         let length = Int(bytes.peerWireUInt32(at: 0))
+        guard length <= maximumFrameLength else {
+            throw TorrentPeerWireError.invalidMessageLength
+        }
         guard length == data.count - 4 else {
             throw TorrentPeerWireError.invalidMessageLength
         }
@@ -819,7 +824,7 @@ public actor TorrentPeerWireSession {
     private func readFrame() async throws -> Data {
         let lengthData = try await readExact(4)
         let length = Int(lengthData.uint32(at: 0))
-        guard length >= 0 else {
+        guard length >= 0, length <= TorrentPeerWireMessage.maximumFrameLength else {
             throw TorrentPeerWireError.invalidMessageLength
         }
         if length == 0 {

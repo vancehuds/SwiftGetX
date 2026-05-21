@@ -807,7 +807,7 @@ Next step:
 
 ## Large Check 6: Peer Wire and Magnet MVP
 
-Status: [ ]
+Status: [~]
 
 Review Tasks 16-18 for protocol safety, storage consistency, piece verification, resume behavior, UI state transitions, and deterministic tests.
 

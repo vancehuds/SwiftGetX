@@ -38,6 +38,9 @@ struct TorrentPeerWireTests {
             payload: Data([1, 2, 3])
         )
         #expect(try TorrentPeerWireMessage.decodeFrame(extended.encodedData()) == extended)
+        #expect(throws: TorrentPeerWireError.invalidMessageLength) {
+            try TorrentPeerWireMessage.decodeFrame(oversizedFrameHeader())
+        }
 
         let blockPlanner = try TorrentPeerBlockPlanner.requests(pieceLength: 20, maximumBlockLength: 8)
         #expect(blockPlanner.map(\.begin) == [0, 8, 16])
@@ -222,6 +225,94 @@ struct TorrentPeerWireTests {
             #expect(actual == Data(Insecure.SHA1.hash(data: info)).map { String(format: "%02x", $0) }.joined())
         } catch {
             Issue.record("Expected an invalid metadata hash error.")
+        }
+    }
+
+    @Test("rejects oversized peer wire frames before reading payload")
+    func rejectsOversizedPeerWireFramesBeforeReadingPayload() async throws {
+        let saveDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: saveDirectory) }
+
+        let contents = Data((0..<8).map(UInt8.init))
+        let metainfo = try TorrentMetainfo.parse(
+            data: torrentData(
+                announce: nil,
+                info: bencodeDictionary([
+                    ("length", bencodeInteger(Int64(contents.count))),
+                    ("name", bencodeString("demo.bin")),
+                    ("piece length", bencodeInteger(Int64(contents.count))),
+                    ("pieces", bencodeData(Data(Insecure.SHA1.hash(data: contents))))
+                ])
+            )
+        )
+        let layout = try TorrentContentLayout(metainfo: metainfo, saveDirectory: saveDirectory)
+        let workspace = TorrentPeerWorkspace(
+            metainfo: metainfo,
+            layout: layout,
+            resumeStateURL: saveDirectory.appendingPathComponent("demo.resume.json")
+        )
+        let transport = MockTorrentPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: metainfo.infoHashV1,
+                    peerID: Data((60..<80).map(UInt8.init))
+                ).encodedData(),
+                try TorrentPeerWireMessage.unchoke.encodedData(),
+                oversizedFrameHeader()
+            ]
+        )
+        let session = TorrentPeerWireSession(
+            metainfo: metainfo,
+            layout: layout,
+            workspace: workspace,
+            transport: transport,
+            peerID: Data((40..<60).map(UInt8.init)),
+            maximumBlockLength: 8,
+            pipelineLimit: 1
+        )
+
+        do {
+            _ = try await session.downloadPiece(0)
+            Issue.record("Expected oversized frame rejection.")
+        } catch TorrentPeerWireError.invalidMessageLength {
+            #expect(true)
+        } catch {
+            Issue.record("Expected invalidMessageLength for oversized frame.")
+        }
+    }
+
+    @Test("rejects oversized extended metadata frames before reading payload")
+    func rejectsOversizedExtendedMetadataFramesBeforeReadingPayload() async throws {
+        let info = bencodeDictionary([
+            ("length", bencodeInteger(8)),
+            ("name", bencodeString("demo.bin")),
+            ("piece length", bencodeInteger(8)),
+            ("pieces", bencodeData(Data(Insecure.SHA1.hash(data: Data((0..<8).map(UInt8.init))))))
+        ])
+        let infoHash = Data(Insecure.SHA1.hash(data: info))
+        let transport = MockTorrentPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: infoHash,
+                    peerID: Data((60..<80).map(UInt8.init)),
+                    reserved: TorrentPeerWireHandshake.extensionProtocolReservedBytes
+                ).encodedData(),
+                oversizedFrameHeader()
+            ]
+        )
+        let session = try TorrentMagnetMetadataSession(
+            infoHash: infoHash,
+            trackers: [],
+            transport: transport
+        )
+
+        do {
+            _ = try await session.fetchMetadata()
+            Issue.record("Expected oversized extended frame rejection.")
+        } catch TorrentPeerWireError.invalidMessageLength {
+            #expect(true)
+        } catch {
+            Issue.record("Expected invalidMessageLength for oversized extended frame.")
         }
     }
 
@@ -477,6 +568,16 @@ struct TorrentPeerWireTests {
 
     private func bencodeInteger(_ value: Int64) -> Data {
         Data("i\(value)e".utf8)
+    }
+
+    private func oversizedFrameHeader() -> Data {
+        let length = UInt32(TorrentPeerWireMessage.maximumFrameLength + 1)
+        return Data([
+            UInt8((length >> 24) & 0xff),
+            UInt8((length >> 16) & 0xff),
+            UInt8((length >> 8) & 0xff),
+            UInt8(length & 0xff)
+        ])
     }
 
     private func makeTemporaryDirectory() throws -> URL {

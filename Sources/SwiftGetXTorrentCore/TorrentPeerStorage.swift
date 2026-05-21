@@ -143,6 +143,9 @@ public final class TorrentContentStorage: @unchecked Sendable {
                 if result < 0 {
                     throw makePOSIXError()
                 }
+                guard result > 0 else {
+                    throw TorrentContentLayoutError.totalLengthOverflow
+                }
                 written += result
                 remaining -= result
             }

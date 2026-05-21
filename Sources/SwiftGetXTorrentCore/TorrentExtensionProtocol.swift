@@ -314,6 +314,9 @@ public actor TorrentMagnetMetadataSession {
     private func readFrame() async throws -> Data {
         let lengthData = try await readExact(4)
         let length = Int(lengthData.uint32(at: 0))
+        guard length <= TorrentPeerWireMessage.maximumFrameLength else {
+            throw TorrentPeerWireError.invalidMessageLength
+        }
         if length == 0 {
             return lengthData
         }
