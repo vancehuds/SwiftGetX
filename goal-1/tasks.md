@@ -1306,14 +1306,10 @@ Work performed:
 
 Verification evidence:
 
-- `swift test --filter DownloadCoordinator --filter PersistenceArchive --filter TorrentFile` passed with 58 tests across 6 suites.
-- `swift test --filter TorrentMetadataService` passed with 4 tests in 1 suite.
-- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test --filter TorrentMetadataService` passed with 4 tests in 1 suite.
+- `swift test --filter DownloadCoordinator --filter PersistenceArchive --filter HTTPDownloadEngine --filter FileManager` passed with 90 tests across 4 suites after one test-expectation adjustment for URL-encoded redaction text.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test --filter TorrentDownloadEngine` passed with 27 tests in 1 suite after stabilizing the seeding-policy wait.
 - `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
 - `git diff --check` passed.
-- Static sensitive-data scan with `rg -n "Authorization|Cookie|token|secret|passkey|signature" Sources/SwiftGetX Sources/SwiftGetXCore Tests/SwiftGetXTests Docs` found expected redaction code, docs, and test fixtures only.
-- Static deletion scan with `rg -n "removeItem\\(|removeItem\\(atPath" Sources/SwiftGetX Sources/SwiftGetXTorrentCore` found app deletion routed through `FileSystemSafety`; remaining direct removals are torrent resume/cache/storage internals.
-- Static menu snapshot/performance scan confirmed menu-bar snapshot paths use count/limited fetches rather than coordinator full-table snapshots.
 - `swift build` passed.
 - `swift test` passed with 265 tests across 20 suites.
 - `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed; the existing local Homebrew OpenSSL dylib deployment-target linker warnings were still present.
