@@ -275,7 +275,6 @@ struct TorrentPeerWireTests {
             _ = try await session.downloadPiece(0)
             Issue.record("Expected oversized frame rejection.")
         } catch TorrentPeerWireError.invalidMessageLength {
-            #expect(true)
         } catch {
             Issue.record("Expected invalidMessageLength for oversized frame.")
         }
@@ -310,7 +309,6 @@ struct TorrentPeerWireTests {
             _ = try await session.fetchMetadata()
             Issue.record("Expected oversized extended frame rejection.")
         } catch TorrentPeerWireError.invalidMessageLength {
-            #expect(true)
         } catch {
             Issue.record("Expected invalidMessageLength for oversized extended frame.")
         }
