@@ -117,8 +117,7 @@ struct TaskListView: View {
                                     }
                                     Divider()
                                     Button(L10n.string("action_reveal_in_finder")) {
-                                        let url = URL(fileURLWithPath: task.savePath)
-                                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                                        NSWorkspace.shared.activateFileViewerSelecting([task.revealURL])
                                     }
                                     Divider()
                                     Button(L10n.string("action_delete_task"), role: .destructive) {
@@ -162,9 +161,9 @@ struct TaskListView: View {
         } message: {
             if let taskToDelete {
                 if taskToDelete.hasFinishedDownloading {
-                    Text(L10n.string("delete_task_completed_message"))
+                    Text(L10n.string("delete_task_completed_message", taskToDelete.localContentDeletionPathSummary))
                 } else {
-                    Text(L10n.string("delete_task_unfinished_message"))
+                    Text(L10n.string("delete_task_unfinished_message", taskToDelete.localContentDeletionPathSummary))
                 }
             }
         }
@@ -312,8 +311,7 @@ private struct TaskRowView: View {
                     .help(isPausable ? L10n.string("action_pause") : L10n.string("action_start"))
 
                     Button {
-                        let url = URL(fileURLWithPath: task.savePath)
-                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                        NSWorkspace.shared.activateFileViewerSelecting([task.revealURL])
                     } label: {
                         Image(systemName: "folder.fill")
                             .font(layout.font(10))

@@ -26,6 +26,10 @@ struct DownloadRequest: Sendable {
     let kind: DownloadKind
     let status: DownloadStatus
     let savePath: String
+    let torrentSaveDirectoryPath: String?
+    let torrentOutputName: String?
+    let torrentContentRootPath: String?
+    let torrentFinalFilePath: String?
     let totalBytes: Int64
     let downloadedBytes: Int64
     let supportsResume: Bool
@@ -48,6 +52,10 @@ struct DownloadRequest: Sendable {
         kind: DownloadKind,
         status: DownloadStatus = .queued,
         savePath: String,
+        torrentSaveDirectoryPath: String? = nil,
+        torrentOutputName: String? = nil,
+        torrentContentRootPath: String? = nil,
+        torrentFinalFilePath: String? = nil,
         totalBytes: Int64,
         downloadedBytes: Int64,
         supportsResume: Bool,
@@ -69,6 +77,10 @@ struct DownloadRequest: Sendable {
         self.kind = kind
         self.status = status
         self.savePath = savePath
+        self.torrentSaveDirectoryPath = torrentSaveDirectoryPath
+        self.torrentOutputName = torrentOutputName
+        self.torrentContentRootPath = torrentContentRootPath
+        self.torrentFinalFilePath = torrentFinalFilePath
         self.totalBytes = totalBytes
         self.downloadedBytes = downloadedBytes
         self.supportsResume = supportsResume
@@ -96,6 +108,10 @@ struct DownloadRequest: Sendable {
         kind = task.kind
         status = task.status
         savePath = task.savePath
+        torrentSaveDirectoryPath = task.isTorrent ? task.effectiveTorrentSaveDirectoryPath : nil
+        torrentOutputName = task.isTorrent ? task.effectiveTorrentOutputName : nil
+        torrentContentRootPath = task.isTorrent ? task.effectiveTorrentContentRootPath : nil
+        torrentFinalFilePath = task.isTorrent ? task.torrentFinalFilePath : nil
         totalBytes = task.totalBytes
         downloadedBytes = task.downloadedBytes
         supportsResume = task.supportsResume

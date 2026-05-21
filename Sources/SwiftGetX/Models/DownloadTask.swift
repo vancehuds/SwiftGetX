@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import SwiftGetXCore
+import SwiftGetXTorrentCore
 
 @Model
 final class DownloadTask {
@@ -29,6 +30,10 @@ final class DownloadTask {
     var torrentPeersJSON: String?
     var torrentRuntimeOptionsJSON: String?
     var torrentHealthJSON: String?
+    var torrentSaveDirectoryPath: String?
+    var torrentOutputName: String?
+    var torrentContentRootPath: String?
+    var torrentFinalFilePath: String?
     var selectedFileIndexes: [Int]
     var torrentFilesJSON: String?
     var connectionSummary: String?
@@ -67,6 +72,10 @@ final class DownloadTask {
         torrentPeersJSON: String? = nil,
         torrentRuntimeOptionsJSON: String? = nil,
         torrentHealthJSON: String? = nil,
+        torrentSaveDirectoryPath: String? = nil,
+        torrentOutputName: String? = nil,
+        torrentContentRootPath: String? = nil,
+        torrentFinalFilePath: String? = nil,
         selectedFileIndexes: [Int] = [],
         torrentFilesJSON: String? = nil,
         connectionSummary: String? = nil,
@@ -104,6 +113,10 @@ final class DownloadTask {
         self.torrentPeersJSON = torrentPeersJSON
         self.torrentRuntimeOptionsJSON = torrentRuntimeOptionsJSON
         self.torrentHealthJSON = torrentHealthJSON
+        self.torrentSaveDirectoryPath = torrentSaveDirectoryPath
+        self.torrentOutputName = torrentOutputName
+        self.torrentContentRootPath = torrentContentRootPath
+        self.torrentFinalFilePath = torrentFinalFilePath
         self.selectedFileIndexes = selectedFileIndexes
         self.torrentFilesJSON = torrentFilesJSON
         self.connectionSummary = connectionSummary
@@ -167,6 +180,67 @@ final class DownloadTask {
             ?? httpResponseMetadata?.finalURL
             ?? BrowserDownloadContext.redactedURLString(source)
             ?? source
+    }
+
+    var isTorrent: Bool {
+        kind == .torrentMagnet || kind == .torrentFile
+    }
+
+    var effectiveTorrentSaveDirectoryPath: String {
+        torrentSaveDirectoryPath?.nonEmptyTrimmed ?? savePath
+    }
+
+    var effectiveTorrentOutputName: String {
+        torrentOutputName?.nonEmptyTrimmed
+            ?? URL(fileURLWithPath: savePath).lastPathComponent
+    }
+
+    var effectiveTorrentContentRootPath: String {
+        torrentContentRootPath?.nonEmptyTrimmed ?? savePath
+    }
+
+    var displaySavePath: String {
+        guard isTorrent else { return savePath }
+        return torrentFinalFilePath?.nonEmptyTrimmed
+            ?? torrentContentRootPath?.nonEmptyTrimmed
+            ?? torrentSaveDirectoryPath?.nonEmptyTrimmed
+            ?? savePath
+    }
+
+    var revealURL: URL {
+        URL(fileURLWithPath: displaySavePath)
+    }
+
+    var localContentDeletionURLs: [URL] {
+        guard isTorrent else {
+            var urls = [URL(fileURLWithPath: savePath)]
+            urls.append(contentsOf: HTTPPartialDataStore(savePath: savePath).existingDataURLs)
+            return Self.uniqueStandardizedURLs(urls)
+        }
+
+        let saveDirectoryURL = URL(
+            fileURLWithPath: effectiveTorrentSaveDirectoryPath,
+            isDirectory: true
+        ).standardizedFileURL
+        let candidatePath = torrentFinalFilePath?.nonEmptyTrimmed
+            ?? torrentContentRootPath?.nonEmptyTrimmed
+        guard let candidatePath else { return [] }
+        let contentURL = URL(fileURLWithPath: candidatePath).standardizedFileURL
+
+        guard contentURL.path != saveDirectoryURL.path,
+              contentURL.isDescendant(of: saveDirectoryURL)
+        else {
+            return []
+        }
+        return [contentURL]
+    }
+
+    var localContentDeletionPathSummary: String {
+        let paths = localContentDeletionURLs.map(\.path)
+        guard !paths.isEmpty else {
+            return L10n.string("delete_task_no_known_local_content")
+        }
+        return paths.joined(separator: "\n")
     }
 
     var torrentMetadataStatus: TorrentMetadataStatus {
@@ -264,6 +338,43 @@ final class DownloadTask {
         set { httpOptionsJSON = Self.encodeHTTPOptions(newValue) }
     }
 
+    func applyTorrentLayout(
+        saveDirectory: URL,
+        outputName: String? = nil,
+        files: [TorrentFile]? = nil,
+        isMultiFile: Bool? = nil
+    ) {
+        guard isTorrent else { return }
+        let normalizedSaveDirectory = saveDirectory.standardizedFileURL
+        savePath = normalizedSaveDirectory.path
+        torrentSaveDirectoryPath = normalizedSaveDirectory.path
+        let torrentFiles = files ?? self.torrentFiles
+        let sanitizedOutputName = outputName?.nonEmptyTrimmed
+            ?? SourceParser.sanitizeFilename(name).nonEmptyTrimmed
+        torrentOutputName = sanitizedOutputName
+
+        guard !torrentFiles.isEmpty else {
+            torrentContentRootPath = nil
+            torrentFinalFilePath = nil
+            return
+        }
+
+        guard let layout = try? TorrentContentLayout(
+            files: torrentFiles.map(\.torrentFileInfo),
+            saveDirectory: normalizedSaveDirectory,
+            outputName: sanitizedOutputName,
+            isMultiFile: isMultiFile
+        ) else {
+            torrentContentRootPath = nil
+            torrentFinalFilePath = nil
+            return
+        }
+
+        torrentOutputName = layout.outputName
+        torrentContentRootPath = layout.contentRoot.path
+        torrentFinalFilePath = layout.finalFileURL?.path
+    }
+
     private static func decode<Value: Decodable>(_ type: Value.Type, from json: String?) -> Value? {
         guard let json,
               let data = json.data(using: .utf8)
@@ -287,6 +398,17 @@ final class DownloadTask {
             return nil
         }
         return encode(persistable)
+    }
+
+    private static func uniqueStandardizedURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var unique = [URL]()
+        for url in urls {
+            let standardized = url.standardizedFileURL
+            guard seen.insert(standardized.path).inserted else { continue }
+            unique.append(standardized)
+        }
+        return unique
     }
 }
 
@@ -527,6 +649,10 @@ struct TorrentFile: Codable, Identifiable, Equatable, Sendable {
     var priorityLevel: TorrentFilePriority {
         get { TorrentFilePriority(rawValue: priority) ?? .normal }
         set { priority = newValue.rawValue }
+    }
+
+    var torrentFileInfo: TorrentFileInfo {
+        TorrentFileInfo(index: index, path: path, length: size)
     }
 }
 
@@ -797,6 +923,23 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         case .neverStop:
             return false
         }
+    }
+}
+
+private extension String {
+    var nonEmptyTrimmed: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+private extension URL {
+    func isDescendant(of ancestor: URL) -> Bool {
+        let ancestorPath = ancestor.standardizedFileURL.path
+        let path = standardizedFileURL.path
+        guard path.hasPrefix(ancestorPath) else { return false }
+        if path == ancestorPath { return true }
+        return path.dropFirst(ancestorPath.count).first == "/"
     }
 }
 

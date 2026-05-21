@@ -200,7 +200,14 @@ private struct OverviewPanel: View {
 
             VStack(spacing: layout.value(8)) {
                 DetailRow(title: L10n.string("detail_total_size"), value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.totalBytes))
-                DetailRow(title: L10n.string("detail_save_path"), value: task.savePath)
+                DetailRow(
+                    title: task.isTorrent ? L10n.string("torrent_content_path") : L10n.string("detail_save_path"),
+                    value: task.displaySavePath
+                )
+                if task.isTorrent {
+                    DetailRow(title: L10n.string("torrent_save_directory"), value: task.effectiveTorrentSaveDirectoryPath)
+                    DetailRow(title: L10n.string("torrent_output_name"), value: task.effectiveTorrentOutputName)
+                }
                 DetailRow(title: L10n.string("detail_source"), value: task.displaySource)
                 DetailRow(title: L10n.string("detail_resume"), value: task.supportsResume ? L10n.string("supported") : L10n.string("not_supported_or_unknown"))
                 if let connectionSummary = task.connectionSummary {

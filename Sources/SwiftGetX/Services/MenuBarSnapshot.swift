@@ -47,7 +47,7 @@ struct MenuBarSnapshot: Equatable {
                     status: $0.status,
                     progress: $0.progress,
                     speedBytesPerSecond: $0.speedBytesPerSecond,
-                    savePath: $0.savePath,
+                    savePath: $0.displaySavePath,
                     createdAt: $0.createdAt
                 )
             }

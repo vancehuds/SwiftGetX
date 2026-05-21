@@ -34,6 +34,26 @@ struct TorrentDownloadEngineTests {
         #expect(startRequests.first?.resolvedTorrentFilePath == "/tmp/cache/demo.torrent")
     }
 
+    @Test("passes save directory separately from content paths")
+    func passesSaveDirectorySeparatelyFromContentPaths() async throws {
+        let adapter = RecordingTorrentAdapter()
+        let engine = TorrentDownloadEngine(adapter: adapter)
+
+        await engine.start(Self.request(
+            savePath: "/tmp/downloads/album",
+            torrentSaveDirectoryPath: "/tmp/downloads",
+            torrentOutputName: "album",
+            torrentContentRootPath: "/tmp/downloads/album",
+            torrentFinalFilePath: nil
+        ))
+
+        let startRequests = await adapter.startRequests
+        #expect(startRequests.first?.savePath == "/tmp/downloads")
+        #expect(startRequests.first?.outputName == "album")
+        #expect(startRequests.first?.contentRootPath == "/tmp/downloads/album")
+        #expect(startRequests.first?.finalFilePath == nil)
+    }
+
     @Test("resume uses adapter resume without adding a second handle")
     func resumeUsesAdapterResume() async throws {
         let adapter = RecordingTorrentAdapter()
@@ -160,6 +180,11 @@ struct TorrentDownloadEngineTests {
         source: String = "magnet:?xt=urn:btih:abcdef",
         kind: DownloadKind = .torrentMagnet,
         resolvedTorrentFilePath: String? = nil,
+        savePath: String = "/tmp/demo",
+        torrentSaveDirectoryPath: String? = nil,
+        torrentOutputName: String? = nil,
+        torrentContentRootPath: String? = nil,
+        torrentFinalFilePath: String? = nil,
         selectedFileIndexes: [Int] = [],
         torrentFiles: [TorrentFile] = [],
         torrentResumeState: TorrentResumeState? = nil,
@@ -173,7 +198,11 @@ struct TorrentDownloadEngineTests {
             resolvedTorrentFilePath: resolvedTorrentFilePath,
             kind: kind,
             status: .queued,
-            savePath: "/tmp/demo",
+            savePath: savePath,
+            torrentSaveDirectoryPath: torrentSaveDirectoryPath,
+            torrentOutputName: torrentOutputName,
+            torrentContentRootPath: torrentContentRootPath,
+            torrentFinalFilePath: torrentFinalFilePath,
             totalBytes: 0,
             downloadedBytes: 0,
             supportsResume: true,

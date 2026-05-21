@@ -176,7 +176,10 @@ final class TorrentDownloadEngine: DownloadEngine {
             id: request.id,
             displaySource: request.source,
             resolvedTorrentFilePath: request.resolvedTorrentFilePath,
-            savePath: request.savePath,
+            savePath: request.torrentSaveDirectoryPath ?? request.savePath,
+            outputName: request.torrentOutputName,
+            contentRootPath: request.torrentContentRootPath ?? request.savePath,
+            finalFilePath: request.torrentFinalFilePath,
             totalBytes: request.totalBytes,
             downloadedBytes: request.downloadedBytes,
             selectedFileIndexes: request.selectedFileIndexes,
@@ -197,7 +200,10 @@ final class TorrentDownloadEngine: DownloadEngine {
                 id: request.id,
                 displaySource: request.source,
                 resolvedTorrentFilePath: cachedURL.path,
-                savePath: request.savePath,
+                savePath: request.torrentSaveDirectoryPath ?? request.savePath,
+                outputName: request.torrentOutputName,
+                contentRootPath: request.torrentContentRootPath ?? request.savePath,
+                finalFilePath: request.torrentFinalFilePath,
                 totalBytes: request.totalBytes,
                 downloadedBytes: request.downloadedBytes,
                 selectedFileIndexes: request.selectedFileIndexes,
@@ -262,6 +268,9 @@ struct TorrentStartRequest: Sendable {
     let displaySource: String
     let resolvedTorrentFilePath: String?
     let savePath: String
+    let outputName: String?
+    let contentRootPath: String
+    let finalFilePath: String?
     let totalBytes: Int64
     let downloadedBytes: Int64
     let selectedFileIndexes: [Int]

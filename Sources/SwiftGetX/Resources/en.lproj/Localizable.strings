@@ -86,10 +86,11 @@
 "default_unnamed_download_filename" = "Untitled download";
 "delete_task_and_local_file" = "Delete Task and Local File";
 "delete_task_and_partial_file" = "Delete Task and Downloaded Data";
-"delete_task_completed_message" = "You can delete only the task record, or also delete the local file.";
+"delete_task_completed_message" = "You can delete only the task record, or also delete this local path:\n%@";
 "delete_task_dialog_title" = "Delete download task?";
+"delete_task_no_known_local_content" = "No exact local content path is known. SwiftGetX will not delete the whole save directory.";
 "delete_task_only" = "Delete Task Only";
-"delete_task_unfinished_message" = "Unfinished downloads will delete downloaded data and temporary segments to avoid leftovers.";
+"delete_task_unfinished_message" = "Deleting downloaded data will remove only these exact local paths:\n%@";
 "detail_connection" = "Connection Details";
 "detail_error" = "Error Message";
 "detail_resume" = "Resume Support";
@@ -313,6 +314,7 @@
 "task_ready" = "Ready";
 "torrent_connection_summary" = "%d peers · ↓ %@/s · ↑ %@/s · ratio %.2f";
 "torrent_connections" = "Connections";
+"torrent_content_path" = "BT Content Path";
 "torrent_distributed_copies" = "Distributed Copies";
 "torrent_enable_dht" = "Enable DHT";
 "torrent_enable_lsd" = "Enable Local Service Discovery";
@@ -340,6 +342,8 @@
 "torrent_preview_loading" = "Fetching BT metadata...";
 "torrent_preview_more_files" = "... and %d more files";
 "torrent_preview_more_trackers" = "... and %d more trackers";
+"torrent_output_name" = "BT Output Name";
+"torrent_save_directory" = "BT Save Directory";
 "torrent_resume_data" = "Resume Data";
 "torrent_resume_data_clean" = "Saved";
 "torrent_resume_data_dirty" = "Needs save";

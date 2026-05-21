@@ -182,6 +182,7 @@ struct NewTaskSheet: View {
 
             SourcePreviewView(
                 sourceText: sourceText,
+                saveDirectory: saveDirectory,
                 previews: previews,
                 selectedFileIndexesBySource: $selectedFileIndexesBySource,
                 filePrioritiesBySource: $filePrioritiesBySource
@@ -601,6 +602,7 @@ private struct HTTPDownloadOptionsEditor: View {
 private struct SourcePreviewView: View {
     @Environment(\.responsiveLayout) private var layout
     let sourceText: String
+    let saveDirectory: URL
     let previews: [TorrentMetadataPreview]
     @Binding var selectedFileIndexesBySource: [String: Set<Int>]
     @Binding var filePrioritiesBySource: [String: [Int: TorrentFilePriority]]
@@ -630,7 +632,7 @@ private struct SourcePreviewView: View {
                         ForEach(sources.prefix(4), id: \.self) { source in
                             if let preview = previews.first(where: { $0.source == source }) {
                                 TorrentPreviewRow(
-                                    preview: preview,
+                                    preview: preview.plannedForSaveDirectory(saveDirectory),
                                     selectedFileIndexes: selectionBinding(for: preview),
                                     filePriorities: priorityBinding(for: preview)
                                 )
@@ -826,6 +828,20 @@ private struct TorrentPreviewRow: View {
                 HTTPPreviewDetails(preview: preview)
             }
 
+            if preview.kind != .http {
+                VStack(alignment: .leading, spacing: layout.value(3)) {
+                    if let saveDirectoryPath = preview.torrentSaveDirectoryPath {
+                        detailRow(title: L10n.string("torrent_save_directory"), value: saveDirectoryPath)
+                    }
+                    if let outputName = preview.torrentOutputName {
+                        detailRow(title: L10n.string("torrent_output_name"), value: outputName)
+                    }
+                    if let displayPath = preview.torrentDisplayPath {
+                        detailRow(title: L10n.string("torrent_content_path"), value: displayPath)
+                    }
+                }
+            }
+
             if preview.kind != .http, let errorMessage = preview.errorMessage {
                 Text(errorMessage)
                     .font(layout.font(10.5))
@@ -878,6 +894,20 @@ private struct TorrentPreviewRow: View {
                 }
             }
         )
+    }
+
+    private func detailRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: layout.value(6)) {
+            Text(title)
+                .font(layout.font(10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: layout.value(112), alignment: .leading)
+            Text(value)
+                .font(layout.font(10.5))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
     }
 }
 

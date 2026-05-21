@@ -300,7 +300,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             return
         }
 
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: task.savePath)])
+        NSWorkspace.shared.activateFileViewerSelecting([task.revealURL])
     }
 
     @objc private func deleteTask(_ sender: NSMenuItem) {

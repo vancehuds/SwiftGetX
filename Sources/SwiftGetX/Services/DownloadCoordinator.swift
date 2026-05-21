@@ -3,6 +3,7 @@ import Foundation
 import Observation
 import SwiftData
 import SwiftGetXCore
+import SwiftGetXTorrentCore
 
 @MainActor
 @Observable
@@ -188,6 +189,9 @@ final class DownloadCoordinator {
                     : nil,
                 httpOptions: kind == .http ? httpOptions : nil
             )
+            if task.isTorrent {
+                task.applyTorrentLayout(saveDirectory: saveDirectory, outputName: displayName)
+            }
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
             return task
@@ -221,8 +225,9 @@ final class DownloadCoordinator {
     ) -> [DownloadTask] {
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
         let tasks = previews.map { preview in
-            let savePath = preview.savePath
-                ?? saveDirectory.appendingPathComponent(preview.displayName).path
+            let savePath = preview.kind == .http
+                ? preview.savePath ?? saveDirectory.appendingPathComponent(preview.displayName).path
+                : saveDirectory.path
             let task = DownloadTask(
                 name: preview.displayName,
                 source: preview.source,
@@ -248,6 +253,16 @@ final class DownloadCoordinator {
                 }
             }
             task.torrentFiles = files
+            if task.isTorrent {
+                task.applyTorrentLayout(
+                    saveDirectory: saveDirectory,
+                    outputName: preview.displayName,
+                    files: files,
+                    isMultiFile: preview.resolvedTorrentFilePath.flatMap { path in
+                        (try? TorrentMetainfo.parse(url: URL(fileURLWithPath: path)))?.isMultiFile
+                    }
+                )
+            }
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
             if let errorMessage = preview.errorMessage {
@@ -410,13 +425,18 @@ final class DownloadCoordinator {
     func remove(_ task: DownloadTask, deletingFiles: Bool) {
         guard let modelContext else { return }
         let shouldScheduleQueue = task.usesActiveDownloadSlot
-        let shouldDeleteLocalData = deletingFiles
+        let localDeletionURLs = task.localContentDeletionURLs
+        let shouldDeleteLocalData = deletingFiles && (task.kind == .http || !localDeletionURLs.isEmpty)
         let request = DownloadRequest(task: task)
 
         if shouldDeleteLocalData {
-            try? FileManager.default.removeItem(atPath: task.savePath)
             if task.kind == .http {
+                try? FileManager.default.removeItem(atPath: task.savePath)
                 HTTPPartialDataStore(savePath: task.savePath).removeData()
+            } else {
+                for deletionURL in localDeletionURLs {
+                    try? FileManager.default.removeItem(at: deletionURL)
+                }
             }
         }
         if task.kind == .torrentMagnet || task.kind == .torrentFile {
@@ -767,6 +787,13 @@ final class DownloadCoordinator {
             task.torrentFiles = snapshot.torrentFiles
             if task.selectedFileIndexes.isEmpty {
                 task.selectedFileIndexes = snapshot.torrentFiles.map(\.index)
+            }
+            if task.isTorrent {
+                task.applyTorrentLayout(
+                    saveDirectory: URL(fileURLWithPath: task.effectiveTorrentSaveDirectoryPath, isDirectory: true),
+                    outputName: task.torrentOutputName,
+                    files: snapshot.torrentFiles
+                )
             }
         }
         if let connectionSummary = snapshot.connectionSummary {

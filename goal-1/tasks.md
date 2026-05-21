@@ -548,17 +548,37 @@ Next step:
 
 ## Task 13: BT Save Path Semantics and Deletion Boundaries
 
-Status: [ ]
+Status: [x]
 
 Split or clarify BT save directory, output name, final file path/content root path, UI display paths, and local deletion confirmation so single-file and multi-file torrents cannot delete the wrong directory or miss actual content.
 
 Work performed:
 
+- Added explicit persisted torrent path metadata on `DownloadTask`: save directory, output name, content root path, and final single-file path.
+- Wired torrent task creation and preview planning through `TorrentContentLayout`, so app-level `savePath` now remains the libtorrent/engine save directory while UI surfaces the concrete final file path or multi-file content root.
+- Extended `DownloadRequest` and `TorrentStartRequest` so torrent engines receive save directory separately from output name, content root path, and final file path.
+- Updated task list, inspector, menu bar snapshot/reveal behavior, and new-task previews to use torrent display paths instead of the raw save directory.
+- Bounded local torrent deletion to exact known content paths inside the save directory. Unknown/legacy torrent tasks without exact content metadata now skip local file deletion rather than deleting a broad save directory.
+- Updated delete confirmations and localization to show the concrete path(s) that will be removed, or a no-known-content warning.
+- Added regression tests for single-file and multi-file torrent path persistence, exact-path deletion boundaries, unresolved torrent deletion safety, and the engine request boundary.
+
 Verification evidence:
+
+- `swift test --filter DownloadCoordinator --filter TorrentDownloadEngine --filter TorrentMetadataService` passed with 32 tests across 3 suites after rerunning with SwiftPM cache access.
+- `swift build` passed.
+- `swift test` passed with 169 tests across 14 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Existing installed SwiftData stores were not migration-tested in this task; the new torrent path fields are optional and old torrent tasks intentionally avoid local deletion unless exact content metadata is known.
+- Unknown magnet tasks without metadata show only the save directory/output name in preview and confirmation safety text until runtime metadata/layout is available in later torrent-engine work.
+- Runtime Swift torrent adapter, storage writes, and live metadata layout updates remain Task 14+ scope.
+
 Next step:
+
+- Task 14: Swift Torrent Adapter Skeleton and Engine Status.
 
 ## Task 14: Swift Torrent Adapter Skeleton and Engine Status
 

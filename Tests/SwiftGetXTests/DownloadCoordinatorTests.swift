@@ -367,6 +367,152 @@ struct DownloadCoordinatorTests {
         #expect(!FileManager.default.fileExists(atPath: deletedPartURL.path))
     }
 
+    @Test("torrent preview tasks persist save directory and content paths")
+    func torrentPreviewTasksPersistSaveDirectoryAndContentPaths() throws {
+        let fixture = try makeFixture()
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        let singlePreview = TorrentMetadataPreview(
+            source: "file:///tmp/single.torrent",
+            kind: .torrentFile,
+            displayName: "payload.bin",
+            resolvedTorrentFilePath: nil,
+            files: [
+                TorrentFile(index: 0, path: "payload.bin", size: 42)
+            ],
+            totalBytes: 42,
+            metadataStatus: .available,
+            errorMessage: nil
+        )
+        let multiPreview = TorrentMetadataPreview(
+            source: "file:///tmp/album.torrent",
+            kind: .torrentFile,
+            displayName: "album",
+            resolvedTorrentFilePath: nil,
+            files: [
+                TorrentFile(index: 0, path: "album/a.txt", size: 10),
+                TorrentFile(index: 1, path: "album/nested/b.txt", size: 20)
+            ],
+            totalBytes: 30,
+            metadataStatus: .available,
+            errorMessage: nil
+        )
+
+        let tasks = fixture.coordinator.add(
+            previews: [singlePreview, multiPreview],
+            saveDirectory: directory
+        )
+        let single = try #require(tasks.first { $0.source == singlePreview.source })
+        let multi = try #require(tasks.first { $0.source == multiPreview.source })
+
+        #expect(single.savePath == directory.path)
+        #expect(single.torrentSaveDirectoryPath == directory.path)
+        #expect(single.torrentOutputName == "payload.bin")
+        #expect(single.torrentContentRootPath == directory.path)
+        #expect(single.torrentFinalFilePath == directory.appendingPathComponent("payload.bin").path)
+        #expect(single.displaySavePath == directory.appendingPathComponent("payload.bin").path)
+
+        #expect(multi.savePath == directory.path)
+        #expect(multi.torrentSaveDirectoryPath == directory.path)
+        #expect(multi.torrentOutputName == "album")
+        #expect(multi.torrentContentRootPath == directory.appendingPathComponent("album", isDirectory: true).path)
+        #expect(multi.torrentFinalFilePath == nil)
+        #expect(multi.displaySavePath == directory.appendingPathComponent("album", isDirectory: true).path)
+        #expect(DownloadRequest(task: multi).savePath == directory.path)
+        #expect(DownloadRequest(task: multi).torrentContentRootPath == directory.appendingPathComponent("album", isDirectory: true).path)
+    }
+
+    @Test("torrent file deletion is bounded to exact content paths")
+    func torrentFileDeletionIsBoundedToExactContentPaths() throws {
+        let singleFixture = try makeFixture()
+        let singleDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: singleDirectory) }
+        let singlePayload = singleDirectory.appendingPathComponent("payload.bin")
+        let singleSibling = singleDirectory.appendingPathComponent("keep.txt")
+        try Data([1]).write(to: singlePayload)
+        try Data([2]).write(to: singleSibling)
+        let single = DownloadTask(
+            name: "payload.bin",
+            source: "file:///tmp/single.torrent",
+            kind: .torrentFile,
+            status: .completed,
+            savePath: singleDirectory.path,
+            torrentSaveDirectoryPath: singleDirectory.path,
+            torrentOutputName: "payload.bin",
+            torrentContentRootPath: singleDirectory.path,
+            torrentFinalFilePath: singlePayload.path
+        )
+        singleFixture.context.insert(single)
+        try singleFixture.context.save()
+        singleFixture.coordinator.attach(modelContext: singleFixture.context, settings: singleFixture.settings)
+
+        singleFixture.coordinator.remove(single, deletingFiles: true)
+
+        #expect(!FileManager.default.fileExists(atPath: singlePayload.path))
+        #expect(FileManager.default.fileExists(atPath: singleSibling.path))
+        #expect(FileManager.default.fileExists(atPath: singleDirectory.path))
+
+        let multiFixture = try makeFixture()
+        let multiDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: multiDirectory) }
+        let contentRoot = multiDirectory.appendingPathComponent("album", isDirectory: true)
+        let multiSibling = multiDirectory.appendingPathComponent("keep.txt")
+        try FileManager.default.createDirectory(at: contentRoot, withIntermediateDirectories: true)
+        try Data([3]).write(to: contentRoot.appendingPathComponent("a.txt"))
+        try Data([4]).write(to: multiSibling)
+        let multi = DownloadTask(
+            name: "album",
+            source: "file:///tmp/album.torrent",
+            kind: .torrentFile,
+            status: .completed,
+            savePath: multiDirectory.path,
+            torrentSaveDirectoryPath: multiDirectory.path,
+            torrentOutputName: "album",
+            torrentContentRootPath: contentRoot.path,
+            torrentFinalFilePath: nil
+        )
+        multiFixture.context.insert(multi)
+        try multiFixture.context.save()
+        multiFixture.coordinator.attach(modelContext: multiFixture.context, settings: multiFixture.settings)
+
+        multiFixture.coordinator.remove(multi, deletingFiles: true)
+
+        #expect(!FileManager.default.fileExists(atPath: contentRoot.path))
+        #expect(FileManager.default.fileExists(atPath: multiSibling.path))
+        #expect(FileManager.default.fileExists(atPath: multiDirectory.path))
+    }
+
+    @Test("unresolved torrent deletion does not remove save directory")
+    func unresolvedTorrentDeletionDoesNotRemoveSaveDirectory() throws {
+        let fixture = try makeFixture()
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sibling = directory.appendingPathComponent("keep.txt")
+        try Data([5]).write(to: sibling)
+        let task = DownloadTask(
+            name: "Magnet",
+            source: "magnet:?xt=urn:btih:abcdef",
+            kind: .torrentMagnet,
+            status: .failed,
+            savePath: directory.path,
+            torrentSaveDirectoryPath: directory.path,
+            torrentOutputName: "Magnet"
+        )
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        #expect(task.localContentDeletionURLs.isEmpty)
+        #expect(task.localContentDeletionPathSummary == L10n.string("delete_task_no_known_local_content"))
+
+        fixture.coordinator.remove(task, deletingFiles: true)
+
+        #expect(FileManager.default.fileExists(atPath: sibling.path))
+        #expect(FileManager.default.fileExists(atPath: directory.path))
+    }
+
     @Test("restart policy queues unfinished active tasks")
     func restartPolicyQueuesUnfinishedActiveTasks() throws {
         let fixture = try makeFixture()

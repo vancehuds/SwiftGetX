@@ -18,6 +18,10 @@ struct TorrentMetadataPreview: Equatable, Sendable {
     var httpResponseMetadata: HTTPResponseMetadata?
     var supportsResume: Bool
     var savePath: String?
+    var torrentSaveDirectoryPath: String?
+    var torrentOutputName: String?
+    var torrentContentRootPath: String?
+    var torrentFinalFilePath: String?
     var duplicateStrategy: DownloadPreviewDuplicateStrategy
     var browserContext: BrowserDownloadContext?
 
@@ -38,6 +42,10 @@ struct TorrentMetadataPreview: Equatable, Sendable {
         httpResponseMetadata: HTTPResponseMetadata? = nil,
         supportsResume: Bool = false,
         savePath: String? = nil,
+        torrentSaveDirectoryPath: String? = nil,
+        torrentOutputName: String? = nil,
+        torrentContentRootPath: String? = nil,
+        torrentFinalFilePath: String? = nil,
         duplicateStrategy: DownloadPreviewDuplicateStrategy = .none,
         browserContext: BrowserDownloadContext? = nil
     ) {
@@ -53,8 +61,44 @@ struct TorrentMetadataPreview: Equatable, Sendable {
         self.httpResponseMetadata = httpResponseMetadata
         self.supportsResume = supportsResume
         self.savePath = savePath
+        self.torrentSaveDirectoryPath = torrentSaveDirectoryPath
+        self.torrentOutputName = torrentOutputName
+        self.torrentContentRootPath = torrentContentRootPath
+        self.torrentFinalFilePath = torrentFinalFilePath
         self.duplicateStrategy = duplicateStrategy
         self.browserContext = browserContext
+    }
+
+    func plannedForSaveDirectory(_ saveDirectory: URL) -> TorrentMetadataPreview {
+        guard kind == .torrentMagnet || kind == .torrentFile else { return self }
+        var preview = self
+        let normalizedSaveDirectory = saveDirectory.standardizedFileURL
+        preview.savePath = normalizedSaveDirectory.path
+        preview.torrentSaveDirectoryPath = normalizedSaveDirectory.path
+
+        guard let layout = try? TorrentContentLayout(
+            files: files.map(\.torrentFileInfo),
+            saveDirectory: normalizedSaveDirectory,
+            outputName: displayName,
+            isMultiFile: resolvedTorrentFilePath.flatMap { path in
+                (try? TorrentMetainfo.parse(url: URL(fileURLWithPath: path)))?.isMultiFile
+            }
+        ) else {
+            let outputName = SourceParser.sanitizeFilename(displayName)
+            preview.torrentOutputName = outputName.isEmpty ? displayName : outputName
+            preview.torrentContentRootPath = nil
+            preview.torrentFinalFilePath = nil
+            return preview
+        }
+
+        preview.torrentOutputName = layout.outputName
+        preview.torrentContentRootPath = layout.contentRoot.path
+        preview.torrentFinalFilePath = layout.finalFileURL?.path
+        return preview
+    }
+
+    var torrentDisplayPath: String? {
+        torrentFinalFilePath ?? torrentContentRootPath ?? torrentSaveDirectoryPath ?? savePath
     }
 }
 
