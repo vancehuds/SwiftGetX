@@ -314,6 +314,23 @@ private struct TorrentSettingsSection: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Toggle(L10n.string("torrent_enable_dht"), isOn: $settings.torrentDHTEnabled)
+            if settings.torrentDHTEnabled {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.string("torrent_dht_bootstrap_nodes"))
+                        .font(.subheadline)
+                    TextEditor(text: Binding(
+                        get: { settings.torrentDHTBootstrapNodes.joined(separator: "\n") },
+                        set: { settings.torrentDHTBootstrapNodes = $0.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
+                    ))
+                    .frame(height: 64)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                    .font(.system(.body, design: .monospaced))
+                }
+                .padding(.vertical, 4)
+            }
             Toggle(L10n.string("torrent_enable_pex"), isOn: $settings.torrentPEXEnabled)
             Toggle(L10n.string("torrent_enable_lsd"), isOn: $settings.torrentLSDEnabled)
             Toggle(L10n.string("torrent_enable_sequential_default"), isOn: $settings.torrentSequentialDownloadEnabled)

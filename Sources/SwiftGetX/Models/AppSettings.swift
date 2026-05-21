@@ -33,6 +33,8 @@ final class AppSettings {
     var torrentMaxUploadSlots = 8
     var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
     var torrentEngine: TorrentEngineKind = .swift
+    var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
+
 
     func apply(_ record: AppSettingsRecord) {
         defaultDownloadDirectory = URL(fileURLWithPath: record.defaultDownloadDirectoryPath)
@@ -59,6 +61,7 @@ final class AppSettings {
         torrentMaxUploadSlots = record.torrentMaxUploadSlots
         torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
         torrentEngine = TorrentEngineKind(rawValue: record.torrentEngineRawValue) ?? .swift
+        torrentDHTBootstrapNodes = record.torrentDHTBootstrapNodes
     }
 
     func makeRecord() -> AppSettingsRecord {
@@ -86,7 +89,8 @@ final class AppSettings {
             torrentMaxConnections: torrentMaxConnections,
             torrentMaxUploadSlots: torrentMaxUploadSlots,
             torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue,
-            torrentEngineRawValue: torrentEngine.rawValue
+            torrentEngineRawValue: torrentEngine.rawValue,
+            torrentDHTBootstrapNodes: torrentDHTBootstrapNodes
         )
     }
 
@@ -115,6 +119,7 @@ final class AppSettings {
         record.torrentMaxUploadSlots = torrentMaxUploadSlots
         record.torrentSeedingLimitModeRawValue = torrentSeedingLimitMode.rawValue
         record.torrentEngineRawValue = torrentEngine.rawValue
+        record.torrentDHTBootstrapNodes = torrentDHTBootstrapNodes
     }
 
     var torrentRuntimeOptions: TorrentRuntimeOptions {
@@ -176,6 +181,8 @@ final class AppSettingsRecord {
     var torrentMaxUploadSlots: Int = 8
     var torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
     var torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue
+    var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
+
 
     init(
         id: String = "default",
@@ -202,7 +209,8 @@ final class AppSettingsRecord {
         torrentMaxConnections: Int = 200,
         torrentMaxUploadSlots: Int = 8,
         torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue,
-        torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue
+        torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue,
+        torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
     ) {
         self.id = id
         self.defaultDownloadDirectoryPath = defaultDownloadDirectoryPath
@@ -229,5 +237,6 @@ final class AppSettingsRecord {
         self.torrentMaxUploadSlots = torrentMaxUploadSlots
         self.torrentSeedingLimitModeRawValue = torrentSeedingLimitModeRawValue
         self.torrentEngineRawValue = torrentEngineRawValue
+        self.torrentDHTBootstrapNodes = torrentDHTBootstrapNodes
     }
 }

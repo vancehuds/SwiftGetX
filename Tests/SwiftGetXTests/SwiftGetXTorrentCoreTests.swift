@@ -835,6 +835,169 @@ struct SwiftGetXTorrentCoreTests {
         Data("i\(value)e".utf8)
     }
 
+    @Test("DHT routing table handles node additions and XOR distance lookups")
+    func dhtRoutingTableHandlesNodesAndClosestLookups() throws {
+        let nodeID1 = Data(repeating: 1, count: 20)
+        let nodeID2 = Data(repeating: 2, count: 20)
+        
+        let node1 = try TorrentDHTNode(id: nodeID1, host: "127.0.0.1", port: 6881)
+        let node2 = try TorrentDHTNode(id: nodeID2, host: "127.0.0.2", port: 6882)
+        
+        var routingTable = TorrentDHTRoutingTable()
+        routingTable.add(node1)
+        routingTable.add(node2)
+        
+        #expect(routingTable.nodes.count == 2)
+        #expect(routingTable.nodes.contains(where: { $0.address == node1.address }))
+        
+        let target = Data(repeating: 1, count: 20)
+        let closest = routingTable.closestNodes(to: target, limit: 1)
+        #expect(closest.first?.id == nodeID1)
+        
+        routingTable.recordFailure(for: node1)
+        #expect(routingTable.nodes.first(where: { $0.address == node1.address })?.failureCount == 1)
+    }
+
+    @Test("DHT KRPC message query and response serialization")
+    func dhtKRPCMessageEncodeAndDecode() throws {
+        let transactionID = Data([0xaa, 0xbb])
+        let nodeID = Data(repeating: 1, count: 20)
+        let target = Data(repeating: 2, count: 20)
+        
+        let pingReq = try TorrentDHTKRPC.pingRequest(transactionID: transactionID, nodeID: nodeID)
+        #expect(!pingReq.isEmpty)
+        
+        let findNodeReq = try TorrentDHTKRPC.findNodeRequest(transactionID: transactionID, nodeID: nodeID, target: target)
+        #expect(!findNodeReq.isEmpty)
+        
+        let getPeersReq = try TorrentDHTKRPC.getPeersRequest(transactionID: transactionID, nodeID: nodeID, infoHash: target)
+        #expect(!getPeersReq.isEmpty)
+        
+        let announcePeerReq = try TorrentDHTKRPC.announcePeerRequest(
+            transactionID: transactionID,
+            nodeID: nodeID,
+            infoHash: target,
+            port: 6881,
+            token: Data([1, 2, 3])
+        )
+        #expect(!announcePeerReq.isEmpty)
+        
+        // Test parsing response
+        let peer = TorrentPeerEndpoint(host: "127.0.0.1", port: 6881)
+        let node = try TorrentDHTNode(id: nodeID, host: "127.0.0.2", port: 6882)
+        let responseData = try TorrentDHTKRPC.response(
+            transactionID: transactionID,
+            nodeID: nodeID,
+            nodes: [node],
+            peers: [peer],
+            token: Data([4, 5])
+        )
+        
+        let parsed = try TorrentDHTKRPC.parseResponse(responseData, expectedTransactionID: transactionID)
+        #expect(parsed.transactionID == transactionID)
+        #expect(parsed.token == Data([4, 5]))
+        #expect(parsed.peers.count == 1)
+        #expect(parsed.peers.first?.host == "127.0.0.1")
+        #expect(parsed.nodes.count == 1)
+        #expect(parsed.nodes.first?.host == "127.0.0.2")
+    }
+
+    @Test("DHT node store load and save persistence")
+    func dhtNodeStorePersistsNodes() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent("dht-nodes-test-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        
+        let node = try TorrentDHTNode(id: Data(repeating: 3, count: 20), host: "10.0.0.1", port: 6883)
+        let store = TorrentDHTNodeStore(url: fileURL)
+        
+        try store.save([node])
+        let loaded = try store.load()
+        
+        #expect(loaded.count == 1)
+        #expect(loaded.first?.host == "10.0.0.1")
+        #expect(loaded.first?.port == 6883)
+    }
+
+    @Test("DHT client bootstrap and peer discovery lookup")
+    func dhtClientPerformsBootstrapAndDiscovery() async throws {
+        let transport = MockDHTTransport2()
+        let client = try TorrentDHTClient(
+            localNodeID: Data(repeating: 4, count: 20),
+            timeout: .milliseconds(50),
+            transport: transport,
+            transactionIDSource: { Data([1, 2]) }
+        )
+        
+        let infoHash = Data(repeating: 5, count: 20)
+        let bootstrapNode = try TorrentDHTNode(id: Data(repeating: 9, count: 20), host: "127.0.0.1", port: 6881)
+        
+        let nodeID = Data(repeating: 9, count: 20)
+        let findNodeResp = try TorrentDHTKRPC.response(
+            transactionID: Data([1, 2]),
+            nodeID: nodeID,
+            nodes: [try TorrentDHTNode(id: Data(repeating: 8, count: 20), host: "127.0.0.2", port: 6882)]
+        )
+        let getPeersResp = try TorrentDHTKRPC.response(
+            transactionID: Data([1, 2]),
+            nodeID: nodeID,
+            peers: [TorrentPeerEndpoint(host: "192.168.1.5", port: 6889)],
+            token: Data([0xaa, 0xbb])
+        )
+        
+        await transport.setResponse(forQueryType: "find_node", data: findNodeResp)
+        await transport.setResponse(forQueryType: "get_peers", data: getPeersResp)
+        
+        let result = try await client.discoverPeers(
+            infoHash: infoHash,
+            bootstrapNodes: [bootstrapNode],
+            announcePort: 6881,
+            maxPeers: 1
+        )
+        
+        #expect(result.peers.count >= 1)
+        #expect(result.peers.first?.endpoint.host == "192.168.1.5")
+        #expect(result.peers.first?.source == .dht)
+    }
+
+    @Test("PEX message parsing matches added peers")
+    func pexMessageParsesAddedPeers() throws {
+        let addedCompact = Data([127, 0, 0, 1, 0x1a, 0xe1])
+        let pexPayload = BencodeValue.dictionary([
+            Data("added".utf8): .data(addedCompact)
+        ]).encoded()
+        
+        let peers = try TorrentPeerExchangeMessage.parse(pexPayload)
+        #expect(peers.count == 1)
+        #expect(peers.first?.endpoint.host == "127.0.0.1")
+        #expect(peers.first?.endpoint.port == 6881)
+        #expect(peers.first?.source == .pex)
+    }
+
+    @Test("LSD search message formatting and parsing")
+    func lsdAnnounceAndParsing() throws {
+        let infoHash = Data(repeating: 7, count: 20)
+        let messageData = try TorrentLocalServiceDiscovery.searchMessage(infoHash: infoHash, port: 6881)
+        
+        let parsed = try TorrentLocalServiceDiscovery.parseSearchMessage(
+            messageData,
+            sourceHost: "192.168.1.10",
+            expectedInfoHash: infoHash
+        )
+        
+        #expect(parsed != nil)
+        #expect(parsed?.endpoint.host == "192.168.1.10")
+        #expect(parsed?.endpoint.port == 6881)
+        #expect(parsed?.source == .lsd)
+        
+        let mismatched = try TorrentLocalServiceDiscovery.parseSearchMessage(
+            messageData,
+            sourceHost: "192.168.1.10",
+            expectedInfoHash: Data(repeating: 8, count: 20)
+        )
+        #expect(mismatched == nil)
+    }
+
     private func sha1Hex(_ data: Data) -> String {
         Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
@@ -952,5 +1115,23 @@ private extension Data {
     mutating func appendInt64(_ value: Int64) {
         var bigEndian = value.bigEndian
         Swift.withUnsafeBytes(of: &bigEndian) { append(contentsOf: $0) }
+    }
+}
+
+private actor MockDHTTransport2: TorrentDHTTransport {
+    private var responsesByQuery = [String: Data]()
+    
+    func setResponse(forQueryType type: String, data: Data) {
+        responsesByQuery[type] = data
+    }
+    
+    func send(_ data: Data, to node: TorrentDHTNode, timeout: Duration) async throws -> Data {
+        if let value = try? BencodeParser(data: data).parse(),
+           case .dictionary(let dict) = value,
+           let q = dict[Data("q".utf8)]?.stringValue,
+           let response = responsesByQuery[q] {
+            return response
+        }
+        throw TorrentDHTError.timeout
     }
 }

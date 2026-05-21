@@ -319,6 +319,8 @@
 "torrent_connections" = "Connections";
 "torrent_content_path" = "BT Content Path";
 "torrent_distributed_copies" = "Distributed Copies";
+"torrent_dht_nodes" = "DHT Nodes";
+"torrent_dht_bootstrap_nodes" = "DHT Bootstrap Nodes";
 "torrent_enable_dht" = "Enable DHT";
 "torrent_enable_lsd" = "Enable Local Service Discovery";
 "torrent_enable_pex" = "Enable PEX";
@@ -348,6 +350,7 @@
 "torrent_metadata_unavailable" = "Metadata unavailable";
 "torrent_metadata_unknown" = "Metadata unknown";
 "torrent_native_engine_unavailable" = "Native BT engine is not enabled";
+"torrent_peer_sources" = "Peer Sources";
 "torrent_peers" = "Peers";
 "torrent_peers_empty" = "No peers reported yet.";
 "torrent_peer_count" = "Peers";

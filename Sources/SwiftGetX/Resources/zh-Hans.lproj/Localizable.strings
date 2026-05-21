@@ -319,9 +319,12 @@
 "torrent_connections" = "连接数";
 "torrent_content_path" = "BT 内容路径";
 "torrent_distributed_copies" = "可用副本";
+"torrent_dht_nodes" = "DHT 节点";
+"torrent_dht_bootstrap_nodes" = "DHT 引导节点";
 "torrent_enable_dht" = "启用 DHT";
 "torrent_enable_lsd" = "启用局域网发现";
 "torrent_enable_pex" = "启用 PEX";
+"torrent_peer_sources" = "Peer 来源";
 "torrent_enable_sequential_default" = "默认顺序下载";
 "torrent_engine" = "BT 引擎";
 "torrent_engine_libtorrent" = "libtorrent";

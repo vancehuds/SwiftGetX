@@ -436,6 +436,8 @@ private struct ConnectionsPanel: View {
             DetailRow(title: L10n.string("torrent_engine_status"), value: health.engineStatus.title)
             DetailRow(title: L10n.string("torrent_connections"), value: "\(health.connectionCount)")
             DetailRow(title: L10n.string("torrent_upload_slots"), value: "\(health.uploadSlotCount)")
+            DetailRow(title: L10n.string("torrent_dht_nodes"), value: "\(health.dhtNodeCount)")
+            DetailRow(title: L10n.string("torrent_peer_sources"), value: peerSourceSummary(health))
             DetailRow(title: L10n.string("torrent_distributed_copies"), value: String(format: "%.2f", health.distributedCopies))
             DetailRow(title: L10n.string("torrent_resume_data"), value: health.needsResumeDataSave ? L10n.string("torrent_resume_data_dirty") : L10n.string("torrent_resume_data_clean"))
             if let lastError = health.lastError {
@@ -521,7 +523,8 @@ private struct ConnectionsPanel: View {
                             Text(peer.address)
                                 .font(layout.font(11, weight: .medium, design: .monospaced))
                                 .lineLimit(1)
-                            Text(peer.client.isEmpty ? peer.flags : "\(peer.client) · \(peer.flags)")
+                            let sourceLabel = (peer.source ?? "tracker").uppercased()
+                            Text("\(sourceLabel) · \(peer.client.isEmpty ? peer.flags : "\(peer.client) · \(peer.flags)")")
                                 .font(layout.font(10))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -554,6 +557,15 @@ private struct ConnectionsPanel: View {
 
     private func enabledLabel(_ enabled: Bool) -> String {
         enabled ? L10n.string("connection_enabled") : L10n.string("connection_disabled")
+    }
+
+    private func peerSourceSummary(_ health: TorrentHealthInfo) -> String {
+        [
+            "tracker \(health.trackerPeerCount)",
+            "DHT \(health.dhtPeerCount)",
+            "PEX \(health.pexPeerCount)",
+            "LSD \(health.lsdPeerCount)"
+        ].joined(separator: " · ")
     }
 }
 

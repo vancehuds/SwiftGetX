@@ -266,6 +266,7 @@ final class TorrentDownloadEngine: DownloadEngine {
 
 actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     typealias PeerTransportFactory = @Sendable (TorrentPeerEndpoint) async throws -> any TorrentPeerWireTransport
+    typealias PeerDiscoveryProvider = @Sendable (Data, UInt16) async -> [TorrentDiscoveredPeer]
 
     private var runtimeOptions = TorrentRuntimeOptions()
     private var requests: [UUID: TorrentStartRequest] = [:]
@@ -275,10 +276,16 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     private var peerSessions: [UUID: [String: TorrentPeerWireSession]] = [:]
     private var peerWorkspaces: [UUID: TorrentPeerWorkspace] = [:]
     private var swarmStates: [UUID: SwiftTorrentSwarmRuntimeState] = [:]
+    private var peerDiscoveryStates: [UUID: SwiftTorrentPeerDiscoveryState] = [:]
     private var globalDownloadLimitBytesPerSecond: Int64 = 0
     private var globalUploadLimitBytesPerSecond: Int64 = 0
     private let trackerClient: TorrentTrackerClient
     private let peerTransportFactory: PeerTransportFactory
+    private let dhtTransport: (any TorrentDHTTransport)?
+    private let dhtBootstrapNodes: [TorrentDHTNode]
+    private let dhtNodeStoreURL: URL?
+    private let peerExchangeProvider: PeerDiscoveryProvider
+    private let localServiceDiscoveryProvider: PeerDiscoveryProvider
 
     nonisolated var engineKind: TorrentEngineKind { .swift }
     nonisolated var engineStatus: TorrentEngineStatus { .available }
@@ -289,10 +296,36 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         ),
         peerTransportFactory: @escaping PeerTransportFactory = { endpoint in
             try TorrentPeerWireTCPTransport(endpoint: endpoint, timeoutSeconds: 10)
-        }
+        },
+        dhtTransport: (any TorrentDHTTransport)? = SwiftTorrentEngineAdapter.defaultDHTTransport(),
+        dhtBootstrapNodes: [TorrentDHTNode] = SwiftTorrentEngineAdapter.defaultDHTBootstrapNodes,
+        dhtNodeStoreURL: URL? = nil,
+        peerExchangeProvider: @escaping PeerDiscoveryProvider = { _, _ in [] },
+        localServiceDiscoveryProvider: @escaping PeerDiscoveryProvider = { _, _ in [] }
     ) {
         self.trackerClient = trackerClient
         self.peerTransportFactory = peerTransportFactory
+        self.dhtTransport = dhtTransport
+        self.dhtBootstrapNodes = dhtBootstrapNodes
+        self.dhtNodeStoreURL = dhtNodeStoreURL
+        self.peerExchangeProvider = peerExchangeProvider
+        self.localServiceDiscoveryProvider = localServiceDiscoveryProvider
+    }
+
+    private static var defaultDHTBootstrapNodes: [TorrentDHTNode] {
+        [
+            try? TorrentDHTNode(host: "router.bittorrent.com", port: 6_881),
+            try? TorrentDHTNode(host: "dht.transmissionbt.com", port: 6_881),
+            try? TorrentDHTNode(host: "router.utorrent.com", port: 6_881)
+        ].compactMap { $0 }
+    }
+
+    private static func defaultDHTTransport() -> (any TorrentDHTTransport)? {
+        #if canImport(Network)
+        NetworkTorrentDHTTransport()
+        #else
+        nil
+        #endif
     }
 
     func start(
@@ -311,7 +344,9 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         let initialTrackerSummary = SwiftTorrentTrackerAnnounceSummary(
             trackers: await trackerSession.trackerInfos(),
             peers: [],
-            successfulTrackerURL: nil
+            successfulTrackerURL: nil,
+            dhtNodeCount: 0,
+            lastDiscoveryError: nil
         )
         let needsMagnetMetadata = request.displaySource.lowercased().hasPrefix("magnet:")
             && metadata.metainfo == nil
@@ -331,29 +366,26 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 trackerSummary: initialTrackerSummary
             ))
         }
-        guard let trackerSummary = await announceTrackers(
+        let trackerSummary = await announceTrackers(
             for: request,
             metadata: metadata,
             trackerSession: trackerSession,
             event: request.downloadedBytes > 0 ? .none : .started,
             downloaded: request.downloadedBytes,
             left: max(0, metadata.totalBytes - request.downloadedBytes)
-        ) else {
-            onSnapshot(snapshot(
-                for: request,
-                status: .failed,
-                metadata: metadata,
-                trackerSummary: nil
-            ))
-            return
-        }
+        ) ?? initialTrackerSummary
+        let discoveredTrackerSummary = await discoverPeers(
+            for: request,
+            metadata: metadata,
+            trackerSummary: trackerSummary
+        )
 
-        guard !trackerSummary.peers.isEmpty else {
+        guard !discoveredTrackerSummary.peers.isEmpty else {
             onSnapshot(snapshot(
                 for: request,
                 status: .failed,
                 metadata: metadata,
-                trackerSummary: trackerSummary
+                trackerSummary: discoveredTrackerSummary
             ))
             return
         }
@@ -363,7 +395,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 for: request,
                 status: .fetchingMetadata,
                 metadata: metadata,
-                trackerSummary: trackerSummary
+                trackerSummary: discoveredTrackerSummary
             ))
             do {
                 let metadataFetchTask = Task {
@@ -371,9 +403,9 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                         infoHash: infoHash,
                         trackers: metadata.trackerDescriptors.map(\.url),
                         peers: deduplicatedPeers(
-                            trackerSummary.peers,
+                            discoveredTrackerSummary.peers,
                             limit: max(1, request.runtimeOptions.maxConnections)
-                        ),
+                        ).map(\.endpoint),
                         peerTransportFactory: peerTransportFactory
                     )
                 }
@@ -385,7 +417,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                         for: request,
                         status: .fetchingMetadata,
                         metadata: metadata,
-                        trackerSummary: trackerSummary,
+                        trackerSummary: discoveredTrackerSummary,
                         errorMessageOverride: TorrentMetadataError.metadataTimeout.localizedDescription
                     ))
                 }
@@ -397,7 +429,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                     for: request,
                     status: .failed,
                     metadata: metadata,
-                    trackerSummary: trackerSummary,
+                    trackerSummary: discoveredTrackerSummary,
                     errorMessageOverride: error.localizedDescription
                 ))
                 return
@@ -408,7 +440,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             for: request,
             status: .connectingPeers,
             metadata: metadata,
-            trackerSummary: trackerSummary
+            trackerSummary: discoveredTrackerSummary
         ))
 
         guard let metainfo = metadata.metainfo,
@@ -418,7 +450,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 for: request,
                 status: .failed,
                 metadata: metadata,
-                trackerSummary: trackerSummary,
+                trackerSummary: discoveredTrackerSummary,
                 errorMessageOverride: L10n.string("torrent_swift_engine_runtime_pending")
             ))
             return
@@ -430,7 +462,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 metainfo: metainfo,
                 layout: layout,
                 metadata: metadata,
-                trackerSummary: trackerSummary,
+                trackerSummary: discoveredTrackerSummary,
                 onSnapshot: onSnapshot
             )
         } catch is CancellationError {
@@ -438,7 +470,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 for: request,
                 status: .paused,
                 metadata: metadata,
-                trackerSummary: trackerSummary,
+                trackerSummary: discoveredTrackerSummary,
                 downloadedBytes: request.downloadedBytes
             ))
         } catch {
@@ -446,7 +478,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 for: request,
                 status: .failed,
                 metadata: metadata,
-                trackerSummary: trackerSummary,
+                trackerSummary: discoveredTrackerSummary,
                 downloadedBytes: request.downloadedBytes,
                 errorMessageOverride: error.localizedDescription
             ))
@@ -486,6 +518,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         peerSessions[id] = nil
         peerWorkspaces[id] = nil
         swarmStates[id] = nil
+        peerDiscoveryStates[id] = nil
     }
 
     func recheck(id: UUID) async {}
@@ -538,7 +571,9 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             : SwiftTorrentTrackerAnnounceSummary(
                 trackers: await trackerSession.trackerInfos(),
                 peers: [],
-                successfulTrackerURL: nil
+                successfulTrackerURL: nil,
+                dhtNodeCount: peerDiscoveryStates[id]?.dhtNodeCount ?? 0,
+                lastDiscoveryError: peerDiscoveryStates[id]?.lastError
             )
         let status: DownloadStatus = trackerSummary?.peers.isEmpty == false ? .connectingPeers : .failed
         onSnapshot(snapshot(
@@ -547,6 +582,99 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             metadata: metadata,
             trackerSummary: trackerSummary
         ))
+    }
+
+    private func discoverPeers(
+        for request: TorrentStartRequest,
+        metadata: SwiftTorrentMetadataSnapshot,
+        trackerSummary: SwiftTorrentTrackerAnnounceSummary
+    ) async -> SwiftTorrentTrackerAnnounceSummary {
+        guard let infoHash = metadata.infoHashV1 else {
+            peerDiscoveryStates[request.id] = SwiftTorrentPeerDiscoveryState(peers: trackerSummary.peers)
+            return trackerSummary
+        }
+        let options = effectiveRuntimeOptions(for: request, metadata: metadata)
+        let announcePort = UInt16(6_881)
+        var peers = trackerSummary.peers
+        var dhtNodeCount = 0
+        var lastError: String?
+
+        if options.isDHTEnabled, let dhtTransport {
+            let storeURL = dhtNodeStoreURL(for: request)
+            let persistedNodes = storeURL.flatMap { try? TorrentDHTNodeStore(url: $0).load() } ?? []
+            let bootstrapNodes = persistedNodes + dhtBootstrapNodes
+            if !bootstrapNodes.isEmpty {
+                do {
+                    let client = try TorrentDHTClient(
+                        timeout: .milliseconds(250),
+                        transport: dhtTransport
+                    )
+                    let discovery = try await client.discoverPeers(
+                        infoHash: infoHash,
+                        bootstrapNodes: bootstrapNodes,
+                        announcePort: announcePort,
+                        maxPeers: options.maxConnections
+                    )
+                    peers.append(contentsOf: discovery.peers)
+                    dhtNodeCount = discovery.routingTable.nodes.count
+                    lastError = discovery.lastError
+                    if let storeURL {
+                        try? TorrentDHTNodeStore(url: storeURL).save(discovery.routingTable.nodes)
+                    }
+                } catch {
+                    lastError = error.localizedDescription
+                }
+            } else if metadata.trackerDescriptors.isEmpty {
+                lastError = "DHT is enabled but no bootstrap or persisted nodes are configured."
+            }
+        }
+
+        if options.isPEXEnabled {
+            peers.append(contentsOf: await peerExchangeProvider(infoHash, announcePort))
+        }
+        if options.isLSDEnabled {
+            peers.append(contentsOf: await localServiceDiscoveryProvider(infoHash, announcePort))
+        }
+
+        let deduplicated = deduplicatedPeers(peers, limit: max(1, options.maxConnections))
+        let discoveryState = SwiftTorrentPeerDiscoveryState(
+            peers: deduplicated,
+            dhtNodeCount: dhtNodeCount,
+            lastError: lastError
+        )
+        peerDiscoveryStates[request.id] = discoveryState
+        return SwiftTorrentTrackerAnnounceSummary(
+            trackers: trackerSummary.trackers,
+            peers: deduplicated,
+            successfulTrackerURL: trackerSummary.successfulTrackerURL,
+            dhtNodeCount: dhtNodeCount,
+            lastDiscoveryError: lastError
+        )
+    }
+
+    private func dhtNodeStoreURL(for request: TorrentStartRequest) -> URL? {
+        if let dhtNodeStoreURL {
+            return dhtNodeStoreURL
+        }
+        guard let resumeDataPath = request.resumeDataPath else {
+            return nil
+        }
+        return URL(fileURLWithPath: resumeDataPath)
+            .deletingPathExtension()
+            .appendingPathExtension("dht-nodes.json")
+    }
+
+    private func effectiveRuntimeOptions(
+        for request: TorrentStartRequest,
+        metadata: SwiftTorrentMetadataSnapshot
+    ) -> TorrentRuntimeOptions {
+        var options = request.runtimeOptions
+        if metadata.metainfo?.isPrivate == true {
+            options.isDHTEnabled = false
+            options.isPEXEnabled = false
+            options.isLSDEnabled = false
+        }
+        return options
     }
 
     private func downloadTorrent(
@@ -562,7 +690,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             limit: max(1, request.runtimeOptions.maxConnections)
         )
         guard !peers.isEmpty else {
-            throw TorrentTrackerError.invalidResponse("Tracker returned no usable peers.")
+            throw TorrentTrackerError.invalidResponse("Peer discovery returned no usable peers.")
         }
         let resumeURL = request.resumeDataPath.map(URL.init(fileURLWithPath:))
             ?? layout.saveDirectory.appendingPathComponent(".swiftgetx-\(request.id.uuidString).resume.json")
@@ -579,7 +707,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         var completedPieceIndexes = Set(resumeState.completedPieces.completedPieceIndexes)
         var peerStates = Dictionary(
             uniqueKeysWithValues: peers.map {
-                ($0.address, SwiftTorrentPeerRuntimeState(endpoint: $0))
+                ($0.endpoint.address, SwiftTorrentPeerRuntimeState(endpoint: $0.endpoint, source: $0.source))
             }
         )
         swarmStates[request.id] = SwiftTorrentSwarmRuntimeState(
@@ -805,15 +933,15 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     }
 
     private func deduplicatedPeers(
-        _ peers: [TorrentPeerEndpoint],
+        _ peers: [TorrentDiscoveredPeer],
         limit: Int
-    ) -> [TorrentPeerEndpoint] {
+    ) -> [TorrentDiscoveredPeer] {
         var seen = Set<String>()
         return peers.filter {
-            $0.port > 0
-                && $0.port <= Int(UInt16.max)
-                && !$0.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && seen.insert($0.address).inserted
+            $0.endpoint.port > 0
+                && $0.endpoint.port <= Int(UInt16.max)
+                && !$0.endpoint.host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && seen.insert($0.endpoint.address).inserted
         }
         .prefix(max(1, limit))
         .map { $0 }
@@ -960,7 +1088,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         layout: TorrentContentLayout? = nil,
         resumeStateStatus: TorrentResumeState.Status = .missing
     ) -> DownloadSnapshot {
-        let options = request.runtimeOptions
+        let options = effectiveRuntimeOptions(for: request, metadata: metadata)
         let isMagnet = request.displaySource.lowercased().hasPrefix("magnet:")
         let metadataStatus: TorrentMetadataStatus = {
             if !metadata.files.isEmpty {
@@ -972,15 +1100,18 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             return isMagnet ? .fetching : .unavailable
         }()
         let trackers = trackerSummary?.trackers ?? metadata.trackers
+        let discoveryState = peerDiscoveryStates[request.id]
+            ?? SwiftTorrentPeerDiscoveryState(peers: trackerSummary?.peers ?? [])
         let peers = !peerStates.isEmpty ? peerStates.map(\.peerInfo).sorted { $0.address < $1.address } : trackerSummary?.peers.map {
             TorrentPeerInfo(
-                address: $0.address,
+                address: $0.endpoint.address,
                 client: "",
                 progress: 0,
                 downloadRate: 0,
                 uploadRate: 0,
-                direction: "tracker",
-                flags: "tracker"
+                direction: $0.source.rawValue,
+                flags: $0.source.rawValue,
+                source: $0.source.rawValue
             )
         } ?? []
         let connectionCount = peerStates.filter(\.isConnected).count
@@ -1041,12 +1172,18 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 peerCount: peers.count,
                 connectionCount: connectionCount,
                 uploadSlotCount: activeUploadSlots,
+                dhtNodeCount: max(trackerSummary?.dhtNodeCount ?? 0, discoveryState.dhtNodeCount),
                 distributedCopies: distributedCopies(
                     metainfo: metainfo,
                     resumeState: resumeState,
                     connectedPeerCount: connectionCount
                 ),
-                trackerCount: trackers.count
+                trackerCount: trackers.count,
+                trackerPeerCount: discoveryState.count(for: .tracker),
+                dhtPeerCount: discoveryState.count(for: .dht),
+                pexPeerCount: discoveryState.count(for: .pex),
+                lsdPeerCount: discoveryState.count(for: .lsd),
+                lastError: trackerSummary?.lastDiscoveryError
             )
         )
     }
@@ -1204,8 +1341,29 @@ private struct SwiftTorrentSwarmRuntimeState: Sendable {
     var downloadedBytes: Int64
 }
 
+private struct SwiftTorrentPeerDiscoveryState: Sendable {
+    var peers: [TorrentDiscoveredPeer]
+    var dhtNodeCount: Int
+    var lastError: String?
+
+    init(
+        peers: [TorrentDiscoveredPeer] = [],
+        dhtNodeCount: Int = 0,
+        lastError: String? = nil
+    ) {
+        self.peers = peers
+        self.dhtNodeCount = max(0, dhtNodeCount)
+        self.lastError = lastError
+    }
+
+    func count(for source: TorrentPeerDiscoverySource) -> Int {
+        peers.filter { $0.source == source }.count
+    }
+}
+
 private struct SwiftTorrentPeerRuntimeState: Sendable {
     var endpoint: TorrentPeerEndpoint
+    var source: TorrentPeerDiscoverySource = .tracker
     var score: Int = 0
     var bytesDownloaded: Int64 = 0
     var lastDownloadRate: Int64 = 0
@@ -1226,7 +1384,8 @@ private struct SwiftTorrentPeerRuntimeState: Sendable {
             downloadRate: lastDownloadRate,
             uploadRate: 0,
             direction: "down",
-            flags: flags
+            flags: flags,
+            source: source.rawValue
         )
     }
 
@@ -1266,7 +1425,7 @@ private struct SwiftTorrentPeerRuntimeState: Sendable {
     }
 
     private var flags: String {
-        var values = [String]()
+        var values = [source.rawValue]
         values.append(isConnected ? "connected" : "disconnected")
         if isEndgame {
             values.append("endgame")
@@ -1289,8 +1448,10 @@ private struct SwiftTorrentPeerRuntimeState: Sendable {
 
 private struct SwiftTorrentTrackerAnnounceSummary: Sendable {
     var trackers: [TorrentTrackerInfo]
-    var peers: [TorrentPeerEndpoint]
+    var peers: [TorrentDiscoveredPeer]
     var successfulTrackerURL: String?
+    var dhtNodeCount: Int
+    var lastDiscoveryError: String?
 }
 
 private actor SwiftTorrentTrackerSession {
@@ -1325,7 +1486,7 @@ private actor SwiftTorrentTrackerSession {
         force: Bool = false
     ) async -> SwiftTorrentTrackerAnnounceSummary {
         let now = Date()
-        var peers = [TorrentPeerEndpoint]()
+        var peers = [TorrentDiscoveredPeer]()
         var successfulTrackerURL: String?
 
         if force {
@@ -1339,7 +1500,7 @@ private actor SwiftTorrentTrackerSession {
                         event: event
                     )
                     scheduler.recordSuccess(url: descriptor.url, result: result, now: now)
-                    peers = result.peers
+                    peers = result.peers.map { TorrentDiscoveredPeer(endpoint: $0, source: .tracker) }
                     successfulTrackerURL = descriptor.url
                     break
                 } catch {
@@ -1349,7 +1510,9 @@ private actor SwiftTorrentTrackerSession {
             return SwiftTorrentTrackerAnnounceSummary(
                 trackers: trackerInfos(),
                 peers: peers,
-                successfulTrackerURL: successfulTrackerURL
+                successfulTrackerURL: successfulTrackerURL,
+                dhtNodeCount: 0,
+                lastDiscoveryError: nil
             )
         }
 
@@ -1363,7 +1526,7 @@ private actor SwiftTorrentTrackerSession {
                     event: event
                 )
                 scheduler.recordSuccess(url: descriptor.url, result: result, now: now)
-                peers = result.peers
+                peers = result.peers.map { TorrentDiscoveredPeer(endpoint: $0, source: .tracker) }
                 successfulTrackerURL = descriptor.url
                 break
             } catch {
@@ -1374,7 +1537,9 @@ private actor SwiftTorrentTrackerSession {
         return SwiftTorrentTrackerAnnounceSummary(
             trackers: trackerInfos(),
             peers: peers,
-            successfulTrackerURL: successfulTrackerURL
+            successfulTrackerURL: successfulTrackerURL,
+            dhtNodeCount: 0,
+            lastDiscoveryError: nil
         )
     }
 

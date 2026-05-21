@@ -890,6 +890,7 @@ struct TorrentPeerInfo: Codable, Identifiable, Equatable, Sendable {
     var uploadRate: Int64
     var direction: String
     var flags: String
+    var source: String? = nil
 
     var id: String { address }
 }
@@ -908,6 +909,10 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
     var dhtNodeCount: Int
     var distributedCopies: Double
     var trackerCount: Int
+    var trackerPeerCount: Int
+    var dhtPeerCount: Int
+    var pexPeerCount: Int
+    var lsdPeerCount: Int
     var lastError: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -924,6 +929,10 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         case dhtNodeCount
         case distributedCopies
         case trackerCount
+        case trackerPeerCount
+        case dhtPeerCount
+        case pexPeerCount
+        case lsdPeerCount
         case lastError
     }
 
@@ -941,6 +950,10 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         dhtNodeCount: Int = 0,
         distributedCopies: Double = 0,
         trackerCount: Int = 0,
+        trackerPeerCount: Int = 0,
+        dhtPeerCount: Int = 0,
+        pexPeerCount: Int = 0,
+        lsdPeerCount: Int = 0,
         lastError: String? = nil
     ) {
         self.nativeEngineAvailable = nativeEngineAvailable
@@ -956,6 +969,10 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         self.dhtNodeCount = dhtNodeCount
         self.distributedCopies = distributedCopies
         self.trackerCount = trackerCount
+        self.trackerPeerCount = trackerPeerCount
+        self.dhtPeerCount = dhtPeerCount
+        self.pexPeerCount = pexPeerCount
+        self.lsdPeerCount = lsdPeerCount
         self.lastError = lastError
     }
 
@@ -976,6 +993,10 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         dhtNodeCount = try container.decodeIfPresent(Int.self, forKey: .dhtNodeCount) ?? 0
         distributedCopies = try container.decodeIfPresent(Double.self, forKey: .distributedCopies) ?? 0
         trackerCount = try container.decodeIfPresent(Int.self, forKey: .trackerCount) ?? 0
+        trackerPeerCount = try container.decodeIfPresent(Int.self, forKey: .trackerPeerCount) ?? 0
+        dhtPeerCount = try container.decodeIfPresent(Int.self, forKey: .dhtPeerCount) ?? 0
+        pexPeerCount = try container.decodeIfPresent(Int.self, forKey: .pexPeerCount) ?? 0
+        lsdPeerCount = try container.decodeIfPresent(Int.self, forKey: .lsdPeerCount) ?? 0
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
     }
 }
