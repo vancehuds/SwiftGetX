@@ -17,3 +17,17 @@ struct NotificationManagerTests {
         ))
     }
 }
+
+@Suite("SystemBehaviorController")
+@MainActor
+struct SystemBehaviorControllerTests {
+    @Test("manages login items only from app bundles")
+    func managesLoginItemsOnlyFromAppBundles() {
+        #expect(SystemBehaviorController.canManageLoginItem(
+            bundleURL: URL(fileURLWithPath: "/Applications/SwiftGetX.app")
+        ))
+        #expect(!SystemBehaviorController.canManageLoginItem(
+            bundleURL: URL(fileURLWithPath: "/tmp/SwiftGetXTests.xctest")
+        ))
+    }
+}

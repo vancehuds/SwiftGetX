@@ -59,7 +59,11 @@
 "browser_integration_section" = "Browser Integration";
 "browser_native_host" = "Browser Native Host";
 "browser_takeover" = "Browser Takeover";
+"browser_takeover_allowed_hosts" = "Allowed hosts";
+"browser_takeover_blocked_hosts" = "Blocked hosts";
 "browser_takeover_download_title" = "%@ Takeover Download";
+"browser_takeover_policy_help" = "One host or domain per line. Blocked hosts always reject takeovers; allowed hosts restrict takeovers when non-empty.";
+"browser_takeover_policy_section" = "Takeover Host Policy";
 "browser_takeover_prefilled_filename" = "%@ has been filled in. You can adjust the link or save directory before adding.";
 "browser_takeover_prefilled_link" = "The download link has been filled in. You can adjust the link or save directory before adding.";
 "batch_archive_completed" = "Archive Completed";
@@ -85,7 +89,12 @@
 "command_retry_selected" = "Retry Selected";
 "command_resume_all" = "Resume All";
 "command_toggle_selected" = "Start/Pause Selected";
+"completion_actions_section" = "Completion Actions";
 "completion_notifications" = "Notify when complete";
+"completion_open_file" = "Open file when complete";
+"completion_reveal_in_finder" = "Show file in Finder when complete";
+"completion_script_placeholder" = "Executable script path";
+"completion_sound" = "Play sound when complete";
 "confirm_browser_takeover_downloads" = "Show confirmation after taking over browser downloads";
 "connection_disabled" = "Disabled";
 "connection_dht_ready" = "Started (receiving normally)";
@@ -128,6 +137,8 @@
 "diagnostics_unchecked" = "Not checked";
 "download_kind_badge" = "%@ Download";
 "download_kind_magnet" = "Magnet";
+"download_rules_help" = "One rule per line, for example: domain=example.com | ext=zip,dmg | min=10MB | dir=~/Downloads/Apps | segments=8 | autoStart=false | template={date}/{domain}/{filename}. Safe site headers can be added with header=Name: value.";
+"download_rules_section" = "Download Rules";
 "download_speed_limit" = "Download Speed Limit";
 "download_status_cancelled" = "Cancelled";
 "download_status_connecting_peers" = "Connecting peers";
@@ -190,6 +201,8 @@
 "filter_today" = "Today";
 "global_speed_limit" = "Global speed limit";
 "help_reveal_manifest" = "Show configuration file in Finder";
+"keep_running_in_menu_bar" = "Keep running in the menu bar after closing windows";
+"launch_at_login" = "Launch at login";
 "help_toggle_selected_task" = "Start or pause selected task";
 "http_connection_no_resume_only" = "HTTP · Resume not supported";
 "http_connection_not_resumable" = "Resume not supported";
@@ -340,6 +353,13 @@
 "not_supported_or_unknown" = "Not supported / unknown";
 "notification_download_complete" = "Download Complete";
 "notification_seeding_stopped" = "Seeding Stopped";
+"prevent_sleep_during_downloads" = "Prevent system sleep while downloading";
+"prompt_before_quitting_active" = "Prompt before quitting with active tasks";
+"quit_active_downloads_message" = "There are active downloads. You can pause them before quitting, keep SwiftGetX running in the background, or quit immediately.";
+"quit_active_downloads_title" = "Quit with active downloads?";
+"quit_confirm_quit" = "Quit Anyway";
+"quit_keep_running" = "Keep Running";
+"quit_pause_and_quit" = "Pause and Quit";
 "save_directory" = "Save Directory";
 "queue_auto_requeue_failed" = "Automatically requeue failed tasks";
 "queue_move_down" = "Move Down";
@@ -362,6 +382,7 @@
 "settings_http_thread_count" = "HTTP thread count: %d";
 "settings_retry_count" = "Failed retry count: %d";
 "settings_system_section" = "System";
+"system_behavior_section" = "System Behavior";
 "settings_updates_section" = "Updates";
 "share_ratio_limit" = "Share ratio limit";
 "sidebar_tasks" = "Tasks";

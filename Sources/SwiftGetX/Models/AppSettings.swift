@@ -21,8 +21,19 @@ final class AppSettings {
     var globalDownloadLimitBytes: Int64 = 0
     var globalUploadLimitBytes: Int64 = 0
     var completionNotificationsEnabled = true
+    var completionSoundEnabled = false
+    var completionRevealInFinderEnabled = false
+    var completionOpenFileEnabled = false
+    var completionScriptPath = ""
     var clipboardDetectionEnabled = true
     var confirmBrowserTakeoverDownloads = true
+    var browserTakeoverAllowedHosts: [String] = []
+    var browserTakeoverBlockedHosts: [String] = []
+    var downloadRules: [DownloadRule] = []
+    var launchAtLoginEnabled = false
+    var keepRunningInMenuBar = true
+    var preventSleepDuringDownloads = true
+    var promptBeforeQuittingWithActiveTasks = true
     var downloadRestartPolicy: DownloadRestartPolicy = .restorePaused
     var automaticallyRequeuesFailedTasks = false
     var queueFailureRetryLimit: Int = 3
@@ -59,8 +70,19 @@ final class AppSettings {
         globalDownloadLimitBytes = record.globalDownloadLimitBytes
         globalUploadLimitBytes = record.globalUploadLimitBytes
         completionNotificationsEnabled = record.completionNotificationsEnabled
+        completionSoundEnabled = record.completionSoundEnabled
+        completionRevealInFinderEnabled = record.completionRevealInFinderEnabled
+        completionOpenFileEnabled = record.completionOpenFileEnabled
+        completionScriptPath = record.completionScriptPath
         clipboardDetectionEnabled = record.clipboardDetectionEnabled
         confirmBrowserTakeoverDownloads = record.confirmBrowserTakeoverDownloads
+        browserTakeoverAllowedHosts = HostPattern.normalized(record.browserTakeoverAllowedHosts)
+        browserTakeoverBlockedHosts = HostPattern.normalized(record.browserTakeoverBlockedHosts)
+        downloadRules = Self.decodeDownloadRules(from: record.downloadRulesJSON)
+        launchAtLoginEnabled = record.launchAtLoginEnabled
+        keepRunningInMenuBar = record.keepRunningInMenuBar
+        preventSleepDuringDownloads = record.preventSleepDuringDownloads
+        promptBeforeQuittingWithActiveTasks = record.promptBeforeQuittingWithActiveTasks
         downloadRestartPolicy = DownloadRestartPolicy(rawValue: record.downloadRestartPolicyRawValue) ?? .restorePaused
         automaticallyRequeuesFailedTasks = record.automaticallyRequeuesFailedTasks
         queueFailureRetryLimit = record.queueFailureRetryLimit
@@ -90,8 +112,19 @@ final class AppSettings {
             globalDownloadLimitBytes: globalDownloadLimitBytes,
             globalUploadLimitBytes: globalUploadLimitBytes,
             completionNotificationsEnabled: completionNotificationsEnabled,
+            completionSoundEnabled: completionSoundEnabled,
+            completionRevealInFinderEnabled: completionRevealInFinderEnabled,
+            completionOpenFileEnabled: completionOpenFileEnabled,
+            completionScriptPath: completionScriptPath,
             clipboardDetectionEnabled: clipboardDetectionEnabled,
             confirmBrowserTakeoverDownloads: confirmBrowserTakeoverDownloads,
+            browserTakeoverAllowedHosts: HostPattern.normalized(browserTakeoverAllowedHosts),
+            browserTakeoverBlockedHosts: HostPattern.normalized(browserTakeoverBlockedHosts),
+            downloadRulesJSON: Self.encodeDownloadRules(downloadRules),
+            launchAtLoginEnabled: launchAtLoginEnabled,
+            keepRunningInMenuBar: keepRunningInMenuBar,
+            preventSleepDuringDownloads: preventSleepDuringDownloads,
+            promptBeforeQuittingWithActiveTasks: promptBeforeQuittingWithActiveTasks,
             downloadRestartPolicyRawValue: downloadRestartPolicy.rawValue,
             automaticallyRequeuesFailedTasks: automaticallyRequeuesFailedTasks,
             queueFailureRetryLimit: queueFailureRetryLimit,
@@ -121,8 +154,19 @@ final class AppSettings {
         record.globalDownloadLimitBytes = globalDownloadLimitBytes
         record.globalUploadLimitBytes = globalUploadLimitBytes
         record.completionNotificationsEnabled = completionNotificationsEnabled
+        record.completionSoundEnabled = completionSoundEnabled
+        record.completionRevealInFinderEnabled = completionRevealInFinderEnabled
+        record.completionOpenFileEnabled = completionOpenFileEnabled
+        record.completionScriptPath = completionScriptPath
         record.clipboardDetectionEnabled = clipboardDetectionEnabled
         record.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
+        record.browserTakeoverAllowedHosts = HostPattern.normalized(browserTakeoverAllowedHosts)
+        record.browserTakeoverBlockedHosts = HostPattern.normalized(browserTakeoverBlockedHosts)
+        record.downloadRulesJSON = Self.encodeDownloadRules(downloadRules)
+        record.launchAtLoginEnabled = launchAtLoginEnabled
+        record.keepRunningInMenuBar = keepRunningInMenuBar
+        record.preventSleepDuringDownloads = preventSleepDuringDownloads
+        record.promptBeforeQuittingWithActiveTasks = promptBeforeQuittingWithActiveTasks
         record.downloadRestartPolicyRawValue = downloadRestartPolicy.rawValue
         record.automaticallyRequeuesFailedTasks = automaticallyRequeuesFailedTasks
         record.queueFailureRetryLimit = queueFailureRetryLimit
@@ -156,6 +200,41 @@ final class AppSettings {
             stopSeedingAfterSeconds: stopSeedingAfterSeconds,
             dhtBootstrapNodes: torrentDHTBootstrapNodes
         )
+    }
+
+    var downloadRulesText: String {
+        get { DownloadRuleTextFormat.format(downloadRules) }
+        set { downloadRules = DownloadRuleTextFormat.parse(newValue) }
+    }
+
+    var browserTakeoverAllowedHostsText: String {
+        get { browserTakeoverAllowedHosts.joined(separator: "\n") }
+        set { browserTakeoverAllowedHosts = HostPattern.normalized(newValue.components(separatedBy: .newlines)) }
+    }
+
+    var browserTakeoverBlockedHostsText: String {
+        get { browserTakeoverBlockedHosts.joined(separator: "\n") }
+        set { browserTakeoverBlockedHosts = HostPattern.normalized(newValue.components(separatedBy: .newlines)) }
+    }
+
+    private static func decodeDownloadRules(from json: String?) -> [DownloadRule] {
+        guard let json,
+              let data = json.data(using: .utf8),
+              let rules = try? JSONDecoder().decode([DownloadRule].self, from: data)
+        else {
+            return []
+        }
+        return Array(rules.prefix(DownloadRule.maximumRuleCount))
+    }
+
+    private static func encodeDownloadRules(_ rules: [DownloadRule]) -> String {
+        let rules = Array(rules.prefix(DownloadRule.maximumRuleCount))
+        guard let data = try? JSONEncoder().encode(rules),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            return "[]"
+        }
+        return json
     }
 }
 
@@ -228,8 +307,19 @@ final class AppSettingsRecord {
     var globalDownloadLimitBytes: Int64
     var globalUploadLimitBytes: Int64
     var completionNotificationsEnabled: Bool
+    var completionSoundEnabled: Bool = false
+    var completionRevealInFinderEnabled: Bool = false
+    var completionOpenFileEnabled: Bool = false
+    var completionScriptPath: String = ""
     var clipboardDetectionEnabled: Bool
     var confirmBrowserTakeoverDownloads: Bool = true
+    var browserTakeoverAllowedHosts: [String] = []
+    var browserTakeoverBlockedHosts: [String] = []
+    var downloadRulesJSON: String = "[]"
+    var launchAtLoginEnabled: Bool = false
+    var keepRunningInMenuBar: Bool = true
+    var preventSleepDuringDownloads: Bool = true
+    var promptBeforeQuittingWithActiveTasks: Bool = true
     var downloadRestartPolicyRawValue: String = DownloadRestartPolicy.restorePaused.rawValue
     var automaticallyRequeuesFailedTasks: Bool = false
     var queueFailureRetryLimit: Int = 3
@@ -259,8 +349,19 @@ final class AppSettingsRecord {
         globalDownloadLimitBytes: Int64 = 0,
         globalUploadLimitBytes: Int64 = 0,
         completionNotificationsEnabled: Bool = true,
+        completionSoundEnabled: Bool = false,
+        completionRevealInFinderEnabled: Bool = false,
+        completionOpenFileEnabled: Bool = false,
+        completionScriptPath: String = "",
         clipboardDetectionEnabled: Bool = true,
         confirmBrowserTakeoverDownloads: Bool = true,
+        browserTakeoverAllowedHosts: [String] = [],
+        browserTakeoverBlockedHosts: [String] = [],
+        downloadRulesJSON: String = "[]",
+        launchAtLoginEnabled: Bool = false,
+        keepRunningInMenuBar: Bool = true,
+        preventSleepDuringDownloads: Bool = true,
+        promptBeforeQuittingWithActiveTasks: Bool = true,
         downloadRestartPolicyRawValue: String = DownloadRestartPolicy.restorePaused.rawValue,
         automaticallyRequeuesFailedTasks: Bool = false,
         queueFailureRetryLimit: Int = 3,
@@ -288,8 +389,19 @@ final class AppSettingsRecord {
         self.globalDownloadLimitBytes = globalDownloadLimitBytes
         self.globalUploadLimitBytes = globalUploadLimitBytes
         self.completionNotificationsEnabled = completionNotificationsEnabled
+        self.completionSoundEnabled = completionSoundEnabled
+        self.completionRevealInFinderEnabled = completionRevealInFinderEnabled
+        self.completionOpenFileEnabled = completionOpenFileEnabled
+        self.completionScriptPath = completionScriptPath
         self.clipboardDetectionEnabled = clipboardDetectionEnabled
         self.confirmBrowserTakeoverDownloads = confirmBrowserTakeoverDownloads
+        self.browserTakeoverAllowedHosts = HostPattern.normalized(browserTakeoverAllowedHosts)
+        self.browserTakeoverBlockedHosts = HostPattern.normalized(browserTakeoverBlockedHosts)
+        self.downloadRulesJSON = downloadRulesJSON
+        self.launchAtLoginEnabled = launchAtLoginEnabled
+        self.keepRunningInMenuBar = keepRunningInMenuBar
+        self.preventSleepDuringDownloads = preventSleepDuringDownloads
+        self.promptBeforeQuittingWithActiveTasks = promptBeforeQuittingWithActiveTasks
         self.downloadRestartPolicyRawValue = downloadRestartPolicyRawValue
         self.automaticallyRequeuesFailedTasks = automaticallyRequeuesFailedTasks
         self.queueFailureRetryLimit = queueFailureRetryLimit

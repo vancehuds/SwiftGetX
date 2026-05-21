@@ -59,7 +59,11 @@
 "browser_integration_section" = "浏览器集成";
 "browser_native_host" = "浏览器 Native Host";
 "browser_takeover" = "浏览器接管";
+"browser_takeover_allowed_hosts" = "允许的主机";
+"browser_takeover_blocked_hosts" = "阻止的主机";
 "browser_takeover_download_title" = "%@ 接管下载";
+"browser_takeover_policy_help" = "每行一个主机或域名。阻止列表始终拒绝接管；允许列表非空时只允许匹配主机接管。";
+"browser_takeover_policy_section" = "接管主机策略";
 "browser_takeover_prefilled_filename" = "已预填 %@，可在添加前调整链接或保存目录。";
 "browser_takeover_prefilled_link" = "已预填下载链接，可在添加前调整链接或保存目录。";
 "batch_archive_completed" = "归档已完成";
@@ -85,7 +89,12 @@
 "command_retry_selected" = "重试所选";
 "command_resume_all" = "恢复全部";
 "command_toggle_selected" = "启动/暂停所选";
+"completion_actions_section" = "完成动作";
 "completion_notifications" = "完成后通知";
+"completion_open_file" = "完成后打开文件";
+"completion_reveal_in_finder" = "完成后在访达中显示";
+"completion_script_placeholder" = "可执行脚本路径";
+"completion_sound" = "完成后播放声音";
 "confirm_browser_takeover_downloads" = "接管下载后显示确认界面";
 "connection_disabled" = "已禁用";
 "connection_dht_ready" = "已启动 (接收正常)";
@@ -128,6 +137,8 @@
 "diagnostics_unchecked" = "未检查";
 "download_kind_badge" = "%@ 下载";
 "download_kind_magnet" = "磁力";
+"download_rules_help" = "每行一条规则，例如：domain=example.com | ext=zip,dmg | min=10MB | dir=~/Downloads/Apps | segments=8 | autoStart=false | template={date}/{domain}/{filename}。可用 header=Name: value 添加安全站点请求头。";
+"download_rules_section" = "下载规则";
 "download_speed_limit" = "下载限速";
 "download_status_cancelled" = "已取消";
 "download_status_connecting_peers" = "正在连接 Peer";
@@ -190,6 +201,8 @@
 "filter_today" = "今天";
 "global_speed_limit" = "全局限速";
 "help_reveal_manifest" = "在 Finder 中显示配置文件";
+"keep_running_in_menu_bar" = "关闭窗口后继续在菜单栏运行";
+"launch_at_login" = "登录时启动";
 "help_toggle_selected_task" = "开始或暂停选中任务";
 "http_connection_no_resume_only" = "HTTP · 不支持续传";
 "http_connection_not_resumable" = "不支持续传";
@@ -340,6 +353,13 @@
 "not_supported_or_unknown" = "不支持/未知";
 "notification_download_complete" = "下载完成";
 "notification_seeding_stopped" = "做种已停止";
+"prevent_sleep_during_downloads" = "下载时防止系统睡眠";
+"prompt_before_quitting_active" = "有活动任务时退出前提示";
+"quit_active_downloads_message" = "当前有活动下载。你可以先暂停再退出、让 SwiftGetX 继续在后台运行，或立即退出。";
+"quit_active_downloads_title" = "有活动下载时退出？";
+"quit_confirm_quit" = "仍然退出";
+"quit_keep_running" = "继续运行";
+"quit_pause_and_quit" = "暂停并退出";
 "save_directory" = "保存目录";
 "queue_auto_requeue_failed" = "失败后自动重新排队";
 "queue_move_down" = "下移";
@@ -362,6 +382,7 @@
 "settings_http_thread_count" = "HTTP 线程数：%d";
 "settings_retry_count" = "失败重试次数：%d";
 "settings_system_section" = "系统";
+"system_behavior_section" = "系统行为";
 "settings_updates_section" = "更新";
 "share_ratio_limit" = "分享率限制";
 "sidebar_tasks" = "任务";

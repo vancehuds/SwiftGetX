@@ -88,7 +88,9 @@ final class DownloadCoordinator {
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
         )
+        SystemBehaviorController.shared.applyLaunchAtLogin(enabled: settings.launchAtLoginEnabled)
         normalizeMissingQueuePositions()
+        updateSleepPrevention()
     }
 
     func reloadSettings(_ settings: AppSettings) {
@@ -104,7 +106,9 @@ final class DownloadCoordinator {
             downloadBytesPerSecond: settings.globalDownloadLimitBytes,
             uploadBytesPerSecond: settings.globalUploadLimitBytes
         )
+        SystemBehaviorController.shared.applyLaunchAtLogin(enabled: settings.launchAtLoginEnabled)
         scheduleQueue()
+        updateSleepPrevention()
     }
 
     func restoreIncompleteTasks() {
@@ -207,6 +211,17 @@ final class DownloadCoordinator {
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         return sortedTasks((try? modelContext.fetch(descriptor)) ?? [])
+    }
+
+    var hasActiveDownloadsForSystemPolicy: Bool {
+        allTasks().contains { !$0.isArchived && ($0.usesActiveDownloadSlot || $0.status == .seeding) }
+    }
+
+    func pauseActiveTasksForQuit() {
+        for task in allTasks() where !task.isArchived && (task.usesActiveDownloadSlot || task.status == .seeding || task.status == .queued) {
+            pause(task, schedulesQueueAfterFreeingSlot: false)
+        }
+        updateSleepPrevention()
     }
 
     func sortedTasks(_ tasks: [DownloadTask]) -> [DownloadTask] {
@@ -497,29 +512,49 @@ final class DownloadCoordinator {
         let tasks = sources.map { source in
             let kind = SourceParser.kind(for: source)
             let creationSuggestedFilename = sources.count == 1 ? suggestedFilename : nil
-            let displayName = displayName(
+            let initialDisplayName = displayName(
                 for: source,
                 kind: kind,
                 suggestedFilename: creationSuggestedFilename,
                 sourceCount: sources.count
             )
+            let rule = matchingDownloadRule(
+                source: source,
+                kind: kind,
+                filename: initialDisplayName,
+                totalBytes: nil
+            )
+            let plannedURL = rule?.plannedSaveURL(
+                fallbackURL: saveDirectory.appendingPathComponent(initialDisplayName),
+                source: source,
+                filename: initialDisplayName
+            ) ?? saveDirectory.appendingPathComponent(initialDisplayName)
+            let displayName = plannedURL.lastPathComponent
+            let resolvedHTTPOptions = mergedHTTPOptions(
+                explicitOptions: kind == .http ? httpOptions : nil,
+                rule: rule
+            )
             let task = DownloadTask(
                 name: displayName,
                 source: source,
                 kind: kind,
-                savePath: saveDirectory.appendingPathComponent(displayName).path,
+                status: rule?.autoStart == false ? .paused : .queued,
+                savePath: plannedURL.path,
                 browserContext: browserContext?.persistable,
                 httpResponseMetadata: kind == .http
                     ? HTTPResponseMetadata.fromCreationContext(
                         source: source,
                         browserContext: browserContext,
-                        suggestedFilename: creationSuggestedFilename
+                        suggestedFilename: displayName
                     )
                     : nil,
-                httpOptions: kind == .http ? httpOptions : nil
+                httpOptions: kind == .http ? resolvedHTTPOptions : nil
             )
             if task.isTorrent {
-                task.applyTorrentLayout(saveDirectory: saveDirectory, outputName: displayName)
+                task.applyTorrentLayout(
+                    saveDirectory: plannedURL.deletingLastPathComponent(),
+                    outputName: displayName
+                )
             }
             task.category = DownloadTaskCategory.inferred(
                 kind: kind,
@@ -538,7 +573,7 @@ final class DownloadCoordinator {
             if let browserContext {
                 runtimeBrowserContexts[task.id] = browserContext
             }
-            if task.kind == .http, let httpOptions {
+            if task.kind == .http, let httpOptions = task.httpOptions {
                 runtimeHTTPOptions[task.id] = httpOptions
             }
         }
@@ -564,11 +599,34 @@ final class DownloadCoordinator {
             let savePath = preview.kind == .http
                 ? preview.savePath ?? saveDirectory.appendingPathComponent(preview.displayName).path
                 : saveDirectory.path
-            let task = DownloadTask(
-                name: preview.displayName,
+            let fallbackURL = preview.kind == .http
+                ? URL(fileURLWithPath: savePath)
+                : saveDirectory.appendingPathComponent(preview.displayName)
+            let rule = matchingDownloadRule(
                 source: preview.source,
                 kind: preview.kind,
-                savePath: savePath,
+                filename: preview.displayName,
+                totalBytes: preview.totalBytes > 0 ? preview.totalBytes : nil
+            )
+            let plannedURL = rule?.plannedSaveURL(
+                fallbackURL: fallbackURL,
+                source: preview.source,
+                filename: preview.displayName
+            ) ?? fallbackURL
+            let resolvedSavePath = preview.kind == .http ? plannedURL.path : plannedURL.deletingLastPathComponent().path
+            let displayName = rule?.hasSavePathOverride == true
+                ? plannedURL.lastPathComponent
+                : preview.displayName
+            let resolvedHTTPOptions = mergedHTTPOptions(
+                explicitOptions: preview.kind == .http ? httpOptions : nil,
+                rule: rule
+            )
+            let task = DownloadTask(
+                name: displayName,
+                source: preview.source,
+                kind: preview.kind,
+                status: rule?.autoStart == false ? .paused : .queued,
+                savePath: resolvedSavePath,
                 totalBytes: preview.totalBytes,
                 supportsResume: preview.kind == .http
                     ? preview.supportsResume
@@ -578,9 +636,13 @@ final class DownloadCoordinator {
                 selectedFileIndexes: selectedFileIndexes[preview.source] ?? preview.selectedFileIndexes,
                 browserContext: preview.browserContext?.persistable,
                 httpResponseMetadata: preview.kind == .http
-                    ? preview.httpResponseMetadata
+                    ? (preview.httpResponseMetadata ?? HTTPResponseMetadata.fromCreationContext(
+                        source: preview.source,
+                        browserContext: preview.browserContext,
+                        totalBytes: preview.totalBytes
+                    )).replacingSuggestedFilename(displayName)
                     : nil,
-                httpOptions: preview.kind == .http ? httpOptions : nil
+                httpOptions: preview.kind == .http ? resolvedHTTPOptions : nil
             )
             var files = preview.files
             if let priorities = filePriorities[preview.source] {
@@ -591,8 +653,8 @@ final class DownloadCoordinator {
             task.torrentFiles = files
             if task.isTorrent {
                 task.applyTorrentLayout(
-                    saveDirectory: saveDirectory,
-                    outputName: preview.displayName,
+                    saveDirectory: plannedURL.deletingLastPathComponent(),
+                    outputName: displayName,
                     files: files,
                     isMultiFile: preview.resolvedTorrentFilePath.flatMap { path in
                         (try? TorrentMetainfo.parse(url: URL(fileURLWithPath: path)))?.isMultiFile
@@ -602,7 +664,7 @@ final class DownloadCoordinator {
             task.category = DownloadTaskCategory.inferred(
                 kind: preview.kind,
                 source: preview.source,
-                filename: preview.displayName
+                filename: displayName
             )
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
@@ -621,7 +683,7 @@ final class DownloadCoordinator {
             {
                 runtimeBrowserContexts[task.id] = browserContext
             }
-            if task.kind == .http, let httpOptions {
+            if task.kind == .http, let httpOptions = task.httpOptions {
                 runtimeHTTPOptions[task.id] = httpOptions
             }
         }
@@ -675,6 +737,7 @@ final class DownloadCoordinator {
             httpOptions: runtimeHTTPOptions[task.id] ?? task.httpOptions
         )
         save()
+        updateSleepPrevention()
 
         guard runsEngines else { return }
         Task {
@@ -694,6 +757,38 @@ final class DownloadCoordinator {
         }
     }
 
+    private func matchingDownloadRule(
+        source: String,
+        kind: DownloadKind,
+        filename: String,
+        totalBytes: Int64?
+    ) -> DownloadRule? {
+        settings?.downloadRules.first {
+            $0.matches(source: source, kind: kind, filename: filename, totalBytes: totalBytes)
+        }
+    }
+
+    private func mergedHTTPOptions(
+        explicitOptions: HTTPDownloadOptions?,
+        rule: DownloadRule?
+    ) -> HTTPDownloadOptions? {
+        guard let rule else { return explicitOptions }
+        let explicitOptions = explicitOptions ?? HTTPDownloadOptions()
+        let mergedHeaders = explicitOptions.additionalHeaders + rule.headers.filter { ruleHeader in
+            !explicitOptions.additionalHeaders.contains {
+                $0.normalizedName == ruleHeader.normalizedName
+            }
+        }
+        let merged = HTTPDownloadOptions(
+            segmentCountOverride: explicitOptions.segmentCountOverride ?? rule.segmentCount,
+            retryLimitOverride: explicitOptions.retryLimitOverride ?? rule.retryLimit,
+            perTaskDownloadLimitBytes: explicitOptions.perTaskDownloadLimitBytes,
+            filenameOverride: explicitOptions.filenameOverride,
+            additionalHeaders: mergedHeaders
+        )
+        return merged.isEmpty ? nil : merged
+    }
+
     func pause(_ task: DownloadTask) {
         pause(task, schedulesQueueAfterFreeingSlot: true)
     }
@@ -706,6 +801,7 @@ final class DownloadCoordinator {
         task.appendLog(L10n.string("log_paused"))
         let request = DownloadRequest(task: task)
         save()
+        updateSleepPrevention()
 
         if runsEngines {
             Task {
@@ -747,6 +843,7 @@ final class DownloadCoordinator {
         }
         task.appendLog(L10n.string("log_queued_for_resume"))
         save()
+        updateSleepPrevention()
         scheduleQueue()
     }
 
@@ -768,6 +865,7 @@ final class DownloadCoordinator {
         task.appendLog(L10n.string("log_task_cancelled"))
         let request = DownloadRequest(task: task)
         save()
+        updateSleepPrevention()
 
         runEngineOperation(schedulesQueueAfterFreeingSlot: shouldScheduleQueue) {
             await self.engine(for: request.kind).cancel(request)
@@ -802,6 +900,7 @@ final class DownloadCoordinator {
             selectedTaskID = selectedTaskIDs.first ?? filteredTasks(from: allTasks()).first?.id
         }
         save()
+        updateSleepPrevention()
 
         runEngineOperation(schedulesQueueAfterFreeingSlot: shouldScheduleQueue) {
             await self.engine(for: request.kind).remove(request, deletingFiles: shouldDeleteLocalData)
@@ -1476,6 +1575,9 @@ final class DownloadCoordinator {
                 if settings?.completionNotificationsEnabled ?? true {
                     NotificationManager.notifyCompletion(for: task)
                 }
+                if let settings {
+                    SystemBehaviorController.shared.performCompletionActions(for: task, settings: settings)
+                }
                 scheduleQueue()
             }
             runtimeBrowserContexts[task.id] = nil
@@ -1491,6 +1593,9 @@ final class DownloadCoordinator {
                 task.appendLog(L10n.string("log_download_completed"))
                 if settings?.completionNotificationsEnabled ?? true {
                     NotificationManager.notifyCompletion(for: task)
+                }
+                if let settings {
+                    SystemBehaviorController.shared.performCompletionActions(for: task, settings: settings)
                 }
                 scheduleQueue()
             } else if previousStatus == .seeding {
@@ -1519,6 +1624,7 @@ final class DownloadCoordinator {
         }
 
         save()
+        updateSleepPrevention()
     }
 
     private func updateTimingMetrics(for task: DownloadTask, snapshot: DownloadSnapshot) {
@@ -1563,6 +1669,13 @@ final class DownloadCoordinator {
         } catch {
             statusMessage = L10n.string("status_save_failed", error.localizedDescription)
         }
+    }
+
+    private func updateSleepPrevention() {
+        SystemBehaviorController.shared.updateSleepPrevention(
+            isEnabled: settings?.preventSleepDuringDownloads ?? true,
+            hasActiveDownloads: hasActiveDownloadsForSystemPolicy
+        )
     }
 
     private func moveTorrentContentIfSafe(from oldURLs: [URL], to newURLs: [URL]) -> Int {

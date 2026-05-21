@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Testing
+import SwiftGetXCore
 @testable import SwiftGetX
 
 @Suite("DownloadCoordinator", .serialized)
@@ -90,6 +91,68 @@ struct DownloadCoordinatorTests {
         restored.update(record)
         #expect(record.torrentEngineRawValue == TorrentEngineKind.swift.rawValue)
         #expect(record.torrentDHTBootstrapNodes == ["dht2.example:6883"])
+    }
+
+    @Test("download rule and system behavior settings persist through AppSettings records")
+    func downloadRuleAndSystemBehaviorSettingsPersist() throws {
+        let settings = AppSettings()
+        settings.downloadRules = [
+            DownloadRule(
+                name: "Archives",
+                domains: ["*.example.com"],
+                fileExtensions: ["zip"],
+                minSizeBytes: 1_024,
+                saveDirectoryPath: "/tmp/Archives",
+                segmentCount: 6,
+                retryLimit: 4,
+                autoStart: false,
+                filenameTemplate: "{domain}/{filename}",
+                headers: [
+                    BrowserDownloadHeader(name: "Accept-Language", value: "en-US"),
+                    BrowserDownloadHeader(name: "Authorization", value: "Bearer secret")
+                ]
+            )
+        ]
+        settings.browserTakeoverAllowedHosts = ["Example.com", "*.Example.org"]
+        settings.browserTakeoverBlockedHosts = ["blocked.example.com"]
+        settings.launchAtLoginEnabled = true
+        settings.keepRunningInMenuBar = false
+        settings.preventSleepDuringDownloads = false
+        settings.promptBeforeQuittingWithActiveTasks = false
+        settings.completionSoundEnabled = true
+        settings.completionRevealInFinderEnabled = true
+        settings.completionOpenFileEnabled = true
+        settings.completionScriptPath = "/tmp/complete.sh"
+
+        let record = settings.makeRecord()
+        let restored = AppSettings()
+        restored.apply(record)
+
+        let restoredRule = try #require(restored.downloadRules.first)
+        #expect(restoredRule.name == "Archives")
+        #expect(restoredRule.domains == ["example.com"])
+        #expect(restoredRule.fileExtensions == ["zip"])
+        #expect(restoredRule.headers == [BrowserDownloadHeader(name: "Accept-Language", value: "en-US")])
+        #expect(restored.browserTakeoverAllowedHosts == ["example.com", "example.org"])
+        #expect(restored.browserTakeoverBlockedHosts == ["blocked.example.com"])
+        #expect(restored.launchAtLoginEnabled)
+        #expect(!restored.keepRunningInMenuBar)
+        #expect(!restored.preventSleepDuringDownloads)
+        #expect(!restored.promptBeforeQuittingWithActiveTasks)
+        #expect(restored.completionSoundEnabled)
+        #expect(restored.completionRevealInFinderEnabled)
+        #expect(restored.completionOpenFileEnabled)
+        #expect(restored.completionScriptPath == "/tmp/complete.sh")
+
+        restored.downloadRulesText = "domain=cdn.example.net | ext=dmg | dir=/tmp/DMG | segments=9"
+        restored.browserTakeoverAllowedHostsText = "cdn.example.net\ncdn.example.net"
+        restored.update(record)
+
+        let updated = AppSettings()
+        updated.apply(record)
+        #expect(updated.downloadRules.first?.domains == ["cdn.example.net"])
+        #expect(updated.downloadRules.first?.segmentCount == 9)
+        #expect(updated.browserTakeoverAllowedHosts == ["cdn.example.net"])
     }
 
     @Test("allTasks returns more than the old 500 task cap")
@@ -1056,6 +1119,71 @@ struct DownloadCoordinatorTests {
         #expect(try Data(contentsOf: newFinal) == Data([1, 2, 3]))
         #expect(try Data(contentsOf: newPart) == Data([4, 5]))
         #expect(task.logEntries.contains { $0.contains(L10n.string("log_moved_task_file", newFinal.path)) })
+    }
+
+    @Test("download rules apply save path options and auto start during task creation")
+    func downloadRulesApplyToTaskCreation() throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 2
+        fixture.settings.downloadRules = [
+            DownloadRule(
+                domains: ["example.com"],
+                fileExtensions: ["zip"],
+                saveDirectoryPath: "/tmp/SwiftGetX Rules",
+                segmentCount: 7,
+                retryLimit: 2,
+                autoStart: false,
+                filenameTemplate: "{domain}/{filename}",
+                headers: [BrowserDownloadHeader(name: "Accept-Language", value: "en-US")]
+            )
+        ]
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        let tasks = fixture.coordinator.add(source: "https://cdn.example.com/releases/archive.zip")
+        let task = try #require(tasks.first)
+
+        #expect(task.status == .paused)
+        #expect(task.name == "archive.zip")
+        #expect(task.savePath == "/tmp/SwiftGetX Rules/cdn.example.com/archive.zip")
+        #expect(task.httpOptions?.segmentCountOverride == 7)
+        #expect(task.httpOptions?.retryLimitOverride == 2)
+        #expect(task.httpOptions?.additionalHeaders == [BrowserDownloadHeader(name: "Accept-Language", value: "en-US")])
+    }
+
+    @Test("download rules apply to HTTP metadata previews by size")
+    func downloadRulesApplyToHTTPPreviewsBySize() throws {
+        let fixture = try makeFixture()
+        fixture.settings.downloadRules = [
+            DownloadRule(
+                domains: ["example.com"],
+                fileExtensions: ["zip"],
+                minSizeBytes: 100,
+                saveDirectoryPath: "/tmp/Large",
+                autoStart: false
+            )
+        ]
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+        let preview = TorrentMetadataPreview(
+            source: "https://example.com/archive.zip",
+            kind: .http,
+            displayName: "archive.zip",
+            resolvedTorrentFilePath: nil,
+            files: [],
+            totalBytes: 512,
+            metadataStatus: .available,
+            errorMessage: nil,
+            httpResponseMetadata: HTTPResponseMetadata(contentLength: 512),
+            supportsResume: true,
+            savePath: "/tmp/Fallback/archive.zip",
+            duplicateStrategy: .none,
+            browserContext: nil
+        )
+
+        let task = try #require(fixture.coordinator.add(previews: [preview]).first)
+
+        #expect(task.status == DownloadStatus.paused)
+        #expect(task.savePath == "/tmp/Large/archive.zip")
+        #expect(task.totalBytes == 512)
     }
 
     private func makeFixture() throws -> CoordinatorFixture {

@@ -134,6 +134,11 @@ struct SwiftGetXApp: App {
             return
         }
 
+        if let decision = browserTakeoverPolicyRejection(for: draft) {
+            acknowledgeNativeHandoff(draft, decision: decision)
+            return
+        }
+
         if draft.requiresUserConfirmation
             || (draft.isTrustedNativeHandoff && draft.isBrowserTakeover && appSettings.confirmBrowserTakeoverDownloads)
         {
@@ -152,6 +157,28 @@ struct SwiftGetXApp: App {
                 )
             )
         }
+    }
+
+    private func browserTakeoverPolicyRejection(for draft: DownloadDraft) -> NativeHandoffAckDecision? {
+        guard draft.isTrustedNativeHandoff, draft.isBrowserTakeover else { return nil }
+        let sources = SourceParser.extractSources(from: draft.source)
+        for source in sources where SourceParser.kind(for: source) == .http {
+            switch BrowserTakeoverPolicy.decision(
+                for: source,
+                allowedHosts: appSettings.browserTakeoverAllowedHosts,
+                blockedHosts: appSettings.browserTakeoverBlockedHosts
+            ) {
+            case .allowed:
+                continue
+            case .rejected(let reason):
+                return .rejected(
+                    reason: reason,
+                    requiresUserConfirmation: draft.requiresUserConfirmation || draft.isBrowserTakeover,
+                    message: "SwiftGetX rejected the browser takeover by host policy"
+                )
+            }
+        }
+        return nil
     }
 
     private func acknowledgeNativeHandoff(_ draft: DownloadDraft, decision: NativeHandoffAckDecision) {
@@ -455,6 +482,8 @@ struct BrowserSetupRequest: Equatable {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var menuBarController: MenuBarController?
     private let chromeNativeHostRegistrar = ChromeNativeHostRegistrar()
+    private var coordinator: DownloadCoordinator?
+    private var settings: AppSettings?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationManager.setDelegate(self)
@@ -473,6 +502,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         postDownloadDraft(draft)
     }
 
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        settings?.keepRunningInMenuBar == false
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard settings?.promptBeforeQuittingWithActiveTasks ?? true,
+              let coordinator,
+              coordinator.hasActiveDownloadsForSystemPolicy
+        else {
+            return .terminateNow
+        }
+
+        let alert = NSAlert()
+        alert.messageText = L10n.string("quit_active_downloads_title")
+        alert.informativeText = L10n.string("quit_active_downloads_message")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.string("quit_pause_and_quit"))
+        alert.addButton(withTitle: L10n.string("quit_keep_running"))
+        alert.addButton(withTitle: L10n.string("quit_confirm_quit"))
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            coordinator.pauseActiveTasksForQuit()
+            return .terminateNow
+        case .alertSecondButtonReturn:
+            return .terminateCancel
+        default:
+            return .terminateNow
+        }
+    }
+
     @objc(addDownloadFromService:userData:error:)
     func addDownloadFromService(
         _ pasteboard: NSPasteboard,
@@ -488,6 +548,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @MainActor
     func attachMenuBar(coordinator: DownloadCoordinator, settings: AppSettings) {
+        self.coordinator = coordinator
+        self.settings = settings
         if menuBarController == nil {
             menuBarController = MenuBarController()
         }

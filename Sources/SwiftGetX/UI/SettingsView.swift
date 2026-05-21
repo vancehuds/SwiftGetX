@@ -125,8 +125,19 @@ private struct SettingsSnapshot: Equatable {
     let globalDownloadLimitBytes: Int64
     let globalUploadLimitBytes: Int64
     let completionNotificationsEnabled: Bool
+    let completionSoundEnabled: Bool
+    let completionRevealInFinderEnabled: Bool
+    let completionOpenFileEnabled: Bool
+    let completionScriptPath: String
     let clipboardDetectionEnabled: Bool
     let confirmBrowserTakeoverDownloads: Bool
+    let browserTakeoverAllowedHosts: [String]
+    let browserTakeoverBlockedHosts: [String]
+    let downloadRules: [DownloadRule]
+    let launchAtLoginEnabled: Bool
+    let keepRunningInMenuBar: Bool
+    let preventSleepDuringDownloads: Bool
+    let promptBeforeQuittingWithActiveTasks: Bool
     let downloadRestartPolicy: DownloadRestartPolicy
     let automaticallyRequeuesFailedTasks: Bool
     let queueFailureRetryLimit: Int
@@ -155,8 +166,19 @@ private struct SettingsSnapshot: Equatable {
         globalDownloadLimitBytes = settings.globalDownloadLimitBytes
         globalUploadLimitBytes = settings.globalUploadLimitBytes
         completionNotificationsEnabled = settings.completionNotificationsEnabled
+        completionSoundEnabled = settings.completionSoundEnabled
+        completionRevealInFinderEnabled = settings.completionRevealInFinderEnabled
+        completionOpenFileEnabled = settings.completionOpenFileEnabled
+        completionScriptPath = settings.completionScriptPath
         clipboardDetectionEnabled = settings.clipboardDetectionEnabled
         confirmBrowserTakeoverDownloads = settings.confirmBrowserTakeoverDownloads
+        browserTakeoverAllowedHosts = settings.browserTakeoverAllowedHosts
+        browserTakeoverBlockedHosts = settings.browserTakeoverBlockedHosts
+        downloadRules = settings.downloadRules
+        launchAtLoginEnabled = settings.launchAtLoginEnabled
+        keepRunningInMenuBar = settings.keepRunningInMenuBar
+        preventSleepDuringDownloads = settings.preventSleepDuringDownloads
+        promptBeforeQuittingWithActiveTasks = settings.promptBeforeQuittingWithActiveTasks
         downloadRestartPolicy = settings.downloadRestartPolicy
         automaticallyRequeuesFailedTasks = settings.automaticallyRequeuesFailedTasks
         queueFailureRetryLimit = settings.queueFailureRetryLimit
@@ -255,6 +277,23 @@ private struct DownloadSettingsTab: View {
                     value: $settings.retryLimit,
                     in: 0...10
                 )
+            }
+
+            Section(L10n.string("download_rules_section")) {
+                TextEditor(text: Binding(
+                    get: { settings.downloadRulesText },
+                    set: { settings.downloadRulesText = $0 }
+                ))
+                .frame(minHeight: layout.value(96))
+                .font(.system(.body, design: .monospaced))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+
+                Text(L10n.string("download_rules_help"))
+                    .font(layout.font(11))
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -414,6 +453,24 @@ private struct SystemSettingsTab: View {
                 Toggle(L10n.string("completion_notifications"), isOn: $settings.completionNotificationsEnabled)
                 Toggle(L10n.string("clipboard_link_detection"), isOn: $settings.clipboardDetectionEnabled)
             }
+
+            Section(L10n.string("system_behavior_section")) {
+                Toggle(L10n.string("launch_at_login"), isOn: $settings.launchAtLoginEnabled)
+                Toggle(L10n.string("keep_running_in_menu_bar"), isOn: $settings.keepRunningInMenuBar)
+                Toggle(L10n.string("prevent_sleep_during_downloads"), isOn: $settings.preventSleepDuringDownloads)
+                Toggle(L10n.string("prompt_before_quitting_active"), isOn: $settings.promptBeforeQuittingWithActiveTasks)
+            }
+
+            Section(L10n.string("completion_actions_section")) {
+                Toggle(L10n.string("completion_sound"), isOn: $settings.completionSoundEnabled)
+                Toggle(L10n.string("completion_reveal_in_finder"), isOn: $settings.completionRevealInFinderEnabled)
+                Toggle(L10n.string("completion_open_file"), isOn: $settings.completionOpenFileEnabled)
+                TextField(
+                    L10n.string("completion_script_placeholder"),
+                    text: $settings.completionScriptPath
+                )
+                .textFieldStyle(.roundedBorder)
+            }
         }
         .formStyle(.grouped)
     }
@@ -429,6 +486,42 @@ private struct BrowserIntegrationTab: View {
         Form {
             Section("选项") {
                 Toggle(L10n.string("confirm_browser_takeover_downloads"), isOn: $settings.confirmBrowserTakeoverDownloads)
+            }
+
+            Section(L10n.string("browser_takeover_policy_section")) {
+                VStack(alignment: .leading, spacing: layout.value(5)) {
+                    Text(L10n.string("browser_takeover_allowed_hosts"))
+                        .font(layout.font(11, weight: .semibold))
+                    TextEditor(text: Binding(
+                        get: { settings.browserTakeoverAllowedHostsText },
+                        set: { settings.browserTakeoverAllowedHostsText = $0 }
+                    ))
+                    .frame(height: layout.value(58))
+                    .font(.system(.body, design: .monospaced))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: layout.value(5)) {
+                    Text(L10n.string("browser_takeover_blocked_hosts"))
+                        .font(layout.font(11, weight: .semibold))
+                    TextEditor(text: Binding(
+                        get: { settings.browserTakeoverBlockedHostsText },
+                        set: { settings.browserTakeoverBlockedHostsText = $0 }
+                    ))
+                    .frame(height: layout.value(58))
+                    .font(.system(.body, design: .monospaced))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                }
+
+                Text(L10n.string("browser_takeover_policy_help"))
+                    .font(layout.font(11))
+                    .foregroundStyle(.secondary)
             }
 
             Section(L10n.string("browser_integration_section")) {
