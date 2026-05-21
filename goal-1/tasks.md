@@ -1006,17 +1006,42 @@ Next step:
 
 ## Task 22: Batch Task Management and Categories
 
-Status: [ ]
+Status: [x]
 
 Add multi-select task UI and batch start/pause/delete/recheck/move/limit actions, cleanup completed/failed, categories/tags/smart filters, archive behavior, and clear local-file deletion confirmation.
 
 Work performed:
 
+- Added persistent task metadata for categories, normalized tags, archived state, and generic per-task download/upload speed limits.
+- Added category inference for newly created HTTP, torrent, and preview-created tasks, including software/video/document/BT categories.
+- Added coordinator-owned multi-selection state and batch APIs for resume/start, pause, cancel/retry, recheck, delete, queue moves, queue priority, category, tags, archive/unarchive, cleanup completed/failed/cancelled, and moving selected HTTP/torrent tasks.
+- Extended filtering with smart filters for today, recent 7 days, large files, needs attention, and archived; normal filters now hide archived tasks unless the Archived filter is selected.
+- Updated HTTP and torrent request plumbing so generic per-task speed limits reach HTTP worker throttling and torrent request limits, while preserving HTTP option fallback compatibility.
+- Updated the task list, toolbar, content filtering, and sidebar for multi-select checkboxes, batch action bar, categories/tags sections, smart/archive filters, list cleanup/archive actions, and batch local-file deletion confirmation.
+- Added English and Simplified Chinese localization for the new filters, categories, batch actions, logs, archive controls, and batch deletion messages.
+- Added focused coordinator tests for category/tag/smart/archive filtering, inferred categories, batch selection operations, cleanup, per-task limits, and moving HTTP final/partial data.
+- Committed Task 22 implementation as `a252fed Add batch task management`.
+
 Verification evidence:
+
+- `swift build` passed after rerunning with SwiftPM cache access.
+- `swift test --filter DownloadCoordinator` passed with 30 tests in the `DownloadCoordinator` suite.
+- `swift test` passed with 231 tests across 16 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; linker emitted the existing local OpenSSL deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 234 tests across 17 suites; the same local OpenSSL deployment-target linker warnings were present.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Batch move UI currently exposes a conservative “move to default downloads folder” action rather than an interactive folder picker; the coordinator API supports explicit destination paths for tests and future UI.
+- Category/tag assignment uses built-in category cases and simple preset tag actions in the task list; richer free-form tag editing can be improved in a later inspector/settings UX pass.
+- SwiftUI behavior was build-verified and covered through coordinator tests, but not screenshot-tested in this session.
+- Existing installed SwiftData stores were not migration-tested; new fields have default/optional values intended to keep existing records readable.
+
 Next step:
+
+- Task 23: Drag-and-Drop and System Integration.
 
 ## Task 23: Drag-and-Drop and System Integration
 
