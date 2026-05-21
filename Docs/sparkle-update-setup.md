@@ -50,7 +50,7 @@ dGhlIHB1YmxpYyBrZXkgZ29lcyBoZXJl
 
 | 键 | 说明 | 当前值 |
 |---|---|---|
-| `SUFeedURL` | Appcast 订阅地址 | `https://raw.githubusercontent.com/vancehudson/SwiftGetX/gh-pages/appcast.xml` |
+| `SUFeedURL` | Appcast 订阅地址 | `https://raw.githubusercontent.com/vancehuds/SwiftGetX/gh-pages/appcast.xml` |
 | `SUPublicEDKey` | EdDSA 公钥（用于验证更新签名） | 需替换为你的公钥 |
 | `SUEnableAutomaticChecks` | 是否自动检查更新 | `true`（仅通知，不自动安装） |
 

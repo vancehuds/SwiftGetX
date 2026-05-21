@@ -26,7 +26,7 @@
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 SwiftGetX.</string>
     <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/vancehudson/SwiftGetX/gh-pages/appcast.xml</string>
+    <string>https://raw.githubusercontent.com/vancehuds/SwiftGetX/gh-pages/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>HcyPOd1A9bPy5IVujns0AXTxbzwXTobtNFjesFWNwTY=</string>
     <key>SUEnableAutomaticChecks</key>

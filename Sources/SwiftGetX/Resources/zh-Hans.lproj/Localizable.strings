@@ -298,6 +298,7 @@
 "settings_http_thread_count" = "HTTP 线程数：%d";
 "settings_retry_count" = "失败重试次数：%d";
 "settings_system_section" = "系统";
+"settings_updates_section" = "更新";
 "share_ratio_limit" = "分享率限制";
 "sidebar_tasks" = "任务";
 "source_preview_count" = "已识别 %d 个任务";
@@ -387,4 +388,9 @@
 "torrent_swift_engine_runtime_pending" = "Swift BT 引擎目前仅支持 metadata；Tracker、Peer 和存储任务实现后才会进行实际传输。";
 "unknown" = "未知";
 "upload_speed_limit" = "上传限速";
-
+"updates_automatic_checks" = "自动检查更新";
+"updates_automatic_downloads" = "自动下载更新";
+"updates_current_version" = "当前版本：%@";
+"updates_feed_url" = "更新订阅：%@";
+"updates_last_checked" = "上次检查：%@";
+"updates_last_checked_never" = "上次检查：从未";

@@ -10,6 +10,16 @@ extension ByteCountFormatter {
     }()
 }
 
+extension DateFormatter {
+    @MainActor
+    static let updateCheckFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+}
+
 enum TimeFormatter {
     static func eta(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "--" }

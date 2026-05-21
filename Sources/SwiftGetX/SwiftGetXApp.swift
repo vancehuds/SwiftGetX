@@ -69,7 +69,7 @@ struct SwiftGetXApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView(updater: softwareUpdater)
                 .environment(appSettings)
                 .environment(coordinator)
                 .modelContainer(modelContainer)

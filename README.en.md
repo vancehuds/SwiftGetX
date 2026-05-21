@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/vancehudson/SwiftGetX">
+  <a href="https://github.com/vancehuds/SwiftGetX">
     <img src="Sources/SwiftGetX/Resources/Assets/AppIcon.png" alt="SwiftGetX Logo" width="128" height="128">
   </a>
 </p>
@@ -116,7 +116,7 @@ graph TD
 If you prefer to run pre-built binaries directly without compiling from source, download the pre-packaged assets from the **Releases** page:
 
 ### Step 1: Install the Main Application
-1. Head over to the repository's [Releases](https://github.com/vancehudson/SwiftGetX/releases) page and download the latest `SwiftGetX.dmg`.
+1. Head over to the repository's [Releases](https://github.com/vancehuds/SwiftGetX/releases) page and download the latest `SwiftGetX.dmg`.
 2. Double-click the downloaded `.dmg` file to mount it, and drag **SwiftGetX** into your **Applications** directory.
 3. **⚠️ First-Time Launch Warning (Gatekeeper Bypass)**:
    * Since this is an unnotarized ad-hoc signed open-source prototype app, macOS might block launch on double-click, displaying: *"Cannot be opened because Apple cannot check it for malicious software"* or *"Unverified Developer"*.

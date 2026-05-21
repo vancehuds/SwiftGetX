@@ -68,12 +68,12 @@ cat > "$OUTPUT_DIR/appcast.xml" <<EOF
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
     <channel>
         <title>SwiftGetX Updates</title>
-        <link>https://github.com/vancehudson/SwiftGetX</link>
+        <link>https://github.com/vancehuds/SwiftGetX</link>
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <item>
             <title>Version ${VERSION}</title>
-            <link>https://github.com/vancehudson/SwiftGetX/releases/tag/v${VERSION}</link>
+            <link>https://github.com/vancehuds/SwiftGetX/releases/tag/v${VERSION}</link>
             <sparkle:version>${VERSION}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
             <pubDate>${PUB_DATE}</pubDate>

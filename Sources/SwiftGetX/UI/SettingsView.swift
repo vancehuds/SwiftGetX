@@ -2,10 +2,14 @@ import SwiftData
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject var updater: SoftwareUpdater
     @State private var diagnostics = NativeHostDiagnostics()
 
     var body: some View {
-        SettingsHost(diagnostics: diagnostics)
+        SettingsHost(
+            updater: updater,
+            diagnostics: diagnostics
+        )
     }
 }
 
@@ -14,6 +18,7 @@ private struct SettingsHost: View {
     @Environment(AppSettings.self) private var settings
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var parentLayout
+    @ObservedObject var updater: SoftwareUpdater
     let diagnostics: NativeHostDiagnostics
 
     @State private var activeTab = 0
@@ -57,6 +62,15 @@ private struct SettingsHost: View {
                 Label(L10n.string("browser_integration_section"), systemImage: "safari")
             }
             .tag(3)
+
+            UpdateSettingsTab(
+                updater: updater,
+                layout: parentLayout
+            )
+            .tabItem {
+                Label(L10n.string("settings_updates_section"), systemImage: "arrow.triangle.2.circlepath")
+            }
+            .tag(4)
         }
         .frame(width: parentLayout.value(520), height: parentLayout.value(440))
         .modifier(lifecycleModifier)
@@ -399,6 +413,78 @@ private struct BrowserIntegrationTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Updates Tab
+private struct UpdateSettingsTab: View {
+    @ObservedObject var updater: SoftwareUpdater
+    let layout: ResponsiveLayout
+
+    var body: some View {
+        Form {
+            Section(L10n.string("settings_updates_section")) {
+                VStack(alignment: .leading, spacing: layout.value(10)) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: layout.value(3)) {
+                            Text(L10n.string("updates_current_version", updater.currentVersion))
+                                .font(layout.font(13, weight: .semibold))
+                            Text(lastCheckedText)
+                                .font(layout.font(11.5))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button(L10n.string("command_check_for_updates")) {
+                            updater.checkForUpdates()
+                        }
+                        .disabled(!updater.canCheckForUpdates)
+                    }
+
+                    if let feedURL = updater.feedURL {
+                        Text(L10n.string("updates_feed_url", feedURL.absoluteString))
+                            .font(layout.font(10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(.vertical, layout.value(4))
+            }
+
+            Section {
+                Toggle(
+                    L10n.string("updates_automatic_checks"),
+                    isOn: Binding(
+                        get: { updater.automaticallyChecksForUpdates },
+                        set: { updater.setAutomaticUpdateChecksEnabled($0) }
+                    )
+                )
+
+                Toggle(
+                    L10n.string("updates_automatic_downloads"),
+                    isOn: Binding(
+                        get: { updater.automaticallyDownloadsUpdates },
+                        set: { updater.setAutomaticDownloadsEnabled($0) }
+                    )
+                )
+                .disabled(!updater.allowsAutomaticUpdates)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var lastCheckedText: String {
+        guard let date = updater.lastUpdateCheckDate else {
+            return L10n.string("updates_last_checked_never")
+        }
+
+        return L10n.string(
+            "updates_last_checked",
+            DateFormatter.updateCheckFormatter.string(from: date)
+        )
     }
 }
 

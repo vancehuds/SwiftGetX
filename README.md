@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/vancehudson/SwiftGetX">
+  <a href="https://github.com/vancehuds/SwiftGetX">
     <img src="Sources/SwiftGetX/Resources/Assets/AppIcon.png" alt="SwiftGetX Logo" width="128" height="128">
   </a>
 </p>
@@ -116,7 +116,7 @@ graph TD
 如果您不想本地编译代码，而是想直接从本仓库的 **Releases** 页面下载打包好的成品使用，请按照以下步骤操作：
 
 ### 第一步：安装主程序
-1. 前往本仓库的 [Releases](https://github.com/vancehudson/SwiftGetX/releases) 页面下载最新版的 `SwiftGetX.dmg`。
+1. 前往本仓库的 [Releases](https://github.com/vancehuds/SwiftGetX/releases) 页面下载最新版的 `SwiftGetX.dmg`。
 2. 双击打开 `.dmg` 挂载卷，将 **SwiftGetX** 拖入您的 **Applications (应用程序)** 文件夹中。
 3. **⚠️ 首次启动安全提示 (Gatekeeper 绕过)**：
    * 由于本应用是未公证的 Ad-hoc 签名开源原型，首次启动双击运行时，macOS 系统可能会拦截并提示：*“无法打开，因为 Apple 无法检查其是否包含恶意软件”* 或 *“来自未验证的开发者”*。

@@ -50,7 +50,7 @@ jobs:
           Scripts/generate-appcast.sh \
             dist/SwiftGetX.dmg \
             "${GITHUB_REF_NAME#v}" \
-            "https://github.com/vancehudson/SwiftGetX/releases/download/${GITHUB_REF_NAME}/SwiftGetX.dmg"
+            "https://github.com/vancehuds/SwiftGetX/releases/download/${GITHUB_REF_NAME}/SwiftGetX.dmg"
 
       - name: Publish appcast to gh-pages branch
         run: |

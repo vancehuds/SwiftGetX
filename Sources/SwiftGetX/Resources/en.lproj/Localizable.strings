@@ -298,6 +298,7 @@
 "settings_http_thread_count" = "HTTP thread count: %d";
 "settings_retry_count" = "Failed retry count: %d";
 "settings_system_section" = "System";
+"settings_updates_section" = "Updates";
 "share_ratio_limit" = "Share ratio limit";
 "sidebar_tasks" = "Tasks";
 "source_preview_count" = "%d tasks identified";
@@ -387,4 +388,9 @@
 "torrent_swift_engine_runtime_pending" = "Swift torrent engine is metadata-only until tracker, peer, and storage tasks are implemented.";
 "unknown" = "Unknown";
 "upload_speed_limit" = "Upload Speed Limit";
-
+"updates_automatic_checks" = "Automatically check for updates";
+"updates_automatic_downloads" = "Download updates automatically";
+"updates_current_version" = "Current version: %@";
+"updates_feed_url" = "Update feed: %@";
+"updates_last_checked" = "Last checked: %@";
+"updates_last_checked_never" = "Last checked: Never";
