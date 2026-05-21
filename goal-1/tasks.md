@@ -1375,17 +1375,51 @@ Next step:
 
 ## Task 29: Extension Distribution, Version Compatibility, and Licenses
 
-Status: [ ]
+Status: [x]
 
 Add extension/app/native-host version compatibility checks, Chrome extension release packaging path, installation guidance, fixed-ID strategy documentation, dependency/license acknowledgements, and optional libtorrent dependency cleanup guidance.
 
 Work performed:
 
+- Added shared browser integration compatibility metadata in `SwiftGetXCore`, including browser protocol version, native-host version, minimum extension version, minimum native-host version, and semver-style compatibility checks.
+- Extended native messaging models, `SwiftGetXNativeHost`, the Chrome extension background/popup scripts, and app browser-setup deep-link handling so extension/native-host/app compatibility is checked before download handoff or extension pairing.
+- Added visible extension/native-host incompatibility errors in the Chrome popup and app pairing rejection alerts, plus localized English and Simplified Chinese strings.
+- Updated Chrome extension packaging to write `SwiftGetX-Chrome.release.json`, write the computed extension ID, require stable key plus expected ID in strict release mode, and fail before writing a CRX when the computed fixed ID does not match.
+- Updated CI/release gates so release workflows require `CHROME_EXTENSION_ID`, run Chrome extension packaging in strict mode, upload release metadata, and no longer install Homebrew/CMake/Boost/OpenSSL for ordinary app packaging.
+- Changed DMG packaging so optional libtorrent is built only when `SWIFTGETX_ENABLE_LIBTORRENT=1`, and bundled `Acknowledgements.md` into SwiftPM resources and packaged app resources.
+- Added `Docs/ChromeExtensionDistribution.md`, `Docs/Acknowledgements.md`, packaged acknowledgement text, browser integration docs, release/Sparkle docs, README cleanup, and torrent docs clarifying fixed-ID distribution, Chrome Web Store path, compatibility matrix, license acknowledgements, and optional libtorrent dependency boundaries.
+- Added tests for compatibility message fields, browser setup compatibility metadata parsing, release packaging/fixed-ID script behavior, workflow release metadata, bundled acknowledgements, and release/dependency documentation.
+- Committed Task 29 implementation as `c4a9274 Add extension distribution compatibility gates`.
+
 Verification evidence:
+
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/popup.js` passed.
+- `node --check Scripts/make-crx.mjs` passed.
+- `bash -n Scripts/package-chrome-extension.sh Scripts/package-dmg.sh Scripts/validate-release.sh Scripts/local-build.sh` passed.
+- Chrome extension `manifest.json` plus English and Simplified Chinese locale JSON parsed successfully with Node.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings Sources/SwiftGetX/Resources/AppInfo.plist` passed.
+- `Scripts/validate-release.sh sparkle` passed.
+- `Scripts/package-chrome-extension.sh Sources/SwiftGetX/Resources/ChromeExtension /private/tmp/swiftgetx-chrome-test-2` passed and wrote ZIP, CRX, ID, and `SwiftGetX-Chrome.release.json`.
+- Strict CRX mismatch smoke check with `SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` exited before writing the mismatched CRX.
+- `swift test --filter NativeMessageHost --filter ReleaseValidation --filter AppResources` passed with 52 tests across 3 suites after rerunning with approved SwiftPM cache access.
+- `swift build` passed.
+- `swift test` passed with 278 tests across 21 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed; the existing local Homebrew OpenSSL deployment-target linker warnings were still present.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 281 tests across 22 suites; the same existing OpenSSL deployment-target warnings appeared during linking.
+- `git diff --check` passed.
+- Static stale-wording audit found no remaining ordinary-release wording that described libtorrent/fallback as the default path in README/docs/package messaging.
 
 Remaining risk:
 
+- Real Chrome Web Store publication was not exercised because this workspace does not have Web Store credentials; the repository now documents the manual path and produces uploadable release ZIP/metadata artifacts.
+- The fixed extension ID depends on the external `CHROME_EXTENSION_KEY_BASE64` and `CHROME_EXTENSION_ID` secrets matching in GitHub; local validation proves the scripts fail on mismatches, but cannot prove secret contents.
+- End-to-end extension/native-host compatibility behavior was verified through JavaScript syntax/static checks, Swift message/deep-link tests, and packaging smoke tests, not through an installed Chrome profile automation run.
+- Optional libtorrent verification still depends on the local native archive and Homebrew OpenSSL libraries, which continue to emit deployment-target linker warnings in this environment.
+
 Next step:
+
+- Task 30: Test, Diagnostics, and Support Tooling.
 
 ## Task 30: Test, Diagnostics, and Support Tooling
 
