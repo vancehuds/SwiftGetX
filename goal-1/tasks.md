@@ -1085,17 +1085,45 @@ Next step:
 
 ## Task 24: Inspector, Logs, Accessibility, and Localization
 
-Status: [ ]
+Status: [x]
 
 Add HTTP segment details, average/peak speed, start/finish/duration metadata, log clear/export/copy actions, direct error-card actions, VoiceOver labels, keyboard shortcuts, reduced-transparency handling, and hard-coded string cleanup.
 
 Work performed:
 
+- Added persisted transfer metrics to `DownloadTask`: start/finish timestamps, active duration, average speed, peak speed, and JSON-backed HTTP segment details.
+- Extended HTTP snapshots to report single-stream and segmented transfer details, including segment ranges, downloaded bytes, speeds, and retry counts.
+- Updated `DownloadCoordinator` to maintain timing metrics, persist segment snapshots, copy/export/clear logs, and finish terminal task timing consistently.
+- Expanded the inspector with an HTTP Segments tab, average/peak speed and timing rows, direct error-card actions for copy/retry/reprobe, and log copy/export/clear controls.
+- Added keyboard commands for selected-task start/pause, retry, verify, delete, and search focus.
+- Added VoiceOver labels/help for toolbar controls, inspector log buttons, task-row icon controls, and tracker removal.
+- Improved reduced-transparency fallbacks for drop overlay and task-row hover controls, building on the existing glass-surface fallbacks.
+- Localized new inspector, metrics, log, command, HTTP segment, and torrent-detail strings in English and Simplified Chinese.
+- Localized the libtorrent connection summary string.
+- Added regression tests for coordinator metrics/log export/clear, HTTP segment snapshots, and per-segment progress tracking.
+- Committed Task 24 implementation as `735f991 Add inspector metrics and log controls`.
+
 Verification evidence:
+
+- `swift build` passed.
+- `swift test --filter DownloadCoordinator --filter SegmentPlan --filter HTTPDownloadEngine` passed with 77 tests across 3 suites.
+- `swift test` passed with 242 tests across 17 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; linker emitted the existing local OpenSSL deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 245 tests across 18 suites; the same local OpenSSL deployment-target linker warnings were present.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static reduced-transparency audit confirmed remaining direct material fills in UI code are behind `accessibilityReduceTransparency` branches or existing reduced-transparency helper surfaces.
 
 Remaining risk:
 
+- SwiftUI inspector, keyboard, VoiceOver, and reduced-transparency behavior was compile/static verified and covered by model/engine/coordinator tests, but not screenshot-tested or manually exercised in a running app.
+- Average speed is derived from persisted downloaded bytes over the recorded active interval and may differ from a moving-window speed display after long pauses or resumes.
+- Log export writes beside the task save path by default; sandboxed packaged builds may still require future user-selected export destinations.
+- Optional libtorrent verification depends on the local native archive and Homebrew OpenSSL libraries, which continue to emit deployment-target linker warnings.
+
 Next step:
+
+- Large Check 8: Main UI and Accessibility.
 
 ## Large Check 8: Main UI and Accessibility
 
