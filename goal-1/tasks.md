@@ -1127,17 +1127,42 @@ Next step:
 
 ## Large Check 8: Main UI and Accessibility
 
-Status: [ ]
+Status: [x]
 
 Review Tasks 22-24 for UX regressions, layout, localization, keyboard/VoiceOver coverage, data performance, and tests/build status.
 
 Work performed:
 
+- Audited Tasks 22-24 against `Docs/FunctionalImprovementOpportunities.md` sections 4.1-4.6 and 8.4, covering batch selection/actions, categories/tags/archive filters, drag/drop and system integration, Dock/menu-bar progress, inspector HTTP segment/log/error controls, keyboard paths, VoiceOver labels, reduced-transparency handling, localization cleanup, and large-list fetch behavior.
+- Confirmed core batch/category/archive behavior is covered by coordinator tests, including multi-select pause/resume/recheck/archive/remove, cleanup completed/failed, category/tag/smart/archive filtering, per-task limits, HTTP data moves, and task lists beyond the old 500-task cap.
+- Confirmed drag/drop/system integration is covered by input collector, app resource, and menu-bar snapshot tests, and by `Docs/SystemIntegrationPlan.md` documenting the remaining signed Share Extension boundary.
+- Confirmed inspector segment/log metrics are covered by HTTP engine, segment progress, and coordinator snapshot/log-export tests.
+- Found the selected-task keyboard command set lacked a Reveal-in-Finder path. Added `DownloadCoordinator.revealSelectedInFinder()`, wired `Command-Option-O`, and localized the new command label.
+- Found remaining icon-only batch action bar controls and several inspector torrent file/tracker controls lacked explicit VoiceOver labels/help. Added accessibility labels/help for those controls.
+- Found batch/context tag presets still used hard-coded English strings. Localized the preset tag labels in English and Simplified Chinese.
+- Committed Large Check 8 fixes as `80055f8 Tighten main UI accessibility checks`.
+
 Verification evidence:
+
+- `swift build` passed after rerunning with SwiftPM cache access.
+- Focused Large Check 8 tests passed: `swift test --filter DownloadCoordinator --filter DownloadInputSourceCollector --filter MenuBarSnapshot --filter AppResources --filter HTTPDownloadEngine --filter SegmentPlan` with 95 tests across 6 suites.
+- `swift test` passed with 242 tests across 17 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; linker emitted the existing local OpenSSL deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 245 tests across 18 suites; the same local OpenSSL deployment-target linker warnings were present.
+- `plutil -lint Sources/SwiftGetX/Resources/AppInfo.plist Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static hard-coded UI string scan found only intentional product/unit/acronym labels such as `SwiftGetX`, `BT`, and `1 MB/s`/`5 MB/s`/`10 MB/s` after localizing tag presets.
 
 Remaining risk:
 
+- SwiftUI layout, VoiceOver, keyboard, Dock tile drawing, drag/drop, and Services behavior were verified by compile/static inspection and model/resource tests, but not screenshot-tested or manually exercised in a packaged running app.
+- Finder Open With, Dock file-open, and Services registration still depend on packaged app metadata and Launch Services refresh; `Docs/SystemIntegrationPlan.md` keeps the signed Share Extension path documented for later work.
+- Main-window `@Query` still feeds the visible task list in memory; coordinator all-task fetches no longer use the old 500-task cap, but true paged/lazy task-list rendering remains later large-scale performance work.
+- Optional libtorrent verification depends on the local native archive and Homebrew OpenSSL libraries, which continue to emit deployment-target linker warnings.
+
 Next step:
+
+- Task 25: Download Rules and System Behavior Settings.
 
 ## Task 25: Download Rules and System Behavior Settings
 
