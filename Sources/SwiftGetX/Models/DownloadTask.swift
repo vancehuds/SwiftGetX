@@ -1103,6 +1103,12 @@ enum TorrentSeedingLimitMode: String, Codable, CaseIterable, Identifiable, Senda
 }
 
 struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
+    static let defaultDHTBootstrapNodes = [
+        "router.bittorrent.com:6881",
+        "dht.transmissionbt.com:6881",
+        "router.utorrent.com:6881"
+    ]
+
     var engine: TorrentEngineKind
     var isDHTEnabled: Bool
     var isPEXEnabled: Bool
@@ -1114,6 +1120,7 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
     var seedingLimitMode: TorrentSeedingLimitMode
     var stopSeedingAtRatio: Double
     var stopSeedingAfterSeconds: TimeInterval
+    var dhtBootstrapNodes: [String]
 
     private enum CodingKeys: String, CodingKey {
         case engine
@@ -1127,6 +1134,7 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         case seedingLimitMode
         case stopSeedingAtRatio
         case stopSeedingAfterSeconds
+        case dhtBootstrapNodes
     }
 
     init(
@@ -1140,7 +1148,8 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         maxUploadSlots: Int = 8,
         seedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio,
         stopSeedingAtRatio: Double = 1.0,
-        stopSeedingAfterSeconds: TimeInterval = 3600
+        stopSeedingAfterSeconds: TimeInterval = 3600,
+        dhtBootstrapNodes: [String] = TorrentRuntimeOptions.defaultDHTBootstrapNodes
     ) {
         self.engine = engine
         self.isDHTEnabled = isDHTEnabled
@@ -1153,6 +1162,7 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         self.seedingLimitMode = seedingLimitMode
         self.stopSeedingAtRatio = max(0, stopSeedingAtRatio)
         self.stopSeedingAfterSeconds = max(0, stopSeedingAfterSeconds)
+        self.dhtBootstrapNodes = Self.normalizedBootstrapNodes(dhtBootstrapNodes)
     }
 
     init(from decoder: Decoder) throws {
@@ -1168,7 +1178,9 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
             maxUploadSlots: try container.decodeIfPresent(Int.self, forKey: .maxUploadSlots) ?? 8,
             seedingLimitMode: try container.decodeIfPresent(TorrentSeedingLimitMode.self, forKey: .seedingLimitMode) ?? .stopAtRatio,
             stopSeedingAtRatio: try container.decodeIfPresent(Double.self, forKey: .stopSeedingAtRatio) ?? 1.0,
-            stopSeedingAfterSeconds: try container.decodeIfPresent(TimeInterval.self, forKey: .stopSeedingAfterSeconds) ?? 3600
+            stopSeedingAfterSeconds: try container.decodeIfPresent(TimeInterval.self, forKey: .stopSeedingAfterSeconds) ?? 3600,
+            dhtBootstrapNodes: try container.decodeIfPresent([String].self, forKey: .dhtBootstrapNodes)
+                ?? Self.defaultDHTBootstrapNodes
         )
     }
 
@@ -1201,6 +1213,14 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         case .neverStop:
             TorrentSeedingLimitMode.neverStop.title
         }
+    }
+
+    private static func normalizedBootstrapNodes(_ nodes: [String]) -> [String] {
+        var seen = Set<String>()
+        return nodes
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
     }
 }
 

@@ -37,7 +37,7 @@ final class AppSettings {
     var torrentMaxUploadSlots = 8
     var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
     var torrentEngine: TorrentEngineKind = .swift
-    var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
+    var torrentDHTBootstrapNodes: [String] = TorrentRuntimeOptions.defaultDHTBootstrapNodes
     var language: AppLanguage = .system {
         didSet {
             userDefaults.set(language.rawValue, forKey: Self.languageUserDefaultsKey)
@@ -153,7 +153,8 @@ final class AppSettings {
             maxUploadSlots: torrentMaxUploadSlots,
             seedingLimitMode: torrentSeedingLimitMode,
             stopSeedingAtRatio: stopSeedingAtRatio,
-            stopSeedingAfterSeconds: stopSeedingAfterSeconds
+            stopSeedingAfterSeconds: stopSeedingAfterSeconds,
+            dhtBootstrapNodes: torrentDHTBootstrapNodes
         )
     }
 }
@@ -243,7 +244,7 @@ final class AppSettingsRecord {
     var torrentMaxUploadSlots: Int = 8
     var torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
     var torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue
-    var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
+    var torrentDHTBootstrapNodes: [String] = TorrentRuntimeOptions.defaultDHTBootstrapNodes
     var languageRawValue: String = AppLanguage.system.rawValue
 
 
@@ -274,7 +275,7 @@ final class AppSettingsRecord {
         torrentMaxUploadSlots: Int = 8,
         torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue,
         torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue,
-        torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"],
+        torrentDHTBootstrapNodes: [String] = TorrentRuntimeOptions.defaultDHTBootstrapNodes,
         languageRawValue: String = AppLanguage.system.rawValue
     ) {
         self.id = id

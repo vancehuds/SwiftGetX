@@ -141,6 +141,7 @@ private struct SettingsSnapshot: Equatable {
     let torrentMaxUploadSlots: Int
     let torrentSeedingLimitMode: TorrentSeedingLimitMode
     let torrentEngine: TorrentEngineKind
+    let torrentDHTBootstrapNodes: [String]
     let language: AppLanguage
 
     @MainActor
@@ -170,6 +171,7 @@ private struct SettingsSnapshot: Equatable {
         torrentMaxUploadSlots = settings.torrentMaxUploadSlots
         torrentSeedingLimitMode = settings.torrentSeedingLimitMode
         torrentEngine = settings.torrentEngine
+        torrentDHTBootstrapNodes = settings.torrentDHTBootstrapNodes
         language = settings.language
     }
 }

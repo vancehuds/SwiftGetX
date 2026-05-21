@@ -727,10 +727,9 @@ final class DownloadCoordinator {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.isValidTrackerURL(trimmed) else { return }
         var trackers = task.torrentTrackers
-        if !trackers.contains(where: { $0.url == trimmed }) {
-            trackers.append(TorrentTrackerInfo(url: trimmed, tier: 0, status: L10n.string("torrent_tracker_waiting")))
-            task.torrentTrackers = trackers
-        }
+        guard !trackers.contains(where: { $0.url == trimmed }) else { return }
+        trackers.append(TorrentTrackerInfo(url: trimmed, tier: 0, status: L10n.string("torrent_tracker_waiting")))
+        task.torrentTrackers = trackers
         task.appendLog(L10n.string("log_added_tracker", trimmed))
         let request = DownloadRequest(task: task)
         save()
@@ -767,6 +766,7 @@ final class DownloadCoordinator {
 
     func removeTorrentTracker(_ task: DownloadTask, url: String) {
         guard task.kind == .torrentMagnet || task.kind == .torrentFile else { return }
+        guard task.torrentTrackers.contains(where: { $0.url == url }) else { return }
         task.torrentTrackers = task.torrentTrackers.filter { $0.url != url }
         task.appendLog(L10n.string("log_removed_tracker", url))
         let request = DownloadRequest(task: task)
@@ -832,12 +832,10 @@ final class DownloadCoordinator {
         save()
 
         guard runsEngines else { return }
-        if wasActive {
-            Task {
+        Task {
+            if wasActive {
                 await engine(for: oldRequest.kind).pause(oldRequest)
             }
-        }
-        Task {
             await engine(for: request.kind).recheck(request)
         }
     }

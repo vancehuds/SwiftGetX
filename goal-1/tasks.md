@@ -969,17 +969,40 @@ Next step:
 
 ## Large Check 7: Advanced Torrent UX
 
-Status: [ ]
+Status: [~]
 
 Review Tasks 19-21 for correctness, feature gating, UI consistency, migration needs, and optional libtorrent parity.
 
 Work performed:
 
+- Audited Tasks 19-21 against the advanced torrent plan areas covering DHT/PEX/LSD source gating and statistics, seeding policy behavior, file priority controls, recheck/relocation, tracker operations, settings persistence, UI consistency, and optional libtorrent parity.
+- Found that global DHT bootstrap node settings were persisted and editable but were not part of per-task `TorrentRuntimeOptions`, so the Swift adapter could still use its own hardcoded bootstrap list. Moved the default node list into `TorrentRuntimeOptions`, persisted runtime bootstrap nodes through `AppSettings`, included them in settings snapshot change detection, and made the Swift adapter parse and use runtime bootstrap nodes unless tests inject nodes directly.
+- Found that duplicate single-tracker adds and missing single-tracker removes logged and forwarded no-op engine updates. Updated those operations to return without mutating, logging, or forwarding when no tracker actually changes.
+- Found that torrent relocation paused active tasks and rechecked in separate asynchronous tasks, so recheck could race before pause. Sequenced active pause and recheck in one task.
+- Added regression coverage for DHT bootstrap settings reaching Swift adapter discovery, DHT bootstrap persistence normalization, single-tracker no-op behavior, and the existing relocation/recheck path.
+
 Verification evidence:
+
+- `swift test --filter DownloadCoordinator --filter TorrentDownloadEngine --filter SwiftGetXTorrentCore --filter TorrentFile` passed with 92 tests across 5 suites after rerunning with SwiftPM cache access.
+- `swift build` passed.
+- `swift test` passed with 225 tests across 16 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static core isolation audit with `rg -n "import (SwiftUI|SwiftData|AppKit)|CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore` found no matches.
+- Static libtorrent boundary audit with `rg -n "CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore Sources/SwiftGetX/Services/TorrentDownloadEngine.swift Package.swift` found no matches in `Sources/SwiftGetXTorrentCore`; remaining references are limited to the optional `Package.swift` gate and `Sources/SwiftGetX/Services/TorrentDownloadEngine.swift` app adapter boundary.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; linker emitted the existing local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 228 tests across 17 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
+- Real public swarm, trackerless magnet, and manual UI screenshot validation were not run; verification remained deterministic with local mocks, static inspection, builds, and tests.
+- Live Swift priority changes still apply between pieces rather than cancelling an in-flight piece immediately.
+- Relocation conflict handling remains conservative: it moves exact known content paths only when the destination does not already exist, then rechecks.
+- Optional libtorrent verification depends on the local native archive and Homebrew OpenSSL libraries, and currently emits local deployment-target linker warnings.
+
 Next step:
+
+- Commit the Large Check 7 code/test fixes before marking this check complete.
 
 ## Task 22: Batch Task Management and Categories
 

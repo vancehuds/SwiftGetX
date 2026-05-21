@@ -69,18 +69,27 @@ struct DownloadCoordinatorTests {
     func torrentEngineSettingPersistsThroughAppSettingsRecords() {
         let settings = AppSettings()
         settings.torrentEngine = .libtorrent
+        settings.torrentDHTBootstrapNodes = [
+            "127.0.0.1:6881",
+            " dht.example:6882 ",
+            "127.0.0.1:6881"
+        ]
 
         let record = settings.makeRecord()
         #expect(record.torrentEngineRawValue == TorrentEngineKind.libtorrent.rawValue)
+        #expect(record.torrentDHTBootstrapNodes == settings.torrentDHTBootstrapNodes)
 
         let restored = AppSettings()
         restored.apply(record)
         #expect(restored.torrentEngine == .libtorrent)
         #expect(restored.torrentRuntimeOptions.engine == .libtorrent)
+        #expect(restored.torrentRuntimeOptions.dhtBootstrapNodes == ["127.0.0.1:6881", "dht.example:6882"])
 
         restored.torrentEngine = .swift
+        restored.torrentDHTBootstrapNodes = ["dht2.example:6883"]
         restored.update(record)
         #expect(record.torrentEngineRawValue == TorrentEngineKind.swift.rawValue)
+        #expect(record.torrentDHTBootstrapNodes == ["dht2.example:6883"])
     }
 
     @Test("allTasks returns more than the old 500 task cap")
@@ -610,6 +619,30 @@ struct DownloadCoordinatorTests {
 
         #expect(task.torrentTrackers.map(\.url) == ["http://tracker.example/announce"])
         #expect(task.logEntries.contains { $0.contains(L10n.string("log_removed_trackers", 2)) })
+    }
+
+    @Test("single tracker operations ignore duplicate add and missing remove")
+    func singleTrackerOperationsIgnoreDuplicateAddAndMissingRemove() throws {
+        let fixture = try makeFixture()
+        let task = DownloadTask(
+            name: "Magnet",
+            source: "magnet:?xt=urn:btih:abcdef",
+            kind: .torrentMagnet,
+            savePath: "/tmp/Magnet"
+        )
+        task.torrentTrackers = [
+            TorrentTrackerInfo(url: "udp://tracker.example:80", tier: 0, status: "working")
+        ]
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+        let initialLogCount = task.logEntries.count
+
+        fixture.coordinator.addTorrentTracker(task, url: "udp://tracker.example:80")
+        fixture.coordinator.removeTorrentTracker(task, url: "https://missing.example/announce")
+
+        #expect(task.torrentTrackers.map(\.url) == ["udp://tracker.example:80"])
+        #expect(task.logEntries.count == initialLogCount)
     }
 
     @Test("relocating torrent updates paths and moves exact known content")

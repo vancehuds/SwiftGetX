@@ -1436,6 +1436,64 @@ struct TorrentDownloadEngineTests {
         #expect(last.torrentConnection?.peerCount == 3)
     }
 
+    @Test("Swift adapter uses runtime DHT bootstrap nodes from settings")
+    func swiftAdapterUsesRuntimeDHTBootstrapNodes() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        try Self.singleFileTorrentData(
+            name: "payload.bin",
+            length: 42,
+            announce: nil
+        ).write(to: torrentURL)
+
+        let dhtTransport = AppMockDHTTransport()
+        await dhtTransport.setResponses(
+            nodes: [],
+            peers: [TorrentPeerEndpoint(host: "192.168.1.5", port: 6889)]
+        )
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { _ in
+                throw TorrentPeerWireError.transport("peer transport is not exercised by this discovery test")
+            },
+            dhtTransport: dhtTransport
+        )
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: nil,
+            runtimeOptions: TorrentRuntimeOptions(
+                engine: .swift,
+                isDHTEnabled: true,
+                isPEXEnabled: false,
+                isLSDEnabled: false,
+                dhtBootstrapNodes: ["127.0.0.1:6881", "udp://127.0.0.2:6882", "invalid:"]
+            ),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { _ in }
+
+        let queriedAddresses = await dhtTransport.queriedAddresses()
+        #expect(queriedAddresses.contains("127.0.0.1:6881"))
+        #expect(queriedAddresses.contains("127.0.0.2:6882"))
+        #expect(!queriedAddresses.contains("invalid:0"))
+    }
+
     @Test("Swift adapter respects DHT/PEX/LSD settings toggles and completely gates private torrents")
     func swiftAdapterDiscoveryGatingAndPrivateTorrents() async throws {
         let directory = try Self.makeTemporaryDirectory()
@@ -1884,6 +1942,7 @@ private actor AppMockHTTPTrackerTransport: TorrentHTTPTrackerTransport {
 private actor AppMockDHTTransport: TorrentDHTTransport {
     private var responsePeers = [TorrentPeerEndpoint]()
     private var responseNodes = [TorrentDHTNode]()
+    private var queriedNodeAddresses = [String]()
     private var token = Data([0xaa, 0xbb])
     var onSend: (@Sendable () -> Void)?
 
@@ -1896,7 +1955,12 @@ private actor AppMockDHTTransport: TorrentDHTTransport {
         self.responsePeers = peers
     }
 
+    func queriedAddresses() -> [String] {
+        queriedNodeAddresses
+    }
+
     func send(_ data: Data, to node: TorrentDHTNode, timeout: Duration) async throws -> Data {
+        queriedNodeAddresses.append(node.address)
         onSend?()
         guard let value = try? BencodeParser(data: data).parse(),
               case .dictionary(let dict) = value,

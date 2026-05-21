@@ -314,7 +314,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     private let trackerClient: TorrentTrackerClient
     private let peerTransportFactory: PeerTransportFactory
     private let dhtTransport: (any TorrentDHTTransport)?
-    private let dhtBootstrapNodes: [TorrentDHTNode]
+    private let injectedDHTBootstrapNodes: [TorrentDHTNode]?
     private let dhtNodeStoreURL: URL?
     private let peerExchangeProvider: PeerDiscoveryProvider
     private let localServiceDiscoveryProvider: PeerDiscoveryProvider
@@ -330,7 +330,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             try TorrentPeerWireTCPTransport(endpoint: endpoint, timeoutSeconds: 10)
         },
         dhtTransport: (any TorrentDHTTransport)? = SwiftTorrentEngineAdapter.defaultDHTTransport(),
-        dhtBootstrapNodes: [TorrentDHTNode] = SwiftTorrentEngineAdapter.defaultDHTBootstrapNodes,
+        dhtBootstrapNodes: [TorrentDHTNode]? = nil,
         dhtNodeStoreURL: URL? = nil,
         peerExchangeProvider: @escaping PeerDiscoveryProvider = { _, _ in [] },
         localServiceDiscoveryProvider: @escaping PeerDiscoveryProvider = { _, _ in [] }
@@ -338,18 +338,10 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         self.trackerClient = trackerClient
         self.peerTransportFactory = peerTransportFactory
         self.dhtTransport = dhtTransport
-        self.dhtBootstrapNodes = dhtBootstrapNodes
+        self.injectedDHTBootstrapNodes = dhtBootstrapNodes
         self.dhtNodeStoreURL = dhtNodeStoreURL
         self.peerExchangeProvider = peerExchangeProvider
         self.localServiceDiscoveryProvider = localServiceDiscoveryProvider
-    }
-
-    private static var defaultDHTBootstrapNodes: [TorrentDHTNode] {
-        [
-            try? TorrentDHTNode(host: "router.bittorrent.com", port: 6_881),
-            try? TorrentDHTNode(host: "dht.transmissionbt.com", port: 6_881),
-            try? TorrentDHTNode(host: "router.utorrent.com", port: 6_881)
-        ].compactMap { $0 }
     }
 
     private static func defaultDHTTransport() -> (any TorrentDHTTransport)? {
@@ -784,7 +776,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         if options.isDHTEnabled, let dhtTransport {
             let storeURL = dhtNodeStoreURL(for: request)
             let persistedNodes = storeURL.flatMap { try? TorrentDHTNodeStore(url: $0).load() } ?? []
-            let bootstrapNodes = persistedNodes + dhtBootstrapNodes
+            let bootstrapNodes = persistedNodes + dhtBootstrapNodes(for: request)
             if !bootstrapNodes.isEmpty {
                 do {
                     let client = try TorrentDHTClient(
@@ -844,6 +836,41 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         return URL(fileURLWithPath: resumeDataPath)
             .deletingPathExtension()
             .appendingPathExtension("dht-nodes.json")
+    }
+
+    private func dhtBootstrapNodes(for request: TorrentStartRequest) -> [TorrentDHTNode] {
+        if let injectedDHTBootstrapNodes {
+            return injectedDHTBootstrapNodes
+        }
+        return request.runtimeOptions.dhtBootstrapNodes.compactMap(Self.dhtBootstrapNode)
+    }
+
+    private static func dhtBootstrapNode(from rawValue: String) -> TorrentDHTNode? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let host: String
+        let port: Int
+        if let url = URL(string: trimmed),
+           let urlHost = url.host,
+           let urlPort = url.port
+        {
+            host = urlHost
+            port = urlPort
+        } else if let separator = trimmed.lastIndex(of: ":") {
+            host = String(trimmed[..<separator])
+            port = Int(trimmed[trimmed.index(after: separator)...]) ?? 0
+        } else {
+            host = trimmed
+            port = 6_881
+        }
+
+        guard let node = try? TorrentDHTNode(host: host, port: port),
+              node.isUsable
+        else {
+            return nil
+        }
+        return node
     }
 
     private func effectiveRuntimeOptions(
