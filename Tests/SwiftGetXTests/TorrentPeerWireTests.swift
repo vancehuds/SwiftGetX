@@ -71,6 +71,22 @@ struct TorrentPeerWireTests {
             pieceCount: 2,
             completedPieceIndexes: [0, 1]
         ) == nil)
+        #expect(try TorrentPieceSelector.orderedPieceIndexes(
+            pieceCount: 4,
+            completedPieceIndexes: [0],
+            availability: [1: 3, 2: 1, 3: 2],
+            mode: .sequential
+        ) == [1, 2, 3])
+        #expect(TorrentPieceSelector.isEndgame(
+            pieceCount: 4,
+            completedPieceIndexes: [0, 1],
+            activePeerCount: 2
+        ))
+        #expect(!TorrentPieceSelector.isEndgame(
+            pieceCount: 4,
+            completedPieceIndexes: [0],
+            activePeerCount: 2
+        ))
     }
 
     @Test("writes single-file torrent content")

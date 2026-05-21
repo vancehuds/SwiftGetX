@@ -729,17 +729,42 @@ Next step:
 
 ## Task 17: Real Swarm MVP and Runtime Snapshots
 
-Status: [ ]
+Status: [x]
 
 Implement multi-peer connection pooling, rarest-first and endgame behavior, peer scoring, global/per-task speed limits, tracker completed/stopped events, and `DownloadSnapshot` mapping for files, peers, trackers, health, speed, ETA, and runtime options.
 
 Work performed:
 
+- Extended the Swift torrent adapter from the single-peer MVP into a bounded peer pool keyed by tracker endpoint, with duplicate endpoint filtering, per-peer session reuse, failure removal, pause/cancel/remove cleanup, and tracker `stopped` announces.
+- Added peer runtime scoring for successful pieces, timeouts, bad pieces, and protocol errors, so the adapter retries lower-scored peers and surfaces peer flags/rates in snapshots.
+- Added rarest-first/sequential piece ordering and endgame-state detection in `SwiftGetXTorrentCore`, while preserving sequential mode when requested by runtime options.
+- Added global/per-task torrent speed-limit handling for download throttling/snapshot capping and upload-limit snapshot mapping.
+- Added tracker `completed` announces after successful data completion, while keeping the final Swift adapter status at `completed`; seeding state/policies remain Task 20 scope.
+- Expanded torrent snapshot mapping for file progress, peer rows, tracker rows, connection counts, health fields, runtime options, distributed copies, speed, ETA, upload slots, and resume-state save status.
+- Added deterministic mock tracker/peer tests for single-file completion, multi-file small-piece writes, bad-peer retry/scoring, runtime snapshot mapping, speed/upload limits, tracker `started/completed/stopped` events, and selector ordering/endgame helpers.
+- Corrected a verification regression where the Swift adapter had drifted back to `seeding` on completion; Task 17 now emits `completed` until Task 20 implements real seeding policy behavior.
+
 Verification evidence:
+
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine --filter TorrentPeerWire` passed with 49 tests across 3 suites after the completion-status correction.
+- `swift build` passed.
+- `swift test` passed with 192 tests across 15 suites.
+- `git diff --check` passed.
+- Static libtorrent audit with `rg -n "CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore Sources/SwiftGetX/Services/TorrentDownloadEngine.swift Package.swift` found no libtorrent references in `Sources/SwiftGetXTorrentCore`; remaining matches are the existing optional `Package.swift` gate and app adapter boundary.
+- Static core isolation audit with `rg -n "import (SwiftUI|SwiftData|AppKit)|CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore` found no matches.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; the linker emitted the existing local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 195 tests across 16 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
+- This remains a swarm MVP: pieces are still downloaded one at a time, endgame is represented in runtime state rather than duplicate block requests, and availability is currently inferred from peer count instead of real bitfield/have data.
+- Peer scoring is intentionally simple and in-memory; richer peer bans, optimistic unchoke behavior, connection backoff, and long-lived peer statistics remain future torrent runtime work.
+- Upload-rate reporting maps configured upload limits only; actual upload/seeding throughput and share ratio accounting remain Task 20.
+- Magnet metadata exchange is still unavailable until Task 18, so magnet tasks can parse trackers/info hashes but cannot yet fetch metadata over BEP 9.
+
 Next step:
+
+- Task 18: Magnet Metadata.
 
 ## Task 18: Magnet Metadata
 

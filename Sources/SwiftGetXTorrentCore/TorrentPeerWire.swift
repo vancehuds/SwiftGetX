@@ -297,23 +297,45 @@ public enum TorrentPeerBlockPlanner {
     }
 }
 
+public enum TorrentPieceSelectionMode: Sendable {
+    case sequential
+    case rarestFirst
+}
+
 public enum TorrentPieceSelector {
     public static func nextPieceIndex(
         pieceCount: Int,
         completedPieceIndexes: Set<Int>,
-        availability: [Int: Int] = [:]
+        availability: [Int: Int] = [:],
+        mode: TorrentPieceSelectionMode = .rarestFirst
     ) throws -> Int? {
+        try orderedPieceIndexes(
+            pieceCount: pieceCount,
+            completedPieceIndexes: completedPieceIndexes,
+            availability: availability,
+            mode: mode
+        ).first
+    }
+
+    public static func orderedPieceIndexes(
+        pieceCount: Int,
+        completedPieceIndexes: Set<Int>,
+        availability: [Int: Int] = [:],
+        mode: TorrentPieceSelectionMode = .rarestFirst
+    ) throws -> [Int] {
         guard pieceCount > 0 else {
             throw TorrentPeerWireError.invalidPieceIndex(pieceCount)
         }
         let candidates = (0..<pieceCount).filter { !completedPieceIndexes.contains($0) }
-        guard !candidates.isEmpty else { return nil }
+        guard mode == .rarestFirst else {
+            return candidates
+        }
 
         let rarestCandidates = candidates.filter { (availability[$0] ?? 0) > 0 }
         guard !rarestCandidates.isEmpty else {
-            return candidates.first
+            return candidates
         }
-        return rarestCandidates.min { lhs, rhs in
+        return rarestCandidates.sorted { lhs, rhs in
             let lhsAvailability = availability[lhs] ?? Int.max
             let rhsAvailability = availability[rhs] ?? Int.max
             if lhsAvailability == rhsAvailability {
@@ -321,6 +343,15 @@ public enum TorrentPieceSelector {
             }
             return lhsAvailability < rhsAvailability
         }
+    }
+
+    public static func isEndgame(
+        pieceCount: Int,
+        completedPieceIndexes: Set<Int>,
+        activePeerCount: Int
+    ) -> Bool {
+        let remaining = max(0, pieceCount - completedPieceIndexes.count)
+        return activePeerCount > 1 && remaining > 0 && remaining <= activePeerCount
     }
 }
 
@@ -471,6 +502,8 @@ public actor TorrentPeerWireSession {
     private let pipelineLimit: Int
     private let maximumTimeoutResends: Int
     private var isConnected = false
+    private var isInterested = false
+    private var isUnchoked = false
     private var bufferedBytes = Data()
 
     public init(
@@ -518,7 +551,10 @@ public actor TorrentPeerWireSession {
         }
 
         try await connect()
-        try await transport.send(TorrentPeerWireMessage.interested.encodedData())
+        if !isInterested {
+            try await transport.send(TorrentPeerWireMessage.interested.encodedData())
+            isInterested = true
+        }
         try await waitForUnchoke()
 
         let pieceLength = pieceLength(for: pieceIndex)
@@ -603,7 +639,13 @@ public actor TorrentPeerWireSession {
                             try await sendRequest(request)
                         }
                     }
-                case .keepAlive, .choke, .unchoke, .interested, .notInterested, .have, .bitfield, .request, .cancel, .port, .unknown:
+                case .choke:
+                    isUnchoked = false
+                    continue
+                case .unchoke:
+                    isUnchoked = true
+                    continue
+                case .keepAlive, .interested, .notInterested, .have, .bitfield, .request, .cancel, .port, .unknown:
                     continue
                 case .piece:
                     continue
@@ -712,12 +754,19 @@ public actor TorrentPeerWireSession {
     }
 
     private func waitForUnchoke() async throws {
+        if isUnchoked {
+            return
+        }
         while true {
             try Task.checkCancellation()
             switch try await readMessage() {
             case .unchoke:
+                isUnchoked = true
                 return
-            case .keepAlive, .choke, .interested, .notInterested, .have, .bitfield, .request, .piece, .cancel, .port, .unknown:
+            case .choke:
+                isUnchoked = false
+                continue
+            case .keepAlive, .interested, .notInterested, .have, .bitfield, .request, .piece, .cancel, .port, .unknown:
                 continue
             }
         }
