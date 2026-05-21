@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>SwiftGetX Updates</title>
+        <link>https://github.com/vancehuds/SwiftGetX</link>
+        <description>Most recent changes with links to updates.</description>
+        <language>en</language>
+        <item>
+            <title>Version 0.1.2</title>
+            <link>https://github.com/vancehuds/SwiftGetX/releases/tag/v0.1.2</link>
+            <sparkle:version>0.1.2</sparkle:version>
+            <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+            <pubDate>Thu, 21 May 2026 14:41:06 +0000</pubDate>
+            <enclosure url="https://github.com/vancehuds/SwiftGetX/releases/download/v0.1.2/SwiftGetX.dmg"
+                       sparkle:edSignature="JqSNLJuJZ6vZGqA/MvgHpWmYsWu1NmHx3GvXNJW/eExBgC7+0dCV7GQC/DSvNMGONDB0qu/dWyflu/xrTJGsDw=="
+                       length="9341082"
+                       type="application/octet-stream" />
+        </item>
+    </channel>
+</rss>
