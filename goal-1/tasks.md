@@ -1329,17 +1329,46 @@ Next step:
 
 ## Task 28: Sparkle, Signing, Notarization, and Release Gates
 
-Status: [ ]
+Status: [x]
 
 Replace or enforce Sparkle public-key configuration, add release workflow checks for required secrets, signing/notarization verification commands, manual update status feedback, release notes wiring, and local-build-safe fallback behavior.
 
 Work performed:
 
+- Added `Scripts/validate-release.sh` with modes for Sparkle config, strict release environment secrets, app bundle signing checks, DMG signing/notary/staple checks, and appcast release-note/signature checks.
+- Hardened `Scripts/package-dmg.sh` so local packaging still defaults to ad-hoc signing, while `SWIFTGETX_RELEASE_STRICT=1` requires Developer ID signing, hardened runtime, DMG signing, notarization, stapling, and release validation.
+- Updated the tag release workflow to fail early on missing Apple/Sparkle/Chrome secrets, import the Developer ID certificate into a temporary keychain, package with strict signing/notary env, verify signed/notarized artifacts, and validate the Sparkle appcast before publishing it.
+- Added a lightweight Sparkle config check to the normal build workflow without requiring Apple credentials for PR/main builds.
+- Updated `Scripts/generate-appcast.sh` to wire `sparkle:releaseNotesLink`, include a description, normalize `v`-prefixed versions for GitHub release URLs, XML-escape release-note fields, and fail on empty EdDSA signatures.
+- Added `ReleaseValidation` helpers and release validation tests for Sparkle public key shape, release workflow gates, package script strict/local behavior, appcast release notes, and build workflow local-safe validation.
+- Changed `SoftwareUpdater` to use `SPUUpdaterDelegate` for manual update-check status feedback, including requested, update-found, up-to-date, and failed states, with redacted failure text.
+- Surfaced manual update status text in the Updates settings tab and command help, with English and Simplified Chinese localization.
+- Updated `Docs/sparkle-update-setup.md` to reflect the current non-placeholder Sparkle public key, required release secrets, strict release workflow, release notes, and local ad-hoc fallback behavior.
+- Committed the implementation as `0764a26 Harden release update gates`.
+
 Verification evidence:
+
+- `bash -n Scripts/validate-release.sh` passed.
+- `bash -n Scripts/package-dmg.sh` passed.
+- `bash -n Scripts/generate-appcast.sh` passed.
+- `plutil -lint Sources/SwiftGetX/Resources/AppInfo.plist Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `Scripts/validate-release.sh sparkle` passed and confirmed the configured `SUPublicEDKey` is non-placeholder and decodes to a 32-byte Ed25519 public key.
+- A temporary synthetic appcast passed `Scripts/validate-release.sh appcast <temp-appcast>`.
+- `git diff --check` passed.
+- `swift build` passed after rerunning with approved SwiftPM cache access.
+- `swift test --filter ReleaseValidation --filter AppResources` passed with 15 tests across 2 suites.
+- `swift test` passed with 273 tests across 21 suites.
 
 Remaining risk:
 
+- Actual Developer ID signing, Apple notarization, stapling, and Gatekeeper validation against Apple services were not exercised locally because the required Apple certificate and notary credentials are not present in this workspace.
+- The GitHub release workflow was statically verified and covered by tests but was not run on GitHub in this session.
+- The Sparkle public key is enforced as a valid non-placeholder Ed25519 public key, but the matching relationship between the committed public key and the GitHub `SPARKLE_EDDSA_PRIVATE_KEY` secret cannot be cryptographically proven here without access to the private secret.
+- Strict release validation checks the app bundle and DMG artifacts, but real user Gatekeeper behavior still depends on Apple notarization acceptance for the exact release artifact produced by CI.
+
 Next step:
+
+- Task 29: Extension Distribution, Version Compatibility, and Licenses.
 
 ## Task 29: Extension Distribution, Version Compatibility, and Licenses
 
