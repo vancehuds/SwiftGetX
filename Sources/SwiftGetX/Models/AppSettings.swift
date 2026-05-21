@@ -32,6 +32,7 @@ final class AppSettings {
     var torrentMaxConnections = 200
     var torrentMaxUploadSlots = 8
     var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
+    var torrentEngine: TorrentEngineKind = .swift
 
     func apply(_ record: AppSettingsRecord) {
         defaultDownloadDirectory = URL(fileURLWithPath: record.defaultDownloadDirectoryPath)
@@ -57,6 +58,7 @@ final class AppSettings {
         torrentMaxConnections = record.torrentMaxConnections
         torrentMaxUploadSlots = record.torrentMaxUploadSlots
         torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
+        torrentEngine = TorrentEngineKind(rawValue: record.torrentEngineRawValue) ?? .swift
     }
 
     func makeRecord() -> AppSettingsRecord {
@@ -83,7 +85,8 @@ final class AppSettings {
             torrentMagnetMetadataTimeoutSeconds: torrentMagnetMetadataTimeoutSeconds,
             torrentMaxConnections: torrentMaxConnections,
             torrentMaxUploadSlots: torrentMaxUploadSlots,
-            torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue
+            torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue,
+            torrentEngineRawValue: torrentEngine.rawValue
         )
     }
 
@@ -111,10 +114,12 @@ final class AppSettings {
         record.torrentMaxConnections = torrentMaxConnections
         record.torrentMaxUploadSlots = torrentMaxUploadSlots
         record.torrentSeedingLimitModeRawValue = torrentSeedingLimitMode.rawValue
+        record.torrentEngineRawValue = torrentEngine.rawValue
     }
 
     var torrentRuntimeOptions: TorrentRuntimeOptions {
         TorrentRuntimeOptions(
+            engine: torrentEngine,
             isDHTEnabled: torrentDHTEnabled,
             isPEXEnabled: torrentPEXEnabled,
             isLSDEnabled: torrentLSDEnabled,
@@ -170,6 +175,7 @@ final class AppSettingsRecord {
     var torrentMaxConnections: Int = 200
     var torrentMaxUploadSlots: Int = 8
     var torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
+    var torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue
 
     init(
         id: String = "default",
@@ -195,7 +201,8 @@ final class AppSettingsRecord {
         torrentMagnetMetadataTimeoutSeconds: Int = 12,
         torrentMaxConnections: Int = 200,
         torrentMaxUploadSlots: Int = 8,
-        torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
+        torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue,
+        torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue
     ) {
         self.id = id
         self.defaultDownloadDirectoryPath = defaultDownloadDirectoryPath
@@ -221,5 +228,6 @@ final class AppSettingsRecord {
         self.torrentMaxConnections = torrentMaxConnections
         self.torrentMaxUploadSlots = torrentMaxUploadSlots
         self.torrentSeedingLimitModeRawValue = torrentSeedingLimitModeRawValue
+        self.torrentEngineRawValue = torrentEngineRawValue
     }
 }

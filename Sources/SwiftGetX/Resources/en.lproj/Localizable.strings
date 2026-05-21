@@ -320,6 +320,15 @@
 "torrent_enable_lsd" = "Enable Local Service Discovery";
 "torrent_enable_pex" = "Enable PEX";
 "torrent_enable_sequential_default" = "Sequential download by default";
+"torrent_engine" = "BT Engine";
+"torrent_engine_libtorrent" = "libtorrent";
+"torrent_engine_libtorrent_status" = "Uses the optional native libtorrent bridge when it is compiled into this build. Builds without the bridge report libtorrent as unavailable.";
+"torrent_engine_status" = "Engine Status";
+"torrent_engine_status_available" = "Available";
+"torrent_engine_status_metadata_only" = "Metadata only";
+"torrent_engine_status_unavailable" = "Unavailable";
+"torrent_engine_swift" = "Swift";
+"torrent_engine_swift_status" = "Pure Swift torrent metadata, layout, and resume-state support is active. Peer transfer is added in later torrent tasks.";
 "torrent_file_priority_high" = "High";
 "torrent_file_priority_maximum" = "Max";
 "torrent_file_priority_normal" = "Normal";
@@ -355,9 +364,11 @@
 "torrent_sequential_download" = "Sequential";
 "torrent_share_ratio" = "Share Ratio";
 "torrent_tracker_url" = "Tracker URL";
+"torrent_tracker_metadata_only" = "metadata only";
 "torrent_trackers" = "Trackers";
 "torrent_trackers_empty" = "No trackers reported yet.";
 "torrent_upload_speed" = "Upload Speed";
 "torrent_upload_slots" = "Upload Slots";
+"torrent_swift_engine_runtime_pending" = "Swift torrent engine is metadata-only until tracker, peer, and storage tasks are implemented.";
 "unknown" = "Unknown";
 "upload_speed_limit" = "Upload Speed Limit";

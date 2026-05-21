@@ -176,6 +176,79 @@ struct TorrentDownloadEngineTests {
         #expect(startRequests.map(\.hasExplicitFileSelection) == [false, true])
     }
 
+    @Test("default engine uses Swift metadata adapter")
+    func defaultEngineUsesSwiftMetadataAdapter() {
+        let engine = TorrentDownloadEngine()
+
+        #expect(engine.engineKind == .swift)
+        #expect(engine.engineStatus == .metadataOnly)
+    }
+
+    @Test("libtorrent setting keeps libtorrent identity when bridge is unavailable")
+    func libtorrentSettingKeepsLibtorrentIdentityWhenBridgeIsUnavailable() async throws {
+        let engine = TorrentDownloadEngine()
+
+        await engine.configure(runtimeOptions: TorrentRuntimeOptions(engine: .libtorrent)).value
+
+        #expect(engine.engineKind == .libtorrent)
+        #if !canImport(CSwiftGetXLibtorrent)
+        #expect(engine.engineStatus == .unavailable)
+        #endif
+    }
+
+    @Test("Swift adapter reports metadata-only torrent snapshots")
+    func swiftAdapterReportsMetadataOnlyTorrentSnapshots() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        try Self.singleFileTorrentData(
+            name: "payload.bin",
+            length: 42,
+            announce: "udp://tracker.example:80"
+        ).write(to: torrentURL)
+        let adapter = SwiftTorrentEngineAdapter()
+        let store = SnapshotStore()
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: nil,
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshot = try await store.firstSnapshot()
+
+        #expect(snapshot.status == .failed)
+        #expect(snapshot.errorMessage == L10n.string("torrent_swift_engine_runtime_pending"))
+        #expect(snapshot.totalBytes == 42)
+        #expect(snapshot.torrentMetadataStatus == .available)
+        #expect(snapshot.torrentFiles == [
+            TorrentFile(index: 0, path: "payload.bin", size: 42, priority: TorrentFilePriority.normal.rawValue)
+        ])
+        #expect(snapshot.torrentTrackers?.map(\.url) == ["udp://tracker.example:80"])
+        #expect(snapshot.torrentConnection?.engine == .swift)
+        #expect(snapshot.torrentConnection?.engineStatus == .metadataOnly)
+        #expect(snapshot.torrentHealth?.engine == .swift)
+        #expect(snapshot.torrentHealth?.engineStatus == .metadataOnly)
+        #expect(snapshot.torrentHealth?.hasMetadata == true)
+    }
+
     private static func request(
         source: String = "magnet:?xt=urn:btih:abcdef",
         kind: DownloadKind = .torrentMagnet,
@@ -215,9 +288,63 @@ struct TorrentDownloadEngineTests {
             hasExplicitFileSelection: hasExplicitFileSelection
         )
     }
+
+    private static func singleFileTorrentData(
+        name: String,
+        length: Int,
+        announce: String? = nil
+    ) -> Data {
+        var data = Data("d".utf8)
+        if let announce {
+            data.append(bencodeString("announce"))
+            data.append(bencodeString(announce))
+        }
+        data.append(bencodeString("info"))
+        data.append(Data("d6:lengthi\(length)e4:name\(name.count):\(name)12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaae".utf8))
+        data.append(UInt8(ascii: "e"))
+        return data
+    }
+
+    private static func bencodeString(_ value: String) -> Data {
+        var data = Data("\(value.utf8.count):".utf8)
+        data.append(contentsOf: value.utf8)
+        return data
+    }
+
+    private static func makeTemporaryDirectory() throws -> URL {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+}
+
+private actor SnapshotStore {
+    private var snapshots = [DownloadSnapshot]()
+
+    func append(_ snapshot: DownloadSnapshot) {
+        snapshots.append(snapshot)
+    }
+
+    func firstSnapshot() async throws -> DownloadSnapshot {
+        for _ in 0..<20 {
+            if let snapshot = snapshots.first {
+                return snapshot
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw SnapshotStoreError.missingSnapshot
+    }
+}
+
+private enum SnapshotStoreError: Error {
+    case missingSnapshot
 }
 
 private actor RecordingTorrentAdapter: TorrentEngineAdapter {
+    nonisolated var engineKind: TorrentEngineKind { .swift }
+    nonisolated var engineStatus: TorrentEngineStatus { .metadataOnly }
+
     private(set) var startRequests = [TorrentStartRequest]()
     private(set) var resumeRequests = [TorrentStartRequest]()
     private(set) var fileSelections = [[Int]]()

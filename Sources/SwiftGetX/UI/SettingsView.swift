@@ -92,6 +92,7 @@ private struct SettingsSnapshot: Equatable {
     let torrentMaxConnections: Int
     let torrentMaxUploadSlots: Int
     let torrentSeedingLimitMode: TorrentSeedingLimitMode
+    let torrentEngine: TorrentEngineKind
 
     @MainActor
     init(_ settings: AppSettings) {
@@ -118,6 +119,7 @@ private struct SettingsSnapshot: Equatable {
         torrentMaxConnections = settings.torrentMaxConnections
         torrentMaxUploadSlots = settings.torrentMaxUploadSlots
         torrentSeedingLimitMode = settings.torrentSeedingLimitMode
+        torrentEngine = settings.torrentEngine
     }
 }
 
@@ -301,6 +303,16 @@ private struct TorrentSettingsSection: View {
 
     var body: some View {
         Section("BT") {
+            Picker(L10n.string("torrent_engine"), selection: $settings.torrentEngine) {
+                ForEach(TorrentEngineKind.allCases) { engine in
+                    Text(engine.title).tag(engine)
+                }
+            }
+            Text(settings.torrentEngine == .swift
+                ? L10n.string("torrent_engine_swift_status")
+                : L10n.string("torrent_engine_libtorrent_status"))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             Toggle(L10n.string("torrent_enable_dht"), isOn: $settings.torrentDHTEnabled)
             Toggle(L10n.string("torrent_enable_pex"), isOn: $settings.torrentPEXEnabled)
             Toggle(L10n.string("torrent_enable_lsd"), isOn: $settings.torrentLSDEnabled)

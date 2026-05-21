@@ -680,6 +680,8 @@ enum TorrentFilePriority: Int, Codable, CaseIterable, Identifiable, Sendable {
 
 struct TorrentConnectionInfo: Codable, Equatable, Sendable {
     var metadataStatus: TorrentMetadataStatus
+    var engine: TorrentEngineKind
+    var engineStatus: TorrentEngineStatus
     var peerCount: Int
     var downloadRate: Int64
     var uploadRate: Int64
@@ -691,8 +693,26 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
     var localPortDescription: String
     var nativeEngineAvailable: Bool
 
+    private enum CodingKeys: String, CodingKey {
+        case metadataStatus
+        case engine
+        case engineStatus
+        case peerCount
+        case downloadRate
+        case uploadRate
+        case shareRatio
+        case distributedCopies
+        case isDHTEnabled
+        case isPEXEnabled
+        case isLSDEnabled
+        case localPortDescription
+        case nativeEngineAvailable
+    }
+
     init(
         metadataStatus: TorrentMetadataStatus = .unknown,
+        engine: TorrentEngineKind = .swift,
+        engineStatus: TorrentEngineStatus = .unavailable,
         peerCount: Int = 0,
         downloadRate: Int64 = 0,
         uploadRate: Int64 = 0,
@@ -705,6 +725,8 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
         nativeEngineAvailable: Bool = false
     ) {
         self.metadataStatus = metadataStatus
+        self.engine = engine
+        self.engineStatus = engineStatus
         self.peerCount = peerCount
         self.downloadRate = downloadRate
         self.uploadRate = uploadRate
@@ -718,8 +740,8 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
     }
 
     var summary: String {
-        guard nativeEngineAvailable else {
-            return L10n.string("torrent_native_engine_unavailable")
+        guard engineStatus.supportsRuntimeControls else {
+            return engineStatus.title
         }
         return L10n.string(
             "torrent_connection_summary",
@@ -728,6 +750,25 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
             Self.speedLabel(uploadRate),
             shareRatio
         )
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        metadataStatus = try container.decodeIfPresent(TorrentMetadataStatus.self, forKey: .metadataStatus) ?? .unknown
+        nativeEngineAvailable = try container.decodeIfPresent(Bool.self, forKey: .nativeEngineAvailable) ?? false
+        engine = try container.decodeIfPresent(TorrentEngineKind.self, forKey: .engine)
+            ?? (nativeEngineAvailable ? .libtorrent : .swift)
+        engineStatus = try container.decodeIfPresent(TorrentEngineStatus.self, forKey: .engineStatus)
+            ?? (nativeEngineAvailable ? .available : .unavailable)
+        peerCount = try container.decodeIfPresent(Int.self, forKey: .peerCount) ?? 0
+        downloadRate = try container.decodeIfPresent(Int64.self, forKey: .downloadRate) ?? 0
+        uploadRate = try container.decodeIfPresent(Int64.self, forKey: .uploadRate) ?? 0
+        shareRatio = try container.decodeIfPresent(Double.self, forKey: .shareRatio) ?? 0
+        distributedCopies = try container.decodeIfPresent(Double.self, forKey: .distributedCopies) ?? 0
+        isDHTEnabled = try container.decodeIfPresent(Bool.self, forKey: .isDHTEnabled) ?? false
+        isPEXEnabled = try container.decodeIfPresent(Bool.self, forKey: .isPEXEnabled) ?? false
+        isLSDEnabled = try container.decodeIfPresent(Bool.self, forKey: .isLSDEnabled) ?? false
+        localPortDescription = try container.decodeIfPresent(String.self, forKey: .localPortDescription) ?? ""
     }
 
     private static func speedLabel(_ bytesPerSecond: Int64) -> String {
@@ -742,6 +783,47 @@ struct TorrentConnectionInfo: Codable, Equatable, Sendable {
             return String(format: "%.0f KB/s", value / 1_000)
         }
         return "\(Int(value)) B/s"
+    }
+}
+
+enum TorrentEngineKind: String, Codable, CaseIterable, Equatable, Identifiable, Sendable {
+    case swift
+    case libtorrent
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .swift:
+            L10n.string("torrent_engine_swift")
+        case .libtorrent:
+            L10n.string("torrent_engine_libtorrent")
+        }
+    }
+}
+
+enum TorrentEngineStatus: String, Codable, Equatable, Sendable {
+    case available
+    case metadataOnly
+    case unavailable
+
+    var isAvailable: Bool {
+        self == .available || self == .metadataOnly
+    }
+
+    var supportsRuntimeControls: Bool {
+        self == .available
+    }
+
+    var title: String {
+        switch self {
+        case .available:
+            L10n.string("torrent_engine_status_available")
+        case .metadataOnly:
+            L10n.string("torrent_engine_status_metadata_only")
+        case .unavailable:
+            L10n.string("torrent_engine_status_unavailable")
+        }
     }
 }
 
@@ -795,6 +877,8 @@ struct TorrentPeerInfo: Codable, Identifiable, Equatable, Sendable {
 
 struct TorrentHealthInfo: Codable, Equatable, Sendable {
     var nativeEngineAvailable: Bool
+    var engine: TorrentEngineKind
+    var engineStatus: TorrentEngineStatus
     var hasMetadata: Bool
     var isSequentialDownload: Bool
     var needsResumeDataSave: Bool
@@ -807,8 +891,27 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
     var trackerCount: Int
     var lastError: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case nativeEngineAvailable
+        case engine
+        case engineStatus
+        case hasMetadata
+        case isSequentialDownload
+        case needsResumeDataSave
+        case peerCount
+        case connectionCount
+        case uploadSlotCount
+        case listenPort
+        case dhtNodeCount
+        case distributedCopies
+        case trackerCount
+        case lastError
+    }
+
     init(
         nativeEngineAvailable: Bool = false,
+        engine: TorrentEngineKind = .swift,
+        engineStatus: TorrentEngineStatus = .unavailable,
         hasMetadata: Bool = false,
         isSequentialDownload: Bool = false,
         needsResumeDataSave: Bool = false,
@@ -822,6 +925,8 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         lastError: String? = nil
     ) {
         self.nativeEngineAvailable = nativeEngineAvailable
+        self.engine = engine
+        self.engineStatus = engineStatus
         self.hasMetadata = hasMetadata
         self.isSequentialDownload = isSequentialDownload
         self.needsResumeDataSave = needsResumeDataSave
@@ -833,6 +938,26 @@ struct TorrentHealthInfo: Codable, Equatable, Sendable {
         self.distributedCopies = distributedCopies
         self.trackerCount = trackerCount
         self.lastError = lastError
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        nativeEngineAvailable = try container.decodeIfPresent(Bool.self, forKey: .nativeEngineAvailable) ?? false
+        engine = try container.decodeIfPresent(TorrentEngineKind.self, forKey: .engine)
+            ?? (nativeEngineAvailable ? .libtorrent : .swift)
+        engineStatus = try container.decodeIfPresent(TorrentEngineStatus.self, forKey: .engineStatus)
+            ?? (nativeEngineAvailable ? .available : .unavailable)
+        hasMetadata = try container.decodeIfPresent(Bool.self, forKey: .hasMetadata) ?? false
+        isSequentialDownload = try container.decodeIfPresent(Bool.self, forKey: .isSequentialDownload) ?? false
+        needsResumeDataSave = try container.decodeIfPresent(Bool.self, forKey: .needsResumeDataSave) ?? false
+        peerCount = try container.decodeIfPresent(Int.self, forKey: .peerCount) ?? 0
+        connectionCount = try container.decodeIfPresent(Int.self, forKey: .connectionCount) ?? 0
+        uploadSlotCount = try container.decodeIfPresent(Int.self, forKey: .uploadSlotCount) ?? 0
+        listenPort = try container.decodeIfPresent(Int.self, forKey: .listenPort) ?? 0
+        dhtNodeCount = try container.decodeIfPresent(Int.self, forKey: .dhtNodeCount) ?? 0
+        distributedCopies = try container.decodeIfPresent(Double.self, forKey: .distributedCopies) ?? 0
+        trackerCount = try container.decodeIfPresent(Int.self, forKey: .trackerCount) ?? 0
+        lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
     }
 }
 
@@ -882,6 +1007,7 @@ enum TorrentSeedingLimitMode: String, Codable, CaseIterable, Identifiable, Senda
 }
 
 struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
+    var engine: TorrentEngineKind
     var isDHTEnabled: Bool
     var isPEXEnabled: Bool
     var isLSDEnabled: Bool
@@ -892,7 +1018,21 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
     var seedingLimitMode: TorrentSeedingLimitMode
     var stopSeedingAtRatio: Double
 
+    private enum CodingKeys: String, CodingKey {
+        case engine
+        case isDHTEnabled
+        case isPEXEnabled
+        case isLSDEnabled
+        case isSequentialDownloadEnabled
+        case magnetMetadataTimeoutSeconds
+        case maxConnections
+        case maxUploadSlots
+        case seedingLimitMode
+        case stopSeedingAtRatio
+    }
+
     init(
+        engine: TorrentEngineKind = .swift,
         isDHTEnabled: Bool = true,
         isPEXEnabled: Bool = true,
         isLSDEnabled: Bool = true,
@@ -903,6 +1043,7 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         seedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio,
         stopSeedingAtRatio: Double = 1.0
     ) {
+        self.engine = engine
         self.isDHTEnabled = isDHTEnabled
         self.isPEXEnabled = isPEXEnabled
         self.isLSDEnabled = isLSDEnabled
@@ -912,6 +1053,22 @@ struct TorrentRuntimeOptions: Codable, Equatable, Sendable {
         self.maxUploadSlots = max(-1, maxUploadSlots)
         self.seedingLimitMode = seedingLimitMode
         self.stopSeedingAtRatio = max(0, stopSeedingAtRatio)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            engine: try container.decodeIfPresent(TorrentEngineKind.self, forKey: .engine) ?? .swift,
+            isDHTEnabled: try container.decodeIfPresent(Bool.self, forKey: .isDHTEnabled) ?? true,
+            isPEXEnabled: try container.decodeIfPresent(Bool.self, forKey: .isPEXEnabled) ?? true,
+            isLSDEnabled: try container.decodeIfPresent(Bool.self, forKey: .isLSDEnabled) ?? true,
+            isSequentialDownloadEnabled: try container.decodeIfPresent(Bool.self, forKey: .isSequentialDownloadEnabled) ?? false,
+            magnetMetadataTimeoutSeconds: try container.decodeIfPresent(Int.self, forKey: .magnetMetadataTimeoutSeconds) ?? 12,
+            maxConnections: try container.decodeIfPresent(Int.self, forKey: .maxConnections) ?? 200,
+            maxUploadSlots: try container.decodeIfPresent(Int.self, forKey: .maxUploadSlots) ?? 8,
+            seedingLimitMode: try container.decodeIfPresent(TorrentSeedingLimitMode.self, forKey: .seedingLimitMode) ?? .stopAtRatio,
+            stopSeedingAtRatio: try container.decodeIfPresent(Double.self, forKey: .stopSeedingAtRatio) ?? 1.0
+        )
     }
 
     func shouldStopSeeding(isSeeding: Bool, shareRatio: Double, completed: Bool) -> Bool {

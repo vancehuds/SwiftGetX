@@ -320,6 +320,15 @@
 "torrent_enable_lsd" = "启用局域网发现";
 "torrent_enable_pex" = "启用 PEX";
 "torrent_enable_sequential_default" = "默认顺序下载";
+"torrent_engine" = "BT 引擎";
+"torrent_engine_libtorrent" = "libtorrent";
+"torrent_engine_libtorrent_status" = "使用此构建中可用的可选原生 libtorrent 桥接；未编译桥接的构建会将 libtorrent 显示为不可用。";
+"torrent_engine_status" = "引擎状态";
+"torrent_engine_status_available" = "可用";
+"torrent_engine_status_metadata_only" = "仅 metadata";
+"torrent_engine_status_unavailable" = "不可用";
+"torrent_engine_swift" = "Swift";
+"torrent_engine_swift_status" = "纯 Swift 种子 metadata、布局和恢复状态支持已启用。Tracker、Peer 和存储传输会在后续 BT 任务中补齐。";
 "torrent_file_priority_high" = "高";
 "torrent_file_priority_maximum" = "最高";
 "torrent_file_priority_normal" = "普通";
@@ -355,9 +364,11 @@
 "torrent_sequential_download" = "顺序下载";
 "torrent_share_ratio" = "分享率";
 "torrent_tracker_url" = "Tracker 地址";
+"torrent_tracker_metadata_only" = "仅 metadata";
 "torrent_trackers" = "Tracker";
 "torrent_trackers_empty" = "暂未收到 Tracker 信息。";
 "torrent_upload_speed" = "上传速度";
 "torrent_upload_slots" = "上传槽";
+"torrent_swift_engine_runtime_pending" = "Swift BT 引擎目前仅支持 metadata；Tracker、Peer 和存储任务实现后才会进行实际传输。";
 "unknown" = "未知";
 "upload_speed_limit" = "上传限速";

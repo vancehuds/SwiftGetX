@@ -582,17 +582,40 @@ Next step:
 
 ## Task 14: Swift Torrent Adapter Skeleton and Engine Status
 
-Status: [ ]
+Status: [x]
 
 Add `SwiftTorrentEngineAdapter` behind the existing `TorrentEngineAdapter` boundary, expose engine type/status in UI/settings, keep libtorrent optional, and wire metadata/layout preview without requiring libtorrent.
 
 Work performed:
 
+- Added a pure Swift `SwiftTorrentEngineAdapter` behind `TorrentEngineAdapter`, defaulting torrent runtime to the Swift metadata/layout skeleton without requiring libtorrent.
+- Extended torrent runtime options, connection info, and health info with `TorrentEngineKind` and `TorrentEngineStatus`, including legacy JSON decode defaults for existing persisted task records.
+- Added adapter identity/status to the adapter boundary so Swift reports `metadataOnly`, compiled libtorrent reports `available`, and missing libtorrent reports `unavailable` without silently falling back to Swift.
+- Wired the Swift adapter to parse local `.torrent` metadata through `SwiftGetXTorrentCore`, expose file layout preview data and tracker rows, and report magnet trackers while leaving tracker/peer/storage runtime pending.
+- Persisted the selected torrent engine through `AppSettings` and added a BT engine picker plus status copy in Settings.
+- Surfaced engine type/status in the Inspector connection and health panels, with metadata-only engines clearly not treated as full DHT/PEX/LSD runtime availability.
+- Added English and Simplified Chinese localization for engine labels, statuses, and Swift metadata-only runtime messaging.
+- Added tests for app-setting persistence, default Swift adapter status, libtorrent-unavailable identity, Swift metadata-only snapshots, and legacy torrent diagnostic JSON decoding.
+
 Verification evidence:
+
+- `swift test --filter TorrentDownloadEngine --filter TorrentFileTests --filter DownloadCoordinator` passed with 39 tests across 3 suites after rerunning with SwiftPM cache access.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- `swift build` passed after rerunning with SwiftPM cache access.
+- `swift test` passed with 174 tests across 14 suites after rerunning with SwiftPM cache access.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; the linker emitted local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 177 tests across 15 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
+- The Swift torrent adapter is intentionally metadata/layout only. It does not perform tracker announces, peer-wire connections, storage writes, piece verification, or real data transfer until Tasks 15-18.
+- Switching the global engine changes the engine used for new/configured runtime starts, but already active torrent handles are not migrated between engines in this skeleton task.
+- Optional libtorrent verification depends on the local prebuilt `.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a` archive and Homebrew OpenSSL libraries; this task did not change the C wrapper or vendored native build.
+
 Next step:
+
+- Task 15: Tracker Client and Mock Tracker Tests.
 
 ## Task 15: Tracker Client and Mock Tracker Tests
 

@@ -82,6 +82,34 @@ struct TorrentFileTests {
         #expect(task.torrentHealth?.listenPort == 6881)
     }
 
+    @Test("task decodes legacy torrent diagnostics without engine fields")
+    func decodesLegacyTorrentDiagnosticsWithoutEngineFields() {
+        let task = DownloadTask(
+            name: "demo",
+            source: "magnet:?xt=urn:btih:abcdef",
+            kind: .torrentMagnet,
+            savePath: "/tmp/demo"
+        )
+        task.torrentConnectionJSON = """
+        {"metadataStatus":"available","peerCount":3,"downloadRate":10,"uploadRate":5,"shareRatio":1.25,"distributedCopies":2,"isDHTEnabled":true,"isPEXEnabled":true,"isLSDEnabled":false,"localPortDescription":"6881","nativeEngineAvailable":true}
+        """
+        task.torrentHealthJSON = """
+        {"nativeEngineAvailable":true,"hasMetadata":true,"isSequentialDownload":true,"needsResumeDataSave":false,"peerCount":3,"connectionCount":2,"uploadSlotCount":1,"listenPort":6881,"dhtNodeCount":4,"distributedCopies":2,"trackerCount":1}
+        """
+        task.torrentRuntimeOptionsJSON = """
+        {"isDHTEnabled":false,"isPEXEnabled":true,"isLSDEnabled":false,"isSequentialDownloadEnabled":true,"magnetMetadataTimeoutSeconds":30,"maxConnections":64,"maxUploadSlots":4,"seedingLimitMode":"neverStop","stopSeedingAtRatio":2}
+        """
+
+        #expect(task.torrentConnection?.engine == .libtorrent)
+        #expect(task.torrentConnection?.engineStatus == .available)
+        #expect(task.torrentConnection?.peerCount == 3)
+        #expect(task.torrentHealth?.engine == .libtorrent)
+        #expect(task.torrentHealth?.engineStatus == .available)
+        #expect(task.torrentHealth?.listenPort == 6881)
+        #expect(task.torrentRuntimeOptions?.engine == .swift)
+        #expect(task.torrentRuntimeOptions?.seedingLimitMode == .neverStop)
+    }
+
     @Test("task persists only safe browser context")
     func persistsOnlySafeBrowserContext() {
         let rawContext = BrowserDownloadContext(

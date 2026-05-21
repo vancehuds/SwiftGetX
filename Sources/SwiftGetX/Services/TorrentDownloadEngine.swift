@@ -1,22 +1,36 @@
 import Foundation
+import SwiftGetXTorrentCore
 
 @MainActor
 final class TorrentDownloadEngine: DownloadEngine {
     var onSnapshot: (@Sendable (DownloadSnapshot) -> Void)?
 
-    private let adapter: TorrentEngineAdapter
+    private var adapter: TorrentEngineAdapter
     private var downloadLimitBytesPerSecond: Int64 = 0
     private var uploadLimitBytesPerSecond: Int64 = 0
     private var runtimeOptions = TorrentRuntimeOptions()
 
     init(adapter: TorrentEngineAdapter? = nil) {
-        if let adapter {
-            self.adapter = adapter
-        } else {
+        self.adapter = adapter ?? Self.makeAdapter(for: TorrentRuntimeOptions().engine)
+    }
+
+    var engineKind: TorrentEngineKind {
+        adapter.engineKind
+    }
+
+    var engineStatus: TorrentEngineStatus {
+        adapter.engineStatus
+    }
+
+    private static func makeAdapter(for engine: TorrentEngineKind) -> TorrentEngineAdapter {
+        switch engine {
+        case .swift:
+            SwiftTorrentEngineAdapter()
+        case .libtorrent:
             #if canImport(CSwiftGetXLibtorrent)
-            self.adapter = LibtorrentAdapter() ?? PlaceholderTorrentEngineAdapter()
+            LibtorrentAdapter() ?? PlaceholderTorrentEngineAdapter()
             #else
-            self.adapter = PlaceholderTorrentEngineAdapter()
+            PlaceholderTorrentEngineAdapter()
             #endif
         }
     }
@@ -164,8 +178,18 @@ final class TorrentDownloadEngine: DownloadEngine {
 
     @discardableResult
     func configure(runtimeOptions: TorrentRuntimeOptions) -> Task<Void, Never> {
+        if runtimeOptions.engine != self.runtimeOptions.engine {
+            adapter = Self.makeAdapter(for: runtimeOptions.engine)
+        }
         self.runtimeOptions = runtimeOptions
+        let adapter = adapter
+        let downloadLimitBytesPerSecond = self.downloadLimitBytesPerSecond
+        let uploadLimitBytesPerSecond = self.uploadLimitBytesPerSecond
         let task = Task {
+            await adapter.setSpeedLimit(
+                downloadBytesPerSecond: downloadLimitBytesPerSecond,
+                uploadBytesPerSecond: uploadLimitBytesPerSecond
+            )
             await adapter.configure(runtimeOptions: runtimeOptions)
         }
         return task
@@ -240,7 +264,138 @@ final class TorrentDownloadEngine: DownloadEngine {
     }
 }
 
+actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
+    private var runtimeOptions = TorrentRuntimeOptions()
+    private var requests: [UUID: TorrentStartRequest] = [:]
+
+    nonisolated var engineKind: TorrentEngineKind { .swift }
+    nonisolated var engineStatus: TorrentEngineStatus { .metadataOnly }
+
+    func start(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async throws {
+        requests[request.id] = request
+        onSnapshot(snapshot(for: request, status: .failed))
+    }
+
+    func resume(
+        _ request: TorrentStartRequest,
+        onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
+    ) async throws {
+        try await start(request, onSnapshot: onSnapshot)
+    }
+
+    func pause(id: UUID) async {}
+    func cancel(id: UUID) async {}
+
+    func remove(id: UUID, deletingFiles: Bool) async {
+        requests[id] = nil
+    }
+
+    func recheck(id: UUID) async {}
+    func setSpeedLimit(downloadBytesPerSecond: Int64, uploadBytesPerSecond: Int64) async {}
+    func setFileSelection(id: UUID, selectedFileIndexes: [Int]) async {}
+    func setFilePriority(id: UUID, fileIndex: Int, priority: Int) async {}
+    func setSequentialDownload(id: UUID, enabled: Bool) async {}
+    func addTracker(id: UUID, url: String) async {}
+    func removeTracker(id: UUID, url: String) async {}
+    func forceReannounce(id: UUID) async {}
+
+    func configure(runtimeOptions: TorrentRuntimeOptions) async {
+        self.runtimeOptions = runtimeOptions
+    }
+
+    private func snapshot(for request: TorrentStartRequest, status: DownloadStatus) -> DownloadSnapshot {
+        let metadata = metadataSnapshot(for: request)
+        let options = request.runtimeOptions
+        let isMagnet = request.displaySource.lowercased().hasPrefix("magnet:")
+        let metadataStatus: TorrentMetadataStatus = metadata.files.isEmpty
+            ? (isMagnet ? .fetching : .unavailable)
+            : .available
+
+        return DownloadSnapshot(
+            taskID: request.id,
+            status: status,
+            totalBytes: metadata.totalBytes > 0 ? metadata.totalBytes : request.totalBytes,
+            downloadedBytes: request.downloadedBytes,
+            speedBytesPerSecond: 0,
+            etaSeconds: nil,
+            errorMessage: L10n.string("torrent_swift_engine_runtime_pending"),
+            supportsResume: true,
+            eTag: nil,
+            lastModified: nil,
+            torrentFiles: metadata.files,
+            connectionSummary: L10n.string("torrent_swift_engine_runtime_pending"),
+            torrentMetadataStatus: metadataStatus,
+            torrentConnection: TorrentConnectionInfo(
+                metadataStatus: metadataStatus,
+                engine: .swift,
+                engineStatus: .metadataOnly,
+                isDHTEnabled: options.isDHTEnabled,
+                isPEXEnabled: options.isPEXEnabled,
+                isLSDEnabled: options.isLSDEnabled,
+                nativeEngineAvailable: false
+            ),
+            torrentResumeState: request.resumeDataPath.map {
+                TorrentResumeState(resumeDataPath: $0, status: .missing)
+            },
+            torrentTrackers: metadata.trackers,
+            torrentPeers: [],
+            torrentRuntimeOptions: options,
+            torrentHealth: TorrentHealthInfo(
+                nativeEngineAvailable: false,
+                engine: .swift,
+                engineStatus: .metadataOnly,
+                hasMetadata: metadataStatus == .available,
+                isSequentialDownload: options.isSequentialDownloadEnabled,
+                trackerCount: metadata.trackers.count
+            )
+        )
+    }
+
+    private func metadataSnapshot(for request: TorrentStartRequest) -> (
+        files: [TorrentFile],
+        totalBytes: Int64,
+        trackers: [TorrentTrackerInfo]
+    ) {
+        guard let path = request.resolvedTorrentFilePath,
+              let metainfo = try? TorrentMetainfo.parse(url: URL(fileURLWithPath: path))
+        else {
+            let trackers = MagnetURI.parseTrackers(from: request.displaySource).enumerated().map {
+                TorrentTrackerInfo(
+                    url: $0.element,
+                    tier: $0.offset,
+                    status: L10n.string("torrent_tracker_metadata_only")
+                )
+            }
+            return ([], 0, trackers)
+        }
+
+        let files = metainfo.files.map { info in
+            TorrentFile(
+                index: info.index,
+                path: info.path,
+                size: info.length,
+                priority: request.filePriorities[info.index] ?? TorrentFilePriority.normal.rawValue,
+                progress: 0
+            )
+        }
+        let trackers = metainfo.trackerURLs.enumerated().map {
+            TorrentTrackerInfo(
+                url: $0.element,
+                tier: $0.offset,
+                status: L10n.string("torrent_tracker_metadata_only")
+            )
+        }
+        return (files, metainfo.totalLength, trackers)
+    }
+}
+
 protocol TorrentEngineAdapter: Sendable {
+    var engineKind: TorrentEngineKind { get }
+    var engineStatus: TorrentEngineStatus { get }
+
     func start(
         _ request: TorrentStartRequest,
         onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
@@ -283,6 +438,9 @@ struct TorrentStartRequest: Sendable {
 }
 
 struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
+    let engineKind: TorrentEngineKind = .libtorrent
+    let engineStatus: TorrentEngineStatus = .unavailable
+
     func start(
         _ request: TorrentStartRequest,
         onSnapshot: @escaping @Sendable (DownloadSnapshot) -> Void
@@ -303,6 +461,8 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
                 torrentMetadataStatus: .unavailable,
                 torrentConnection: TorrentConnectionInfo(
                     metadataStatus: .unavailable,
+                    engine: .libtorrent,
+                    engineStatus: .unavailable,
                     nativeEngineAvailable: false
                 ),
                 torrentResumeState: request.resumeDataPath.map {
@@ -311,7 +471,11 @@ struct PlaceholderTorrentEngineAdapter: TorrentEngineAdapter {
                 torrentTrackers: [],
                 torrentPeers: [],
                 torrentRuntimeOptions: request.runtimeOptions,
-                torrentHealth: TorrentHealthInfo(nativeEngineAvailable: false)
+                torrentHealth: TorrentHealthInfo(
+                    nativeEngineAvailable: false,
+                    engine: .libtorrent,
+                    engineStatus: .unavailable
+                )
             )
         )
     }

@@ -378,24 +378,26 @@ private struct ConnectionsPanel: View {
     var body: some View {
         VStack(spacing: layout.value(10)) {
             if let connection = task.torrentConnection {
+                DetailRow(title: L10n.string("torrent_engine"), value: connection.engine.title)
+                DetailRow(title: L10n.string("torrent_engine_status"), value: connection.engineStatus.title)
                 DetailRow(title: L10n.string("torrent_metadata_status"), value: connection.metadataStatus.title)
                 DetailRow(
                     title: L10n.string("connection_dht_status"),
-                    value: connection.nativeEngineAvailable
+                    value: connection.engineStatus.supportsRuntimeControls
                         ? enabledLabel(connection.isDHTEnabled)
-                        : L10n.string("torrent_native_engine_unavailable")
+                        : connection.engineStatus.title
                 )
                 DetailRow(
                     title: L10n.string("connection_pex"),
-                    value: connection.nativeEngineAvailable
+                    value: connection.engineStatus.supportsRuntimeControls
                         ? enabledLabel(connection.isPEXEnabled)
-                        : L10n.string("torrent_native_engine_unavailable")
+                        : connection.engineStatus.title
                 )
                 DetailRow(
                     title: L10n.string("connection_lsd"),
-                    value: connection.nativeEngineAvailable
+                    value: connection.engineStatus.supportsRuntimeControls
                         ? enabledLabel(connection.isLSDEnabled)
-                        : L10n.string("torrent_native_engine_unavailable")
+                        : connection.engineStatus.title
                 )
                 DetailRow(title: L10n.string("connection_local_port"), value: connection.localPortDescription.isEmpty ? L10n.string("unknown") : connection.localPortDescription)
                 DetailRow(title: L10n.string("torrent_peer_count"), value: "\(connection.peerCount)")
@@ -424,6 +426,8 @@ private struct ConnectionsPanel: View {
             Text(L10n.string("torrent_health"))
                 .font(layout.font(10, weight: .semibold))
                 .foregroundStyle(.secondary)
+            DetailRow(title: L10n.string("torrent_engine"), value: health.engine.title)
+            DetailRow(title: L10n.string("torrent_engine_status"), value: health.engineStatus.title)
             DetailRow(title: L10n.string("torrent_connections"), value: "\(health.connectionCount)")
             DetailRow(title: L10n.string("torrent_upload_slots"), value: "\(health.uploadSlotCount)")
             DetailRow(title: L10n.string("torrent_distributed_copies"), value: String(format: "%.2f", health.distributedCopies))

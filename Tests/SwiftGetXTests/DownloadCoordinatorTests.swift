@@ -65,6 +65,24 @@ struct DownloadCoordinatorTests {
         #expect(record.queueFailureRetryLimit == 1)
     }
 
+    @Test("torrent engine setting persists through AppSettings records")
+    func torrentEngineSettingPersistsThroughAppSettingsRecords() {
+        let settings = AppSettings()
+        settings.torrentEngine = .libtorrent
+
+        let record = settings.makeRecord()
+        #expect(record.torrentEngineRawValue == TorrentEngineKind.libtorrent.rawValue)
+
+        let restored = AppSettings()
+        restored.apply(record)
+        #expect(restored.torrentEngine == .libtorrent)
+        #expect(restored.torrentRuntimeOptions.engine == .libtorrent)
+
+        restored.torrentEngine = .swift
+        restored.update(record)
+        #expect(record.torrentEngineRawValue == TorrentEngineKind.swift.rawValue)
+    }
+
     @Test("allTasks returns more than the old 500 task cap")
     func allTasksReturnsMoreThanOldFetchLimit() throws {
         let fixture = try makeFixture()

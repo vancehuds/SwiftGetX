@@ -4,6 +4,9 @@ import Foundation
 import CSwiftGetXLibtorrent
 
 actor LibtorrentAdapter: TorrentEngineAdapter {
+    nonisolated var engineKind: TorrentEngineKind { .libtorrent }
+    nonisolated var engineStatus: TorrentEngineStatus { .available }
+
     private let sessionBox: LibtorrentSessionBox
     private var handleIDs: [UUID: Int32] = [:]
     private var pollingTasks: [UUID: Task<Void, Never>] = [:]
@@ -480,6 +483,8 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
     private func connectionInfo(from nativeStatus: SGXTorrentStatus, options: TorrentRuntimeOptions) -> TorrentConnectionInfo {
         TorrentConnectionInfo(
             metadataStatus: metadataStatus(from: nativeStatus),
+            engine: .libtorrent,
+            engineStatus: .available,
             peerCount: Int(nativeStatus.num_peers),
             downloadRate: nativeStatus.download_rate,
             uploadRate: nativeStatus.upload_rate,
@@ -498,6 +503,8 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
     private func healthInfo(from nativeStatus: SGXTorrentStatus, trackerCount: Int?) -> TorrentHealthInfo {
         TorrentHealthInfo(
             nativeEngineAvailable: true,
+            engine: .libtorrent,
+            engineStatus: .available,
             hasMetadata: nativeStatus.has_metadata != 0,
             isSequentialDownload: nativeStatus.is_sequential_download != 0,
             needsResumeDataSave: nativeStatus.needs_resume_data_save != 0,
