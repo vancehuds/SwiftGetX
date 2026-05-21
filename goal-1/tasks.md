@@ -1288,17 +1288,48 @@ Next step:
 
 ## Large Check 9: Settings, Persistence, and Filesystem Safety
 
-Status: [ ]
+Status: [x]
 
 Review Tasks 25-27 for settings consistency, security, data migration, privacy, and large-library behavior. Run broad tests.
 
 Work performed:
 
+- Audited Tasks 25-27 against `Docs/FunctionalImprovementOpportunities.md` sections 5 and 6, covering settings/runtime consistency, download rules, browser takeover host policy, system behavior settings, schema/data repair, import/export redaction, large-library menu/system-policy behavior, and filesystem safety boundaries.
+- Confirmed speed-limit persistence, download rules, browser takeover allow/deny policy, system behavior settings, robust JSON repair, archive import/export sanitation, menu-bar snapshot bounded queries, HTTP/torrent preflight, safe deletion, and protocol-boundary documentation are present and tested.
+- Hardened `DownloadTask.browserContext` so direct assignment also persists only `BrowserDownloadContext.persistable`, preventing accidental Authorization/Cookie/header or handoff-source text persistence outside repair paths.
+- Normalized torrent DHT bootstrap node settings when applying, creating, updating, or initializing `AppSettingsRecord`, so persisted settings do not keep whitespace/duplicate bootstrap entries that runtime options later collapse.
+- Redacted engine snapshot `errorMessage` and connection-summary text before persistence/logging, including failed-task handling.
+- Replaced the active-system-policy full task-table scan with a count query over active/seeding statuses, matching the menu-bar large-library safeguards.
+- Fixed optional-libtorrent magnet preview tests to use valid magnet info hashes and assert runtime native-previewer availability rather than compile-time import alone.
+- Stabilized one async torrent seeding test by waiting for completion status instead of a fixed snapshot count.
+- Committed implementation/test fixes as `9dc1228 Tighten settings and persistence safety`.
+
 Verification evidence:
+
+- `swift test --filter DownloadCoordinator --filter PersistenceArchive --filter TorrentFile` passed with 58 tests across 6 suites.
+- `swift test --filter TorrentMetadataService` passed with 4 tests in 1 suite.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test --filter TorrentMetadataService` passed with 4 tests in 1 suite.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static sensitive-data scan with `rg -n "Authorization|Cookie|token|secret|passkey|signature" Sources/SwiftGetX Sources/SwiftGetXCore Tests/SwiftGetXTests Docs` found expected redaction code, docs, and test fixtures only.
+- Static deletion scan with `rg -n "removeItem\\(|removeItem\\(atPath" Sources/SwiftGetX Sources/SwiftGetXTorrentCore` found app deletion routed through `FileSystemSafety`; remaining direct removals are torrent resume/cache/storage internals.
+- Static menu snapshot/performance scan confirmed menu-bar snapshot paths use count/limited fetches rather than coordinator full-table snapshots.
+- `swift build` passed.
+- `swift test` passed with 265 tests across 20 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed; the existing local Homebrew OpenSSL dylib deployment-target linker warnings were still present.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 268 tests across 21 suites.
 
 Remaining risk:
 
+- Sensitive browser/per-task HTTP headers remain runtime-only by design, not Keychain-backed; authenticated restarts still require live browser context or re-entry.
+- Startup data repair still performs a one-time full task fetch to clean legacy stores; this is acceptable for repair but true paged migration can be improved for very large existing libraries.
+- Large-library safeguards now cover menu snapshots and active system-policy checks, but main-window SwiftUI `@Query` rendering is still not a fully paged virtualized task list.
+- File preflight/deletion checks cannot prevent later external filesystem changes such as permission revocation, APFS capacity changes, network-volume behavior, or destination conflicts created after startup.
+- Optional libtorrent verification still depends on the local native archive and Homebrew OpenSSL libraries, with existing deployment-target linker warnings during optional builds.
+
 Next step:
+
+- Task 28: Sparkle, Signing, Notarization, and Release Gates.
 
 ## Task 28: Sparkle, Signing, Notarization, and Release Gates
 
