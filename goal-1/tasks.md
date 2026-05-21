@@ -1248,17 +1248,43 @@ Next step:
 
 ## Task 27: Filesystem Safety and Protocol Expansion Boundaries
 
-Status: [ ]
+Status: [x]
 
 Add disk-space/permission checks, safe deletion boundary checks, HTTP preallocation/capacity detection where possible, torrent sandbox/path checks, and document/test protocol expansion boundaries for FTP/SFTP, Metalink, HLS/DASH, multi-source, and GitHub/GitLab assets.
 
 Work performed:
 
+- Added `FileSystemSafety` for symlink-resolved boundary checks, safe local deletion filtering, destination directory/write/capacity preflight, torrent layout preflight, and best-effort macOS file preallocation.
+- Routed HTTP final-file deletion, HTTP partial/temporary cleanup, coordinator task deletion, oversized segment repair, and torrent local-content deletion through bounded safe-deletion paths that refuse directory removal unless the path is exact known torrent content inside the save directory.
+- Tightened HTTP partial data discovery so `.part`/manifest/segment sidecar directories are not treated as removable partial files.
+- Extended HTTP capacity handling so segmented downloads account for merge scratch space when segmented mode is actually possible, and added best-effort preallocation for single-part and merge files without truncating progress-visible byte counts.
+- Added Swift torrent runtime preflight for save directory permission/capacity and generated content path containment before peer/storage work starts.
+- Added explicit containment invariants inside `TorrentContentLayout` so generated content roots and file URLs remain inside the selected save directory even before app-level runtime checks.
+- Added `Docs/ProtocolExpansionBoundaries.md` documenting current app-native support and explicit deferred boundaries for FTP/SFTP, Metalink, HLS/DASH, mirror/multi-source downloads, and GitHub/GitLab release-asset API/auth integration.
+- Added regression coverage for symlink deletion escapes, HTTP deletion refusing destination directories, torrent relocation/deletion boundaries, torrent layout containment, unsupported protocol parsing, HLS/DASH/Metalink-as-HTTP-manifest behavior, and GitHub/GitLab release assets remaining direct HTTP downloads.
+- Committed Task 27 implementation as `1ab65ef Harden filesystem and protocol boundaries`.
+
 Verification evidence:
+
+- Initial sandboxed SwiftPM test command failed because SwiftPM could not write `/Users/vancehudson/.cache/clang/ModuleCache`; reruns used approved SwiftPM cache access.
+- `swift test --filter SourceParser --filter HTTPDownloadEngine --filter DownloadCoordinator --filter SwiftGetXTorrentCore` passed with 120 tests across 4 suites.
+- `swift build` passed.
+- First broad `swift test` run had one transient async failure in `Swift adapter stops seeding after configured time`; rerunning that isolated test passed.
+- Final broad `swift test` rerun passed with 262 tests across 20 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 265 tests across 21 suites; the existing local OpenSSL dylib deployment-target linker warnings were still present.
 
 Remaining risk:
 
+- macOS file preallocation is best-effort and intentionally ignored when the filesystem cannot reserve space; capacity checks still run before writes, but sparse files, APFS accounting, concurrent disk use, and network-mounted volumes can change available space after preflight.
+- Torrent runtime preflight checks current save-directory permission and expected wanted bytes, but long-running downloads can still hit later filesystem changes such as permission revocation, disk pressure, or destination conflicts created after startup.
+- FTP/SFTP, Metalink parsing, HLS/DASH media assembly, mirror/multi-source scheduling, and GitHub/GitLab release-asset API/auth integration are explicitly documented as unsupported boundaries rather than implemented engines.
+- Optional libtorrent verification still depends on the local native archive and Homebrew OpenSSL libraries, which continue to emit deployment-target linker warnings in this environment.
+
 Next step:
+
+- Large Check 9: Settings, Persistence, and Filesystem Safety.
 
 ## Large Check 9: Settings, Persistence, and Filesystem Safety
 
