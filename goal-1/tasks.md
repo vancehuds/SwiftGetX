@@ -847,17 +847,42 @@ Next step:
 
 ## Task 19: DHT, PEX, and LSD
 
-Status: [ ]
+Status: [x]
 
 Implement or clearly gate DHT KRPC/routing/bootstrap/get_peers/announce_peer, PEX, LSD, persisted DHT nodes, settings toggles, source statistics, and local mock tests for non-network behavior.
 
 Work performed:
 
+- Added pure Swift DHT support in `SwiftGetXTorrentCore`, including BEP 5 KRPC request/response encoding and parsing for `ping`, `find_node`, `get_peers`, and `announce_peer`.
+- Added DHT routing-table and node persistence helpers so discovered nodes can be loaded from and saved to a task-specific JSON node store for faster subsequent startup.
+- Added compact peer/node parsing and validation for DHT, plus deterministic PEX payload parsing and LSD search message formatting/parsing.
+- Wired the Swift torrent adapter to combine tracker, DHT, PEX, and LSD peers, deduplicate by endpoint, respect max-connection limits, and expose per-source peer counts plus DHT node count in torrent health snapshots.
+- Made the Swift adapter's DHT/PEX/LSD behavior obey runtime settings toggles, and force-disable those discovery paths for private torrents.
+- Surfaced DHT node and peer-source statistics in the inspector health panel, with English and Simplified Chinese localization.
+- Added local mock DHT/PEX/LSD tests for KRPC serialization, routing-table lookup, node-store persistence, DHT peer discovery, PEX parsing, LSD parsing, Swift adapter source statistics, settings toggles, and private-torrent gating.
+
 Verification evidence:
+
+- `swift test --filter DHT --filter PEX --filter LSD` passed with 1 selected adapter test.
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine` passed with 53 tests across 2 suites, including DHT KRPC/routing/node-store, PEX/LSD parsing, adapter discovery source counts, settings toggles, and private torrent gating.
+- `swift test` passed with 214 tests across 16 suites.
+- `swift build` passed.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static core isolation audit with `rg -n "import (SwiftUI|SwiftData|AppKit)|CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore` found no matches.
+- Static libtorrent boundary audit with `rg -n "CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore Sources/SwiftGetX/Services/TorrentDownloadEngine.swift Package.swift` found no matches in `Sources/SwiftGetXTorrentCore`; remaining references are limited to the optional `Package.swift` gate and `Sources/SwiftGetX/Services/TorrentDownloadEngine.swift` app adapter boundary.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; the linker emitted the existing local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 217 tests across 17 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
+- The automated tests use local mock DHT/KRPC, PEX, and LSD fixtures rather than public trackerless magnets or LAN multicast, keeping verification deterministic but leaving real-world NAT/firewall/bootstrap behavior for later manual validation.
+- PEX and LSD are integrated through injectable discovery providers and protocol parsers; full long-running peer-session PEX extraction and live multicast listener behavior can be hardened further after seeding/upload and advanced peer runtime work.
+- DHT routing is deliberately bounded and lightweight for the Swift MVP; richer bucket management, token policy, IPv6 compact forms, backoff persistence, and long-lived node health remain future hardening.
+
 Next step:
+
+- Task 20: Seeding State and Policies.
 
 ## Task 20: Seeding State and Policies
 
