@@ -158,6 +158,7 @@ struct ChromeExtensionDiscovery {
 
     static func defaultDevelopmentExtensionDirectory(bundle: Bundle = .main) -> URL? {
         bundle.url(forResource: "ChromeExtension", withExtension: nil)
+            ?? AppResources.url(forResource: "ChromeExtension")
     }
 
     func discoverExtensionIDs() -> [String] {
