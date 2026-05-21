@@ -464,6 +464,7 @@ private struct TaskRowView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.responsiveLayout) private var layout
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let task: DownloadTask
     let isSelected: Bool
 
@@ -480,6 +481,7 @@ private struct TaskRowView: View {
                     .frame(width: layout.value(22), height: layout.value(34))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(isSelected ? L10n.string("action_clear_selection") : L10n.string("action_select_task"))
             .help(isSelected ? L10n.string("action_clear_selection") : L10n.string("action_select_task"))
 
             Image(systemName: task.kind.symbolName)
@@ -624,6 +626,7 @@ private struct TaskRowView: View {
                             .background(Color.primary.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(isPausable ? L10n.string("action_pause") : L10n.string("action_start"))
                     .help(isPausable ? L10n.string("action_pause") : L10n.string("action_start"))
 
                     Button {
@@ -636,6 +639,7 @@ private struct TaskRowView: View {
                             .background(Color.primary.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.string("action_reveal_in_finder"))
                     .help(L10n.string("action_reveal_in_finder"))
 
                     Button {
@@ -649,10 +653,19 @@ private struct TaskRowView: View {
                             .background(Color.red.opacity(colorScheme == .dark ? 0.20 : 0.10), in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(L10n.string("action_delete_task"))
                     .help(L10n.string("action_delete_task"))
                 }
                 .padding(layout.value(4))
-                .background(.regularMaterial, in: Capsule())
+                .background {
+                    if reduceTransparency {
+                        Capsule()
+                            .fill(Color(nsColor: .controlBackgroundColor))
+                    } else {
+                        Capsule()
+                            .fill(.regularMaterial)
+                    }
+                }
                 .overlay {
                     Capsule()
                         .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.08), lineWidth: 1)

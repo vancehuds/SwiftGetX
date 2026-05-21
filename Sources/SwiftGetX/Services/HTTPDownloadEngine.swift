@@ -758,7 +758,12 @@ private struct HTTPDownloadWorker: Sendable {
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
                 connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
-                httpResponseMetadata: metadata.responseMetadata
+                httpResponseMetadata: metadata.responseMetadata,
+                httpSegments: singleStreamSegments(
+                    totalBytes: metadata.contentLength,
+                    downloadedBytes: shouldResume ? existingBytes : 0,
+                    speedBytesPerSecond: 0
+                )
             )
         )
 
@@ -898,7 +903,12 @@ private struct HTTPDownloadWorker: Sendable {
                     eTag: metadata.eTag,
                     lastModified: metadata.lastModified,
                     connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
-                    httpResponseMetadata: metadata.responseMetadata
+                    httpResponseMetadata: metadata.responseMetadata,
+                    httpSegments: singleStreamSegments(
+                        totalBytes: metadata.contentLength,
+                        downloadedBytes: downloadedBytes,
+                        speedBytesPerSecond: speed
+                    )
                 )
             )
 
@@ -953,7 +963,12 @@ private struct HTTPDownloadWorker: Sendable {
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
                 connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
-                httpResponseMetadata: metadata.responseMetadata
+                httpResponseMetadata: metadata.responseMetadata,
+                httpSegments: singleStreamSegments(
+                    totalBytes: max(metadata.contentLength, downloadedBytes),
+                    downloadedBytes: downloadedBytes,
+                    speedBytesPerSecond: 0
+                )
             )
         )
     }
@@ -970,8 +985,9 @@ private struct HTTPDownloadWorker: Sendable {
 
         let plan = manifest.segmentPlan
         try layout.repairOversizedSegments(for: plan)
-        let initialBytes = try layout.segmentProgress(for: plan)
-        let progress = SegmentProgress(initialBytes: initialBytes)
+        let initialSegments = try layout.segmentInfos(for: plan)
+        let initialBytes = initialSegments.reduce(Int64(0)) { $0 + $1.downloadedBytes }
+        let progress = SegmentProgress(segments: initialSegments)
         let summary = connectionSummary(segmentCount: plan.segments.count, supportsResume: true)
 
         emit(
@@ -987,7 +1003,8 @@ private struct HTTPDownloadWorker: Sendable {
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
                 connectionSummary: summary,
-                httpResponseMetadata: metadata.responseMetadata
+                httpResponseMetadata: metadata.responseMetadata,
+                httpSegments: initialSegments
             )
         )
 
@@ -1042,7 +1059,8 @@ private struct HTTPDownloadWorker: Sendable {
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
                 connectionSummary: summary,
-                httpResponseMetadata: metadata.responseMetadata
+                httpResponseMetadata: metadata.responseMetadata,
+                httpSegments: await progress.currentSegments()
             )
         )
 
@@ -1083,7 +1101,8 @@ private struct HTTPDownloadWorker: Sendable {
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
                 connectionSummary: summary,
-                httpResponseMetadata: metadata.responseMetadata
+                httpResponseMetadata: metadata.responseMetadata,
+                httpSegments: await progress.currentSegments()
             )
         )
     }
@@ -1118,7 +1137,8 @@ private struct HTTPDownloadWorker: Sendable {
                     eTag: metadata.eTag,
                     lastModified: metadata.lastModified,
                     connectionSummary: summary,
-                    httpResponseMetadata: metadata.responseMetadata
+                    httpResponseMetadata: metadata.responseMetadata,
+                    httpSegments: sample.segments
                 )
             )
         }
@@ -1159,6 +1179,7 @@ private struct HTTPDownloadWorker: Sendable {
                 }
 
                 emitRetry(request, error: error, attempt: attempt + 1)
+                await progress.setRetryCount(attempt + 1, for: segment.index)
                 try? await Task.sleep(for: .seconds(min(6, attempt + 1)))
             }
         }
@@ -1184,7 +1205,7 @@ private struct HTTPDownloadWorker: Sendable {
 
         var localBytes = HTTPTemporaryLayout.localSize(at: segmentURL)
         if localBytes > segment.length {
-            await progress.add(-localBytes)
+            await progress.setDownloadedBytes(0, for: segment.index)
             try FileManager.default.removeItem(at: segmentURL)
             FileManager.default.createFile(atPath: segmentURL.path, contents: nil)
             layout.setFileHidden(at: segmentURL, hidden: hidesTemporaryFiles)
@@ -1243,7 +1264,7 @@ private struct HTTPDownloadWorker: Sendable {
 
             let bytes = Int64(buffer.count)
             try fileHandle.write(contentsOf: Data(buffer))
-            await progress.add(bytes)
+            await progress.add(bytes, to: segment.index)
             buffer.removeAll(keepingCapacity: true)
             await waitForDownloadCapacity(request: request, bytes: bytes)
         }
@@ -1420,6 +1441,23 @@ private struct HTTPDownloadWorker: Sendable {
         onSnapshot?(snapshot)
     }
 
+    private func singleStreamSegments(
+        totalBytes: Int64,
+        downloadedBytes: Int64,
+        speedBytesPerSecond: Int64
+    ) -> [HTTPSegmentInfo]? {
+        guard totalBytes > 0 else { return nil }
+        return [
+            HTTPSegmentInfo(
+                index: 0,
+                startByte: 0,
+                endByte: totalBytes - 1,
+                downloadedBytes: downloadedBytes,
+                speedBytesPerSecond: speedBytesPerSecond
+            )
+        ]
+    }
+
     private func connectionSummary(segmentCount: Int, supportsResume: Bool) -> String {
         let streamDescription = segmentCount > 1
             ? L10n.string("http_connection_segments", segmentCount)
@@ -1552,6 +1590,21 @@ private struct HTTPTemporaryLayout: Sendable {
                 throw HTTPDownloadError.invalidLocalData(L10n.string("error_segment_too_large", segment.index))
             }
             return partialResult + size
+        }
+    }
+
+    func segmentInfos(for plan: SegmentPlan) throws -> [HTTPSegmentInfo] {
+        try plan.segments.map { segment in
+            let size = Self.localSize(at: segmentURL(index: segment.index))
+            guard size <= segment.length else {
+                throw HTTPDownloadError.invalidLocalData(L10n.string("error_segment_too_large", segment.index))
+            }
+            return HTTPSegmentInfo(
+                index: segment.index,
+                startByte: segment.start,
+                endByte: segment.end,
+                downloadedBytes: size
+            )
         }
     }
 
@@ -1883,19 +1936,81 @@ actor SegmentProgress {
     private var downloaded: Int64
     private var lastDownloaded: Int64
     private var lastSampledAt: Date
+    private var segmentsByIndex: [Int: HTTPSegmentInfo]
+    private var lastSegmentBytesByIndex: [Int: Int64]
 
     init(initialBytes: Int64) {
         downloaded = initialBytes
         lastDownloaded = initialBytes
         lastSampledAt = Date()
+        segmentsByIndex = [:]
+        lastSegmentBytesByIndex = [:]
+    }
+
+    init(segments: [HTTPSegmentInfo]) {
+        segmentsByIndex = Dictionary(uniqueKeysWithValues: segments.map { ($0.index, $0) })
+        lastSegmentBytesByIndex = Dictionary(uniqueKeysWithValues: segments.map { ($0.index, $0.downloadedBytes) })
+        downloaded = segments.reduce(Int64(0)) { $0 + $1.downloadedBytes }
+        lastDownloaded = downloaded
+        lastSampledAt = Date()
     }
 
     func add(_ bytes: Int64) {
-        downloaded += bytes
+        downloaded = max(0, downloaded + bytes)
+    }
+
+    func add(_ bytes: Int64, to index: Int) {
+        guard var segment = segmentsByIndex[index] else {
+            add(bytes)
+            return
+        }
+        let previous = segment.downloadedBytes
+        segment = HTTPSegmentInfo(
+            index: segment.index,
+            startByte: segment.startByte,
+            endByte: segment.endByte,
+            downloadedBytes: previous + bytes,
+            speedBytesPerSecond: segment.speedBytesPerSecond,
+            retryCount: segment.retryCount
+        )
+        segmentsByIndex[index] = segment
+        downloaded = max(0, downloaded + (segment.downloadedBytes - previous))
+    }
+
+    func setDownloadedBytes(_ bytes: Int64, for index: Int) {
+        guard var segment = segmentsByIndex[index] else { return }
+        let previous = segment.downloadedBytes
+        segment = HTTPSegmentInfo(
+            index: segment.index,
+            startByte: segment.startByte,
+            endByte: segment.endByte,
+            downloadedBytes: bytes,
+            speedBytesPerSecond: segment.speedBytesPerSecond,
+            retryCount: segment.retryCount
+        )
+        segmentsByIndex[index] = segment
+        downloaded = max(0, downloaded + (segment.downloadedBytes - previous))
+    }
+
+    func setRetryCount(_ count: Int, for index: Int) {
+        guard var segment = segmentsByIndex[index] else { return }
+        segment = HTTPSegmentInfo(
+            index: segment.index,
+            startByte: segment.startByte,
+            endByte: segment.endByte,
+            downloadedBytes: segment.downloadedBytes,
+            speedBytesPerSecond: segment.speedBytesPerSecond,
+            retryCount: max(segment.retryCount, count)
+        )
+        segmentsByIndex[index] = segment
     }
 
     func downloadedBytes() -> Int64 {
         downloaded
+    }
+
+    func currentSegments() -> [HTTPSegmentInfo] {
+        segmentsByIndex.values.sorted { $0.index < $1.index }
     }
 
     func sample() -> SegmentProgressSample {
@@ -1903,11 +2018,28 @@ actor SegmentProgress {
         let elapsed = max(now.timeIntervalSince(lastSampledAt), 0.001)
         let delta = max(0, downloaded - lastDownloaded)
         let speed = Int64(Double(delta) / elapsed)
+        var segments = currentSegments()
+        for index in segments.indices {
+            let segment = segments[index]
+            let lastBytes = lastSegmentBytesByIndex[segment.index] ?? segment.downloadedBytes
+            let delta = max(0, segment.downloadedBytes - lastBytes)
+            segments[index] = HTTPSegmentInfo(
+                index: segment.index,
+                startByte: segment.startByte,
+                endByte: segment.endByte,
+                downloadedBytes: segment.downloadedBytes,
+                speedBytesPerSecond: Int64(Double(delta) / elapsed),
+                retryCount: segment.retryCount
+            )
+        }
+        segmentsByIndex = Dictionary(uniqueKeysWithValues: segments.map { ($0.index, $0) })
+        lastSegmentBytesByIndex = Dictionary(uniqueKeysWithValues: segments.map { ($0.index, $0.downloadedBytes) })
         lastDownloaded = downloaded
         lastSampledAt = now
         return SegmentProgressSample(
             downloadedBytes: downloaded,
-            speedBytesPerSecond: speed
+            speedBytesPerSecond: speed,
+            segments: segments
         )
     }
 }
@@ -1915,4 +2047,15 @@ actor SegmentProgress {
 struct SegmentProgressSample: Sendable, Equatable {
     let downloadedBytes: Int64
     let speedBytesPerSecond: Int64
+    let segments: [HTTPSegmentInfo]
+
+    init(
+        downloadedBytes: Int64,
+        speedBytesPerSecond: Int64,
+        segments: [HTTPSegmentInfo] = []
+    ) {
+        self.downloadedBytes = downloadedBytes
+        self.speedBytesPerSecond = speedBytesPerSecond
+        self.segments = segments
+    }
 }

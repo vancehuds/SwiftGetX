@@ -365,6 +365,34 @@ struct HTTPDownloadEngineTests {
         })
     }
 
+    @Test("emits HTTP segment details")
+    func emitsHTTPSegmentDetails() async throws {
+        let payload = Self.largePayload()
+        let server = try RangeTestServer(payload: payload, behavior: .failFirstRangedGET(status: 500))
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 4, retryLimit: 1)
+        await engine.start(Self.request(source: server.url, destination: destination))
+
+        let completed = try #require(recorder.snapshots.last(where: { $0.status == .completed }))
+        let segments = try #require(completed.httpSegments)
+        #expect(segments.count == 4)
+        #expect(segments.map(\.index) == [0, 1, 2, 3])
+        #expect(segments.reduce(Int64(0)) { $0 + $1.length } == Int64(payload.count))
+        #expect(segments.reduce(Int64(0)) { $0 + $1.downloadedBytes } == Int64(payload.count))
+        #expect(segments.contains { $0.retryCount == 1 })
+    }
+
     @Test("honors per-task retry override")
     func honorsPerTaskRetryOverride() async throws {
         let payload = Self.payload()

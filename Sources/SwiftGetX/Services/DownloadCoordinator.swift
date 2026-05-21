@@ -651,6 +651,10 @@ final class DownloadCoordinator {
 
     private func start(_ task: DownloadTask, resetsQueueFailureState: Bool) {
         guard !task.isArchived else { return }
+        if task.startedAt == nil {
+            task.startedAt = .now
+        }
+        task.finishedAt = nil
         task.status = .running
         task.errorMessage = nil
         task.retryCount = 0
@@ -730,6 +734,7 @@ final class DownloadCoordinator {
         task.status = .queued
         task.errorMessage = nil
         task.speedBytesPerSecond = 0
+        task.finishedAt = nil
         task.nextQueueRetryAt = nil
         if task.queueFailureCount > 0 {
             task.queueFailureCount = 0
@@ -750,6 +755,7 @@ final class DownloadCoordinator {
         let shouldScheduleQueue = task.usesActiveDownloadSlot
         task.status = .cancelled
         task.speedBytesPerSecond = 0
+        task.finishedAt = .now
         task.errorMessage = L10n.string("error_task_cancelled")
         task.nextQueueRetryAt = nil
         task.queueFailureCount = 0
@@ -841,6 +847,54 @@ final class DownloadCoordinator {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(errorMessage, forType: .string)
         task.appendLog(L10n.string("log_copied_error"))
+        save()
+    }
+
+    func copyLogs(_ task: DownloadTask) {
+        let text = Self.logExportText(for: task)
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        task.appendLog(L10n.string("log_copied_logs"))
+        save()
+    }
+
+    @discardableResult
+    func exportLogs(_ task: DownloadTask, to directory: URL? = nil) -> URL? {
+        let text = Self.logExportText(for: task)
+        guard !text.isEmpty else { return nil }
+
+        let exportDirectory = directory
+            ?? URL(fileURLWithPath: task.displaySavePath)
+                .deletingLastPathComponent()
+        let sanitizedName = SourceParser
+            .sanitizeFilename(task.name)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let exportName = sanitizedName.isEmpty ? "swiftgetx-task" : sanitizedName
+        let filename = "\(exportName)-swiftgetx.log"
+        let destination = FileManager.default.uniqueFileURL(
+            for: exportDirectory.appendingPathComponent(filename)
+        )
+
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try text.write(to: destination, atomically: true, encoding: .utf8)
+            task.appendLog(L10n.string("log_exported_logs", destination.path))
+            save()
+            return destination
+        } catch {
+            task.appendLog(error.localizedDescription)
+            save()
+            return nil
+        }
+    }
+
+    func clearLogs(_ task: DownloadTask) {
+        guard !task.logEntries.isEmpty else { return }
+        task.logEntries.removeAll()
         save()
     }
 
@@ -1335,6 +1389,7 @@ final class DownloadCoordinator {
 
         let previousStatus = task.status
         task.status = snapshot.status
+        updateTimingMetrics(for: task, snapshot: snapshot)
         if let name = snapshot.name {
             task.name = name
         }
@@ -1380,6 +1435,9 @@ final class DownloadCoordinator {
         if let httpResponseMetadata = snapshot.httpResponseMetadata {
             task.httpResponseMetadata = httpResponseMetadata.merged(over: task.httpResponseMetadata)
         }
+        if let httpSegments = snapshot.httpSegments {
+            task.httpSegments = httpSegments
+        }
         if let torrentConnection = snapshot.torrentConnection {
             task.torrentConnection = torrentConnection
             task.connectionSummary = torrentConnection.summary
@@ -1405,7 +1463,9 @@ final class DownloadCoordinator {
             task.queueFailureCount = 0
             task.nextQueueRetryAt = nil
             if task.completedAt == nil {
-                task.completedAt = .now
+                let finishedAt = task.finishedAt ?? Date()
+                task.finishedAt = finishedAt
+                task.completedAt = finishedAt
                 task.appendLog(L10n.string("log_download_ready_seeding"))
                 if settings?.completionNotificationsEnabled ?? true {
                     NotificationManager.notifyCompletion(for: task)
@@ -1419,7 +1479,9 @@ final class DownloadCoordinator {
             task.queueFailureCount = 0
             task.nextQueueRetryAt = nil
             if task.completedAt == nil {
-                task.completedAt = .now
+                let finishedAt = task.finishedAt ?? Date()
+                task.finishedAt = finishedAt
+                task.completedAt = finishedAt
                 task.appendLog(L10n.string("log_download_completed"))
                 if settings?.completionNotificationsEnabled ?? true {
                     NotificationManager.notifyCompletion(for: task)
@@ -1451,6 +1513,33 @@ final class DownloadCoordinator {
         }
 
         save()
+    }
+
+    private func updateTimingMetrics(for task: DownloadTask, snapshot: DownloadSnapshot) {
+        if snapshot.status.usesActiveClock, task.startedAt == nil {
+            task.startedAt = .now
+        }
+        if snapshot.status.isTerminalForMetrics || snapshot.status == .seeding {
+            if task.finishedAt == nil {
+                task.finishedAt = .now
+            }
+        } else if snapshot.status.usesActiveClock {
+            task.finishedAt = nil
+        }
+
+        task.peakSpeedBytesPerSecond = max(
+            task.peakSpeedBytesPerSecond,
+            snapshot.speedBytesPerSecond
+        )
+
+        guard let startedAt = task.startedAt else { return }
+        let endDate = task.effectiveFinishedAt ?? Date()
+        let elapsed = max(0, endDate.timeIntervalSince(startedAt))
+        guard elapsed > 0, snapshot.downloadedBytes > 0 else { return }
+        task.averageSpeedBytesPerSecond = max(
+            0,
+            Int64(Double(snapshot.downloadedBytes) / elapsed)
+        )
     }
 
     private func engine(for kind: DownloadKind) -> any DownloadEngine {
@@ -1784,6 +1873,10 @@ final class DownloadCoordinator {
 
     private static func normalizedTag(_ tag: String) -> String {
         DownloadTask.normalizedTagList([tag]).first ?? ""
+    }
+
+    private static func logExportText(for task: DownloadTask) -> String {
+        task.logEntries.joined(separator: "\n")
     }
 
     private func formattedSpeedLimit(_ bytesPerSecond: Int64) -> String {

@@ -265,6 +265,37 @@ struct AppCommands: Commands {
                 coordinator.resumeAll()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
+
+            Divider()
+
+            Button(L10n.string("command_toggle_selected")) {
+                if coordinator.selectedTasks.contains(where: { $0.usesActiveDownloadSlot || $0.status == .seeding }) {
+                    coordinator.pauseSelected()
+                } else {
+                    coordinator.resumeSelected()
+                }
+            }
+            .keyboardShortcut(.return, modifiers: [.command])
+
+            Button(L10n.string("command_retry_selected")) {
+                coordinator.retrySelected()
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
+
+            Button(L10n.string("command_recheck_selected")) {
+                coordinator.recheckSelected()
+            }
+            .keyboardShortcut("k", modifiers: [.command, .option])
+
+            Button(L10n.string("command_delete_selected")) {
+                NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
+            }
+            .keyboardShortcut(.delete, modifiers: [])
+
+            Button(L10n.string("command_focus_search")) {
+                NotificationCenter.default.post(name: .focusTaskSearch, object: nil)
+            }
+            .keyboardShortcut("f")
         }
     }
 }
@@ -487,4 +518,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 extension Notification.Name {
     static let showNewTaskSheet = Notification.Name("SwiftGetX.showNewTaskSheet")
     static let focusTaskFromNotification = Notification.Name("SwiftGetX.focusTaskFromNotification")
+    static let focusTaskSearch = Notification.Name("SwiftGetX.focusTaskSearch")
 }

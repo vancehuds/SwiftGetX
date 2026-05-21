@@ -548,7 +548,13 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
     private func connectionSummary(from nativeStatus: SGXTorrentStatus) -> String {
         let downloadSpeed = Self.speedLabel(nativeStatus.download_rate)
         let uploadSpeed = Self.speedLabel(nativeStatus.upload_rate)
-        return "\(nativeStatus.num_peers) peers · ↓ \(downloadSpeed) · ↑ \(uploadSpeed) · ratio \(String(format: "%.2f", nativeStatus.share_ratio))"
+        return L10n.string(
+            "torrent_connection_summary",
+            Int(nativeStatus.num_peers),
+            downloadSpeed,
+            uploadSpeed,
+            Double(nativeStatus.share_ratio)
+        )
     }
 
     private nonisolated static func speedLabel(_ bytesPerSecond: Int64) -> String {

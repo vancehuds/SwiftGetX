@@ -16,7 +16,11 @@ final class DownloadTask {
     var speedBytesPerSecond: Int64
     var etaSeconds: TimeInterval?
     var createdAt: Date
+    var startedAt: Date?
     var completedAt: Date?
+    var finishedAt: Date?
+    var averageSpeedBytesPerSecond: Int64 = 0
+    var peakSpeedBytesPerSecond: Int64 = 0
     var errorMessage: String?
     var retryCount: Int
     var supportsResume: Bool
@@ -40,6 +44,7 @@ final class DownloadTask {
     var browserContextJSON: String?
     var httpResponseMetadataJSON: String?
     var httpOptionsJSON: String?
+    var httpSegmentsJSON: String?
     var queuePosition: Double = 0
     var queuePriorityRawValue: String = DownloadQueuePriority.normal.rawValue
     var queueFailureCount: Int = 0
@@ -63,7 +68,11 @@ final class DownloadTask {
         speedBytesPerSecond: Int64 = 0,
         etaSeconds: TimeInterval? = nil,
         createdAt: Date = .now,
+        startedAt: Date? = nil,
         completedAt: Date? = nil,
+        finishedAt: Date? = nil,
+        averageSpeedBytesPerSecond: Int64 = 0,
+        peakSpeedBytesPerSecond: Int64 = 0,
         errorMessage: String? = nil,
         retryCount: Int = 0,
         supportsResume: Bool = false,
@@ -87,6 +96,7 @@ final class DownloadTask {
         browserContext: BrowserDownloadContext? = nil,
         httpResponseMetadata: HTTPResponseMetadata? = nil,
         httpOptions: HTTPDownloadOptions? = nil,
+        httpSegments: [HTTPSegmentInfo]? = nil,
         queuePosition: Double = 0,
         queuePriority: DownloadQueuePriority = .normal,
         queueFailureCount: Int = 0,
@@ -109,7 +119,11 @@ final class DownloadTask {
         self.speedBytesPerSecond = speedBytesPerSecond
         self.etaSeconds = etaSeconds
         self.createdAt = createdAt
+        self.startedAt = startedAt
         self.completedAt = completedAt
+        self.finishedAt = finishedAt ?? completedAt
+        self.averageSpeedBytesPerSecond = max(0, averageSpeedBytesPerSecond)
+        self.peakSpeedBytesPerSecond = max(0, peakSpeedBytesPerSecond)
         self.errorMessage = errorMessage
         self.retryCount = retryCount
         self.supportsResume = supportsResume
@@ -133,6 +147,7 @@ final class DownloadTask {
         self.browserContextJSON = Self.encode(browserContext)
         self.httpResponseMetadataJSON = Self.encode(httpResponseMetadata)
         self.httpOptionsJSON = Self.encodeHTTPOptions(httpOptions)
+        self.httpSegmentsJSON = Self.encode(httpSegments)
         self.queuePosition = queuePosition
         self.queuePriorityRawValue = queuePriority.rawValue
         self.queueFailureCount = queueFailureCount
@@ -192,6 +207,16 @@ final class DownloadTask {
 
     var isArchived: Bool {
         archivedAt != nil
+    }
+
+    var effectiveFinishedAt: Date? {
+        finishedAt ?? completedAt
+    }
+
+    var activeDurationSeconds: TimeInterval {
+        guard let startedAt else { return 0 }
+        let endDate = effectiveFinishedAt ?? Date()
+        return max(0, endDate.timeIntervalSince(startedAt))
     }
 
     var normalizedTags: [String] {
@@ -368,6 +393,11 @@ final class DownloadTask {
     var httpOptions: HTTPDownloadOptions? {
         get { Self.decode(HTTPDownloadOptions.self, from: httpOptionsJSON) }
         set { httpOptionsJSON = Self.encodeHTTPOptions(newValue) }
+    }
+
+    var httpSegments: [HTTPSegmentInfo] {
+        get { Self.decode([HTTPSegmentInfo].self, from: httpSegmentsJSON) ?? [] }
+        set { httpSegmentsJSON = Self.encode(newValue.sorted { $0.index < $1.index }) }
     }
 
     func applyTorrentLayout(
@@ -553,6 +583,24 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             "xmark.circle.fill"
         }
     }
+
+    var usesActiveClock: Bool {
+        switch self {
+        case .running, .fetchingMetadata, .fetchingPeers, .connectingPeers, .verifying:
+            true
+        case .queued, .seeding, .paused, .completed, .failed, .cancelled:
+            false
+        }
+    }
+
+    var isTerminalForMetrics: Bool {
+        switch self {
+        case .completed, .failed, .cancelled:
+            true
+        case .queued, .running, .fetchingMetadata, .fetchingPeers, .connectingPeers, .seeding, .paused, .verifying:
+            false
+        }
+    }
 }
 
 enum DownloadQueuePriority: String, Codable, CaseIterable, Identifiable {
@@ -670,6 +718,7 @@ struct DownloadSnapshot: Sendable {
     let torrentHealth: TorrentHealthInfo?
     let connectionSummary: String?
     let httpResponseMetadata: HTTPResponseMetadata?
+    let httpSegments: [HTTPSegmentInfo]?
     let retryCount: Int?
 
     init(
@@ -688,6 +737,7 @@ struct DownloadSnapshot: Sendable {
         torrentFiles: [TorrentFile] = [],
         connectionSummary: String? = nil,
         httpResponseMetadata: HTTPResponseMetadata? = nil,
+        httpSegments: [HTTPSegmentInfo]? = nil,
         retryCount: Int? = nil,
         resolvedTorrentFilePath: String? = nil,
         torrentMetadataStatus: TorrentMetadataStatus? = nil,
@@ -721,7 +771,47 @@ struct DownloadSnapshot: Sendable {
         self.torrentHealth = torrentHealth
         self.connectionSummary = connectionSummary
         self.httpResponseMetadata = httpResponseMetadata
+        self.httpSegments = httpSegments
         self.retryCount = retryCount
+    }
+}
+
+struct HTTPSegmentInfo: Codable, Identifiable, Equatable, Sendable {
+    var index: Int
+    var startByte: Int64
+    var endByte: Int64
+    var downloadedBytes: Int64
+    var speedBytesPerSecond: Int64
+    var retryCount: Int
+
+    var id: Int { index }
+
+    init(
+        index: Int,
+        startByte: Int64,
+        endByte: Int64,
+        downloadedBytes: Int64 = 0,
+        speedBytesPerSecond: Int64 = 0,
+        retryCount: Int = 0
+    ) {
+        let boundedStart = max(0, startByte)
+        let boundedEnd = max(boundedStart, endByte)
+        let boundedLength = max(0, boundedEnd - boundedStart + 1)
+        self.index = index
+        self.startByte = boundedStart
+        self.endByte = boundedEnd
+        self.downloadedBytes = min(max(0, downloadedBytes), boundedLength)
+        self.speedBytesPerSecond = max(0, speedBytesPerSecond)
+        self.retryCount = max(0, retryCount)
+    }
+
+    var length: Int64 {
+        max(0, endByte - startByte + 1)
+    }
+
+    var progress: Double {
+        guard length > 0 else { return 0 }
+        return min(max(Double(downloadedBytes) / Double(length), 0), 1)
     }
 }
 

@@ -308,6 +308,75 @@ struct DownloadCoordinatorTests {
         #expect(task.eTag == nil)
     }
 
+    @Test("snapshots update metrics segments and log export")
+    func snapshotsUpdateMetricsSegmentsAndLogExport() throws {
+        let fixture = try makeFixture()
+        let task = makeTask(name: "Metrics", status: .running, queuePosition: 1)
+        task.startedAt = Date().addingTimeInterval(-10)
+        task.logEntries = [
+            "[00:00:00] First",
+            "[00:00:01] Second"
+        ]
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.apply(DownloadSnapshot(
+            taskID: task.id,
+            status: .running,
+            totalBytes: 1000,
+            downloadedBytes: 500,
+            speedBytesPerSecond: 250,
+            etaSeconds: 2,
+            errorMessage: nil,
+            supportsResume: true,
+            eTag: nil,
+            lastModified: nil,
+            httpSegments: [
+                HTTPSegmentInfo(index: 0, startByte: 0, endByte: 499, downloadedBytes: 250, speedBytesPerSecond: 125),
+                HTTPSegmentInfo(index: 1, startByte: 500, endByte: 999, downloadedBytes: 250, speedBytesPerSecond: 125)
+            ]
+        ))
+
+        #expect(task.startedAt != nil)
+        #expect(task.finishedAt == nil)
+        #expect(task.peakSpeedBytesPerSecond == 250)
+        #expect(task.averageSpeedBytesPerSecond > 0)
+        #expect(task.httpSegments.count == 2)
+
+        fixture.coordinator.apply(DownloadSnapshot(
+            taskID: task.id,
+            status: .completed,
+            totalBytes: 1000,
+            downloadedBytes: 1000,
+            speedBytesPerSecond: 0,
+            etaSeconds: 0,
+            errorMessage: nil,
+            supportsResume: true,
+            eTag: nil,
+            lastModified: nil,
+            httpSegments: [
+                HTTPSegmentInfo(index: 0, startByte: 0, endByte: 499, downloadedBytes: 500),
+                HTTPSegmentInfo(index: 1, startByte: 500, endByte: 999, downloadedBytes: 500)
+            ]
+        ))
+
+        #expect(task.finishedAt != nil)
+        #expect(task.completedAt == task.finishedAt)
+        #expect(task.httpSegments.allSatisfy { $0.progress == 1 })
+
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let exportedURL = try #require(fixture.coordinator.exportLogs(task, to: directory))
+        let exportedText = try String(contentsOf: exportedURL, encoding: .utf8)
+        #expect(exportedText.contains("First"))
+        #expect(exportedText.contains("Second"))
+        #expect(task.logEntries.contains { $0.contains(L10n.string("log_exported_logs", exportedURL.path)) })
+
+        fixture.coordinator.clearLogs(task)
+        #expect(task.logEntries.isEmpty)
+    }
+
     @Test("partial data actions retain delete and rename HTTP data")
     func partialDataActionsRetainDeleteAndRenameHTTPData() throws {
         let fixture = try makeFixture()

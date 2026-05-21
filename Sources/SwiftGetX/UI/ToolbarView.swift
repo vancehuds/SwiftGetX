@@ -59,6 +59,7 @@ struct ToolbarView: View {
                         Image(systemName: "plus")
                     }
                     .buttonStyle(IconButtonStyle())
+                    .accessibilityLabel(L10n.string("command_new_download"))
                     .help(L10n.string("command_new_download"))
 
                     Button {
@@ -72,6 +73,7 @@ struct ToolbarView: View {
                     }
                     .buttonStyle(IconButtonStyle())
                     .disabled(!hasSelection)
+                    .accessibilityLabel(L10n.string("help_toggle_selected_task"))
                     .help(L10n.string("help_toggle_selected_task"))
 
                     Button {
@@ -81,6 +83,7 @@ struct ToolbarView: View {
                     }
                     .buttonStyle(IconButtonStyle())
                     .disabled(!hasSelection)
+                    .accessibilityLabel(L10n.string("action_delete_task"))
                     .help(L10n.string("action_delete_task"))
                 }
 
@@ -101,6 +104,7 @@ struct ToolbarView: View {
                 .padding(.horizontal, layout.value(12))
                 .frame(height: layout.value(34))
                 .frame(width: layout.value(280))
+                .accessibilityLabel(L10n.string("search_placeholder"))
                 .background {
                     RoundedRectangle(cornerRadius: layout.value(9), style: .continuous)
                         .fill(Color.primary.opacity(colorScheme == .dark ? 0.075 : 0.035))
@@ -119,6 +123,9 @@ struct ToolbarView: View {
                         }
                 }
                 .animation(.easeOut(duration: 0.12), value: isSearchFocused)
+                .onReceive(NotificationCenter.default.publisher(for: .focusTaskSearch)) { _ in
+                    isSearchFocused = true
+                }
 
                 Spacer()
 
@@ -159,6 +166,7 @@ struct ToolbarView: View {
                         Image(systemName: "gearshape")
                     }
                     .buttonStyle(IconButtonStyle())
+                    .accessibilityLabel(L10n.string("menu_settings_plain"))
                     .help(L10n.string("menu_settings_plain"))
                 }
             }
@@ -209,6 +217,7 @@ private struct SpeedLimitMenu: View {
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
+        .accessibilityLabel(L10n.string("global_speed_limit"))
         .help(L10n.string("global_speed_limit"))
     }
 }

@@ -33,6 +33,8 @@ struct InspectorView: View {
                                 FilesPanel(task: task)
                             case .connections:
                                 ConnectionsPanel(task: task)
+                            case .segments:
+                                HTTPSegmentsPanel(task: task)
                             case .logs:
                                 LogsPanel(task: task)
                             }
@@ -124,6 +126,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
     case overview
     case files
     case connections
+    case segments
     case logs
 
     var id: String { rawValue }
@@ -133,6 +136,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
         case .overview: L10n.string("inspector_tab_overview")
         case .files: L10n.string("inspector_tab_files")
         case .connections: L10n.string("inspector_tab_connections")
+        case .segments: L10n.string("inspector_tab_segments")
         case .logs: L10n.string("inspector_tab_logs")
         }
     }
@@ -142,6 +146,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
         case .overview: "info.circle"
         case .files: "folder"
         case .connections: "point.3.connected.trianglepath.dotted"
+        case .segments: "square.split.2x2"
         case .logs: "list.bullet.rectangle"
         }
     }
@@ -149,7 +154,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
     static func tabs(for kind: DownloadKind) -> [InspectorTab] {
         switch kind {
         case .http:
-            [.overview, .logs]
+            [.overview, .segments, .logs]
         case .torrentMagnet, .torrentFile:
             [.overview, .files, .connections, .logs]
         }
@@ -177,16 +182,16 @@ private struct OverviewPanel: View {
 
                 MetricCard(
                     title: L10n.string("metric_download_speed"),
-                    value: task.status == .running
+                    value: task.status.usesActiveClock
                         ? ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond) + "/s"
                         : "--",
                     symbol: "arrow.down.circle",
-                    color: task.status == .running ? .green : .secondary
+                    color: task.status.usesActiveClock ? .green : .secondary
                 )
 
                 MetricCard(
                     title: L10n.string("metric_eta"),
-                    value: task.status == .running
+                    value: task.status.usesActiveClock
                         ? (task.etaSeconds.map(TimeFormatter.eta) ?? L10n.string("unknown"))
                         : "--",
                     symbol: "clock",
@@ -198,6 +203,20 @@ private struct OverviewPanel: View {
                     value: ByteCountFormatter.downloadFormatter.string(fromByteCount: task.downloadedBytes),
                     symbol: "chart.bar.fill",
                     color: .blue
+                )
+
+                MetricCard(
+                    title: L10n.string("metric_average_speed"),
+                    value: speed(task.averageSpeedBytesPerSecond),
+                    symbol: "speedometer",
+                    color: .secondary
+                )
+
+                MetricCard(
+                    title: L10n.string("metric_peak_speed"),
+                    value: speed(task.peakSpeedBytesPerSecond),
+                    symbol: "gauge.high",
+                    color: .secondary
                 )
             }
 
@@ -216,11 +235,33 @@ private struct OverviewPanel: View {
                 if let connectionSummary = task.connectionSummary {
                     DetailRow(title: L10n.string("detail_connection"), value: connectionSummary)
                 }
+                if let startedAt = task.startedAt {
+                    DetailRow(title: L10n.string("detail_started_at"), value: Self.dateString(startedAt))
+                }
+                if let finishedAt = task.effectiveFinishedAt {
+                    DetailRow(title: L10n.string("detail_finished_at"), value: Self.dateString(finishedAt))
+                }
+                DetailRow(title: L10n.string("detail_duration"), value: durationText)
                 if let errorMessage = task.errorMessage {
-                    DetailRow(title: L10n.string("detail_error"), value: errorMessage, color: .red)
+                    ErrorActionCard(task: task, errorMessage: errorMessage)
                 }
             }
         }
+    }
+
+    private var durationText: String {
+        task.activeDurationSeconds > 0
+            ? TimeFormatter.eta(task.activeDurationSeconds)
+            : "--"
+    }
+
+    private func speed(_ bytesPerSecond: Int64) -> String {
+        guard bytesPerSecond > 0 else { return "--" }
+        return ByteCountFormatter.downloadFormatter.string(fromByteCount: bytesPerSecond) + "/s"
+    }
+
+    private static func dateString(_ date: Date) -> String {
+        DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .medium)
     }
 
     private var statusColor: Color {
@@ -268,6 +309,130 @@ private struct MetricCard: View {
         .background {
             ContentSurfaceBackground(cornerRadius: 8)
         }
+    }
+}
+
+private struct ErrorActionCard: View {
+    @Environment(DownloadCoordinator.self) private var coordinator
+    @Environment(\.responsiveLayout) private var layout
+    let task: DownloadTask
+    let errorMessage: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(10)) {
+            Label(L10n.string("detail_error"), systemImage: "exclamationmark.triangle.fill")
+                .font(layout.font(10, weight: .semibold))
+                .foregroundStyle(Color.red)
+
+            Text(errorMessage)
+                .font(layout.font(12, design: .monospaced))
+                .foregroundStyle(Color.red)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: layout.value(8)) {
+                Button {
+                    coordinator.copyErrorMessage(task)
+                } label: {
+                    Label(L10n.string("action_copy_error"), systemImage: "doc.on.doc")
+                }
+
+                if task.status == .failed || task.status == .cancelled || task.status == .paused {
+                    Button {
+                        coordinator.retry(task)
+                    } label: {
+                        Label(L10n.string("action_retry_task"), systemImage: "arrow.clockwise")
+                    }
+                }
+
+                if task.kind == .http {
+                    Button {
+                        coordinator.reprobeHTTPMetadata(task)
+                    } label: {
+                        Label(L10n.string("action_reprobe_metadata"), systemImage: "doc.text.magnifyingglass")
+                    }
+                }
+            }
+            .font(layout.font(11, weight: .semibold))
+            .buttonStyle(.bordered)
+        }
+        .padding(layout.value(12))
+        .background(ContentSurfaceBackground(tint: .red, cornerRadius: 8))
+    }
+}
+
+private struct HTTPSegmentsPanel: View {
+    @Environment(\.responsiveLayout) private var layout
+    let task: DownloadTask
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(10)) {
+            if task.httpSegments.isEmpty {
+                Text(L10n.string("http_segments_empty"))
+                    .font(layout.font(12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(layout.value(20))
+            } else {
+                ForEach(task.httpSegments) { segment in
+                    VStack(alignment: .leading, spacing: layout.value(8)) {
+                        HStack {
+                            Label(
+                                L10n.string("http_segment_title", segment.index + 1),
+                                systemImage: "square.split.2x2"
+                            )
+                            .font(layout.font(11, weight: .semibold))
+
+                            Spacer()
+
+                            Text(segment.progress.formatted(.percent.precision(.fractionLength(0))))
+                                .font(layout.font(11, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        LiquidProgressBar(progress: segment.progress, tint: .blue)
+
+                        HStack(spacing: layout.value(12)) {
+                            segmentValue(
+                                title: L10n.string("http_segment_range"),
+                                value: "\(segment.startByte)-\(segment.endByte)"
+                            )
+                            segmentValue(
+                                title: L10n.string("http_segment_size"),
+                                value: ByteCountFormatter.downloadFormatter.string(fromByteCount: segment.length)
+                            )
+                            segmentValue(
+                                title: L10n.string("http_segment_speed"),
+                                value: speed(segment.speedBytesPerSecond)
+                            )
+                            segmentValue(
+                                title: L10n.string("http_segment_retries"),
+                                value: "\(segment.retryCount)"
+                            )
+                        }
+                    }
+                    .padding(layout.value(10))
+                    .background(ContentSurfaceBackground(cornerRadius: 8))
+                }
+            }
+        }
+    }
+
+    private func segmentValue(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: layout.value(2)) {
+            Text(title)
+                .font(layout.font(9.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(layout.font(10.5, design: .monospaced))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func speed(_ bytesPerSecond: Int64) -> String {
+        guard bytesPerSecond > 0 else { return "--" }
+        return ByteCountFormatter.downloadFormatter.string(fromByteCount: bytesPerSecond) + "/s"
     }
 }
 
@@ -713,6 +878,8 @@ private struct ConnectionsPanel: View {
                             Image(systemName: "minus.circle")
                         }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel(L10n.string("torrent_remove_tracker"))
+                        .help(L10n.string("torrent_remove_tracker"))
                     }
                     .padding(layout.value(10))
                     .background(ContentSurfaceBackground(cornerRadius: 8))
@@ -745,8 +912,7 @@ private struct ConnectionsPanel: View {
                             Text(peer.address)
                                 .font(layout.font(11, weight: .medium, design: .monospaced))
                                 .lineLimit(1)
-                            let sourceLabel = (peer.source ?? "tracker").uppercased()
-                            Text("\(sourceLabel) · \(peer.client.isEmpty ? peer.flags : "\(peer.client) · \(peer.flags)")")
+                            Text(peerSubtitle(peer))
                                 .font(layout.font(10))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -754,7 +920,11 @@ private struct ConnectionsPanel: View {
                         Spacer()
                         VStack(alignment: .trailing, spacing: layout.value(2)) {
                             Text(peer.progress.formatted(.percent.precision(.fractionLength(0))))
-                            Text("↓ \(speed(peer.downloadRate)) ↑ \(speed(peer.uploadRate))")
+                            Text(L10n.string(
+                                "torrent_peer_speed_pair",
+                                speed(peer.downloadRate),
+                                speed(peer.uploadRate)
+                            ))
                         }
                         .font(layout.font(10, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -769,8 +939,23 @@ private struct ConnectionsPanel: View {
     private func trackerSubtitle(_ tracker: TorrentTrackerInfo) -> String {
         let seeds = tracker.seedCount >= 0 ? "\(tracker.seedCount)" : "--"
         let peers = tracker.leecherCount >= 0 ? "\(tracker.leecherCount)" : "--"
-        let error = tracker.errorMessage.map { " · \($0)" } ?? ""
-        return "\(tracker.status) · tier \(tracker.tier) · seeds \(seeds) · peers \(peers)\(error)"
+        let base = L10n.string(
+            "torrent_tracker_subtitle",
+            tracker.status,
+            tracker.tier,
+            seeds,
+            peers
+        )
+        guard let error = tracker.errorMessage else { return base }
+        return L10n.string("torrent_detail_join", base, error)
+    }
+
+    private func peerSubtitle(_ peer: TorrentPeerInfo) -> String {
+        let sourceLabel = peerSourceLabel(peer.source)
+        let details = peer.client.isEmpty
+            ? peer.flags
+            : L10n.string("torrent_detail_join", peer.client, peer.flags)
+        return L10n.string("torrent_detail_join", sourceLabel, details)
     }
 
     private func speed(_ bytesPerSecond: Int64) -> String {
@@ -783,20 +968,72 @@ private struct ConnectionsPanel: View {
 
     private func peerSourceSummary(_ health: TorrentHealthInfo) -> String {
         [
-            "tracker \(health.trackerPeerCount)",
-            "DHT \(health.dhtPeerCount)",
-            "PEX \(health.pexPeerCount)",
-            "LSD \(health.lsdPeerCount)"
-        ].joined(separator: " · ")
+            L10n.string("torrent_peer_source_count", peerSourceLabel("tracker"), health.trackerPeerCount),
+            L10n.string("torrent_peer_source_count", peerSourceLabel("dht"), health.dhtPeerCount),
+            L10n.string("torrent_peer_source_count", peerSourceLabel("pex"), health.pexPeerCount),
+            L10n.string("torrent_peer_source_count", peerSourceLabel("lsd"), health.lsdPeerCount)
+        ].joined(separator: L10n.string("torrent_detail_separator"))
+    }
+
+    private func peerSourceLabel(_ source: String?) -> String {
+        switch source?.lowercased() {
+        case "dht":
+            L10n.string("torrent_peer_source_dht")
+        case "pex":
+            L10n.string("torrent_peer_source_pex")
+        case "lsd":
+            L10n.string("torrent_peer_source_lsd")
+        default:
+            L10n.string("torrent_peer_source_tracker")
+        }
     }
 }
 
 private struct LogsPanel: View {
+    @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var layout
     let task: DownloadTask
 
     var body: some View {
-        VStack(alignment: .leading, spacing: layout.value(6)) {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            HStack(spacing: layout.value(8)) {
+                Text(L10n.string("inspector_tab_logs"))
+                    .font(layout.font(10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    coordinator.copyLogs(task)
+                } label: {
+                    Label(L10n.string("logs_copy_all"), systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(task.logEntries.isEmpty)
+                .accessibilityLabel(L10n.string("logs_copy_all"))
+                .help(L10n.string("logs_copy_all"))
+
+                Button {
+                    _ = coordinator.exportLogs(task)
+                } label: {
+                    Label(L10n.string("logs_export"), systemImage: "square.and.arrow.up")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(task.logEntries.isEmpty)
+                .accessibilityLabel(L10n.string("logs_export"))
+                .help(L10n.string("logs_export"))
+
+                Button(role: .destructive) {
+                    coordinator.clearLogs(task)
+                } label: {
+                    Label(L10n.string("logs_clear"), systemImage: "trash")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(task.logEntries.isEmpty)
+                .accessibilityLabel(L10n.string("logs_clear"))
+                .help(L10n.string("logs_clear"))
+            }
+
             if task.logEntries.isEmpty {
                 Text(L10n.string("logs_empty"))
                     .font(layout.font(12))

@@ -117,6 +117,7 @@ struct ContentView: View {
 
 private struct DropTargetOverlay: View {
     @Environment(\.responsiveLayout) private var layout
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         RoundedRectangle(cornerRadius: layout.value(18), style: .continuous)
@@ -130,7 +131,15 @@ private struct DropTargetOverlay: View {
                     .font(layout.font(30, weight: .semibold))
                     .foregroundStyle(Color.accentColor)
                     .padding(layout.value(20))
-                    .background(.thinMaterial, in: Circle())
+                    .background {
+                        if reduceTransparency {
+                            Circle()
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                        } else {
+                            Circle()
+                                .fill(.thinMaterial)
+                        }
+                    }
             }
             .padding(layout.value(12))
     }

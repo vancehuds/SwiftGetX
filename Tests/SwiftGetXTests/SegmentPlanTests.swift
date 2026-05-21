@@ -54,4 +54,22 @@ struct SegmentPlanTests {
         #expect(sample.downloadedBytes == 100)
         #expect(sample.speedBytesPerSecond >= 0)
     }
+
+    @Test("segment progress tracks per-segment bytes speed and retries")
+    func segmentProgressTracksPerSegmentDetails() async {
+        let progress = SegmentProgress(segments: [
+            HTTPSegmentInfo(index: 1, startByte: 50, endByte: 99, downloadedBytes: 10),
+            HTTPSegmentInfo(index: 0, startByte: 0, endByte: 49, downloadedBytes: 5)
+        ])
+
+        await progress.add(20, to: 0)
+        await progress.setRetryCount(2, for: 1)
+        let sample = await progress.sample()
+
+        #expect(sample.downloadedBytes == 35)
+        #expect(sample.segments.map(\.index) == [0, 1])
+        #expect(sample.segments[0].downloadedBytes == 25)
+        #expect(sample.segments[0].speedBytesPerSecond >= 0)
+        #expect(sample.segments[1].retryCount == 2)
+    }
 }
