@@ -969,7 +969,7 @@ Next step:
 
 ## Large Check 7: Advanced Torrent UX
 
-Status: [~]
+Status: [x]
 
 Review Tasks 19-21 for correctness, feature gating, UI consistency, migration needs, and optional libtorrent parity.
 
@@ -1002,7 +1002,7 @@ Remaining risk:
 
 Next step:
 
-- Commit the Large Check 7 code/test fixes before marking this check complete.
+- Task 22: Batch Task Management and Categories.
 
 ## Task 22: Batch Task Management and Categories
 
