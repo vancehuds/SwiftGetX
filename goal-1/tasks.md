@@ -1267,12 +1267,12 @@ Work performed:
 Verification evidence:
 
 - Initial sandboxed SwiftPM test command failed because SwiftPM could not write `/Users/vancehudson/.cache/clang/ModuleCache`; reruns used approved SwiftPM cache access.
-- `swift test --filter SourceParser --filter HTTPDownloadEngine --filter DownloadCoordinator --filter SwiftGetXTorrentCore` passed with 120 tests across 4 suites.
+- `swift test --filter FileManager --filter HTTPDownloadEngine --filter DownloadCoordinator --filter SourceParser --filter SwiftGetXTorrentCore` passed with 122 tests across 5 suites.
 - `swift build` passed.
-- First broad `swift test` run had one transient async failure in `Swift adapter stops seeding after configured time`; rerunning that isolated test passed.
-- Final broad `swift test` rerun passed with 262 tests across 20 suites.
+- `swift test` passed with 262 tests across 20 suites.
 - `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
 - `git diff --check` passed.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed; the existing local OpenSSL dylib deployment-target linker warnings were still present.
 - `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 265 tests across 21 suites; the existing local OpenSSL dylib deployment-target linker warnings were still present.
 
 Remaining risk:
