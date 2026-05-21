@@ -46,7 +46,6 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
             return
         }
 
-        let session = sessionBox.raw
         let selected = request.selectedFileIndexes.map(Int32.init)
         let priorityPairs = request.filePriorities.sorted { $0.key < $1.key }
         let priorityIndexes = priorityPairs.map { Int32($0.key) }
@@ -54,62 +53,28 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         let handleID: Int32
 
         if request.displaySource.hasPrefix("magnet:") {
-            handleID = request.displaySource.withCString { magnet in
-                request.savePath.withCString { savePath in
-                    withOptionalCString(request.resumeDataPath) { resumeDataPath in
-                        selected.withUnsafeBufferPointer { selectedBuffer in
-                            priorityIndexes.withUnsafeBufferPointer { priorityIndexBuffer in
-                                priorityValues.withUnsafeBufferPointer { priorityValueBuffer in
-                                    sgx_libtorrent_add_magnet_with_options(
-                                        session,
-                                        magnet,
-                                        savePath,
-                                        request.hasExplicitFileSelection ? selectedBuffer.baseAddress : nil,
-                                        request.hasExplicitFileSelection ? Int32(selectedBuffer.count) : -1,
-                                        priorityIndexBuffer.baseAddress,
-                                        priorityValueBuffer.baseAddress,
-                                        Int32(priorityIndexBuffer.count),
-                                        resumeDataPath,
-                                        request.runtimeOptions.isSequentialDownloadEnabled ? 1 : 0,
-                                        request.runtimeOptions.isDHTEnabled ? 1 : 0,
-                                        request.runtimeOptions.isPEXEnabled ? 1 : 0,
-                                        request.runtimeOptions.isLSDEnabled ? 1 : 0
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            handleID = sessionBox.addMagnet(
+                request.displaySource,
+                savePath: request.savePath,
+                selectedFileIndexes: selected,
+                hasExplicitFileSelection: request.hasExplicitFileSelection,
+                priorityIndexes: priorityIndexes,
+                priorityValues: priorityValues,
+                resumeDataPath: request.resumeDataPath,
+                runtimeOptions: request.runtimeOptions
+            )
         } else {
             let torrentPath = request.resolvedTorrentFilePath ?? request.displaySource
-            handleID = torrentPath.withCString { torrentPath in
-                request.savePath.withCString { savePath in
-                    withOptionalCString(request.resumeDataPath) { resumeDataPath in
-                        selected.withUnsafeBufferPointer { selectedBuffer in
-                            priorityIndexes.withUnsafeBufferPointer { priorityIndexBuffer in
-                                priorityValues.withUnsafeBufferPointer { priorityValueBuffer in
-                                    sgx_libtorrent_add_torrent_file_with_options(
-                                        session,
-                                        torrentPath,
-                                        savePath,
-                                        request.hasExplicitFileSelection ? selectedBuffer.baseAddress : nil,
-                                        request.hasExplicitFileSelection ? Int32(selectedBuffer.count) : -1,
-                                        priorityIndexBuffer.baseAddress,
-                                        priorityValueBuffer.baseAddress,
-                                        Int32(priorityIndexBuffer.count),
-                                        resumeDataPath,
-                                        request.runtimeOptions.isSequentialDownloadEnabled ? 1 : 0,
-                                        request.runtimeOptions.isDHTEnabled ? 1 : 0,
-                                        request.runtimeOptions.isPEXEnabled ? 1 : 0,
-                                        request.runtimeOptions.isLSDEnabled ? 1 : 0
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            handleID = sessionBox.addTorrentFile(
+                torrentPath,
+                savePath: request.savePath,
+                selectedFileIndexes: selected,
+                hasExplicitFileSelection: request.hasExplicitFileSelection,
+                priorityIndexes: priorityIndexes,
+                priorityValues: priorityValues,
+                resumeDataPath: request.resumeDataPath,
+                runtimeOptions: request.runtimeOptions
+            )
         }
 
         guard handleID >= 0 else {
@@ -654,16 +619,6 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         )
     }
 
-    private func withOptionalCString<Result>(
-        _ value: String?,
-        _ body: (UnsafePointer<CChar>?) -> Result
-    ) -> Result {
-        guard let value, !value.isEmpty else {
-            return body(nil)
-        }
-        return value.withCString(body)
-    }
-
     private func lastError() -> String {
         guard let message = sgx_libtorrent_last_error(sessionBox.raw) else {
             return "Unknown libtorrent error"
@@ -682,6 +637,102 @@ private final class LibtorrentSessionBox: @unchecked Sendable {
 
     deinit {
         sgx_libtorrent_session_destroy(raw)
+    }
+
+    func addMagnet(
+        _ magnetURI: String,
+        savePath: String,
+        selectedFileIndexes: [Int32],
+        hasExplicitFileSelection: Bool,
+        priorityIndexes: [Int32],
+        priorityValues: [Int32],
+        resumeDataPath: String?,
+        runtimeOptions: TorrentRuntimeOptions
+    ) -> Int32 {
+        magnetURI.withCString { magnet in
+            savePath.withCString { savePath in
+                Self.withOptionalCString(resumeDataPath) { resumeDataPath in
+                    selectedFileIndexes.withUnsafeBufferPointer { selectedBuffer in
+                        priorityIndexes.withUnsafeBufferPointer { priorityIndexBuffer in
+                            priorityValues.withUnsafeBufferPointer { priorityValueBuffer in
+                                sgx_libtorrent_add_magnet_with_options(
+                                    raw,
+                                    magnet,
+                                    savePath,
+                                    hasExplicitFileSelection ? selectedBuffer.baseAddress : nil,
+                                    hasExplicitFileSelection ? Int32(selectedBuffer.count) : -1,
+                                    priorityIndexBuffer.baseAddress,
+                                    priorityValueBuffer.baseAddress,
+                                    Int32(priorityIndexBuffer.count),
+                                    resumeDataPath,
+                                    runtimeOptions.isSequentialDownloadEnabled ? 1 : 0,
+                                    runtimeOptions.isDHTEnabled ? 1 : 0,
+                                    runtimeOptions.isPEXEnabled ? 1 : 0,
+                                    runtimeOptions.isLSDEnabled ? 1 : 0
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func addTorrentFile(
+        _ torrentPath: String,
+        savePath: String,
+        selectedFileIndexes: [Int32],
+        hasExplicitFileSelection: Bool,
+        priorityIndexes: [Int32],
+        priorityValues: [Int32],
+        resumeDataPath: String?,
+        runtimeOptions: TorrentRuntimeOptions
+    ) -> Int32 {
+        torrentPath.withCString { torrentPath in
+            savePath.withCString { savePath in
+                Self.withOptionalCString(resumeDataPath) { resumeDataPath in
+                    selectedFileIndexes.withUnsafeBufferPointer { selectedBuffer in
+                        priorityIndexes.withUnsafeBufferPointer { priorityIndexBuffer in
+                            priorityValues.withUnsafeBufferPointer { priorityValueBuffer in
+                                sgx_libtorrent_add_torrent_file_with_options(
+                                    raw,
+                                    torrentPath,
+                                    savePath,
+                                    hasExplicitFileSelection ? selectedBuffer.baseAddress : nil,
+                                    hasExplicitFileSelection ? Int32(selectedBuffer.count) : -1,
+                                    priorityIndexBuffer.baseAddress,
+                                    priorityValueBuffer.baseAddress,
+                                    Int32(priorityIndexBuffer.count),
+                                    resumeDataPath,
+                                    runtimeOptions.isSequentialDownloadEnabled ? 1 : 0,
+                                    runtimeOptions.isDHTEnabled ? 1 : 0,
+                                    runtimeOptions.isPEXEnabled ? 1 : 0,
+                                    runtimeOptions.isLSDEnabled ? 1 : 0
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func addMagnetForPreview(_ magnetURI: String, savePath: String) -> Int32 {
+        magnetURI.withCString { magnet in
+            savePath.withCString { savePath in
+                sgx_libtorrent_add_magnet(raw, magnet, savePath, nil, 0)
+            }
+        }
+    }
+
+    private static func withOptionalCString<Result>(
+        _ value: String?,
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        guard let value, !value.isEmpty else {
+            return body(nil)
+        }
+        return value.withCString(body)
     }
 }
 
@@ -713,11 +764,7 @@ actor LibtorrentMetadataPreviewer {
     }
 
     func preview(magnet: String) async throws -> LibtorrentMagnetPreview {
-        let handleID = magnet.withCString { magnet in
-            NSTemporaryDirectory().withCString { savePath in
-                sgx_libtorrent_add_magnet(sessionBox.raw, magnet, savePath, nil, 0)
-            }
-        }
+        let handleID = sessionBox.addMagnetForPreview(magnet, savePath: NSTemporaryDirectory())
 
         guard handleID >= 0 else {
             throw LibtorrentAdapterError.nativeError(lastError())
