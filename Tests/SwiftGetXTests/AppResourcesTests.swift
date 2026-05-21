@@ -25,7 +25,11 @@ struct AppResourcesTests {
     func appInfoDeclaresTorrentFilesAndServicesInput() throws {
         let appInfoURL = try #require(AppResources.url(forResource: "AppInfo", withExtension: "plist"))
         let data = try Data(contentsOf: appInfoURL)
-        let plist = try #require(PropertyListSerialization.propertyList(from: data) as? [String: Any])
+        let plist = try #require(PropertyListSerialization.propertyList(
+            from: data,
+            options: [],
+            format: nil
+        ) as? [String: Any])
 
         let documentTypes = try #require(plist["CFBundleDocumentTypes"] as? [[String: Any]])
         let torrentType = try #require(documentTypes.first)

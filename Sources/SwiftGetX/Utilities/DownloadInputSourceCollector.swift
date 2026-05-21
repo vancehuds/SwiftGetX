@@ -8,8 +8,10 @@ enum DownloadInputSourceCollector {
         let fragments = textFragments + urls.compactMap(sourceString(from:))
 
         for fragment in fragments {
-            for source in SourceParser.extractSources(from: fragment) where seen.insert(source).inserted {
-                collected.append(source)
+            for source in SourceParser.extractSources(from: fragment) {
+                let canonicalSource = canonicalSource(source)
+                guard seen.insert(canonicalSource).inserted else { continue }
+                collected.append(canonicalSource)
             }
         }
 
@@ -66,6 +68,13 @@ enum DownloadInputSourceCollector {
         default:
             return nil
         }
+    }
+
+    private static func canonicalSource(_ source: String) -> String {
+        guard let localFileURL = SourceParser.localFileURL(for: source) else {
+            return source
+        }
+        return localFileURL.path
     }
 
     static func draft(from pasteboard: NSPasteboard) -> DownloadDraft? {

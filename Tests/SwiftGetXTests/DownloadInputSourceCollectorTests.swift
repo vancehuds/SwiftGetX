@@ -47,6 +47,21 @@ struct DownloadInputSourceCollectorTests {
         #expect(draft.sourceCount == 1)
     }
 
+    @Test("deduplicates local torrent paths and file URLs")
+    func deduplicatesLocalTorrentPathsAndFileURLs() throws {
+        let draft = try #require(DownloadInputSourceCollector.draft(
+            textFragments: [
+                "/tmp/SwiftGetX Demo.torrent"
+            ],
+            urls: [
+                URL(fileURLWithPath: "/tmp/SwiftGetX Demo.torrent")
+            ]
+        ))
+
+        #expect(draft.source == "/tmp/SwiftGetX Demo.torrent")
+        #expect(draft.sourceCount == 1)
+    }
+
     @Test("collects Services pasteboard sources")
     func collectsServicesPasteboardSources() throws {
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("SwiftGetXTests.\(UUID().uuidString)"))
