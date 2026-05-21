@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(BrowserBridge.self) private var browserBridge
     @Environment(ClipboardMonitor.self) private var clipboardMonitor
+    @Environment(AppSettings.self) private var settings
     @Environment(\.openSettings) private var openSettings
     @Query(sort: \DownloadTask.createdAt, order: .reverse) private var allTasks: [DownloadTask]
     @State private var showingNewTask = false
@@ -58,6 +59,7 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 450)
+        .id(settings.language)
         .onReceive(NotificationCenter.default.publisher(for: .showNewTaskSheet)) { notification in
             let incomingDraft = notification.object as? DownloadDraft
             PendingNativeHandoffPolicy.rejectIfReplaced(

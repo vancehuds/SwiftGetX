@@ -18,6 +18,7 @@ private struct SettingsHost: View {
 
     var body: some View {
         content.modifier(lifecycleModifier)
+            .id(settings.language)
     }
 
     private var content: SettingsContent {
