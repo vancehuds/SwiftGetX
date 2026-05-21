@@ -208,7 +208,10 @@ struct TorrentDownloadEngineTests {
             length: 42,
             announce: nil
         ).write(to: torrentURL)
-        let adapter = SwiftTorrentEngineAdapter()
+        let adapter = SwiftTorrentEngineAdapter(
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
+        )
         let store = SnapshotStore()
         let request = TorrentStartRequest(
             id: UUID(),
@@ -237,7 +240,7 @@ struct TorrentDownloadEngineTests {
         let snapshot = try await store.firstSnapshot()
 
         #expect(snapshot.status == .failed)
-        #expect(snapshot.errorMessage == L10n.string("torrent_swift_engine_runtime_pending"))
+        #expect(snapshot.errorMessage == L10n.string("torrent_tracker_no_peers"))
         #expect(snapshot.totalBytes == 42)
         #expect(snapshot.torrentMetadataStatus == .available)
         #expect(snapshot.torrentFiles == [
@@ -263,10 +266,14 @@ struct TorrentDownloadEngineTests {
             announce: trackerURL
         ).write(to: torrentURL)
         let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse())
-        let adapter = SwiftTorrentEngineAdapter(trackerClient: TorrentTrackerClient(
-            httpTransport: httpTransport,
-            retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
-        ))
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
+        )
         let store = SnapshotStore()
         let request = TorrentStartRequest(
             id: UUID(),
@@ -305,7 +312,8 @@ struct TorrentDownloadEngineTests {
                 downloadRate: 0,
                 uploadRate: 0,
                 direction: "tracker",
-                flags: "tracker"
+                flags: "tracker",
+                source: "tracker"
             )
         ])
         #expect(snapshots.last?.torrentTrackers?.first?.url == trackerURL)
@@ -382,7 +390,9 @@ struct TorrentDownloadEngineTests {
             ),
             peerTransportFactory: { endpoint in
                 try await transportFactory.nextTransport(for: endpoint)
-            }
+            },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
         )
         let store = SnapshotStore()
         let magnet = "magnet:?xt=urn:btih:\(infoHash.hexEncodedString)&dn=payload.bin&xl=\(contents.count)&tr=\(Self.percentEncoded(trackerURL))"
@@ -494,7 +504,9 @@ struct TorrentDownloadEngineTests {
             ),
             peerTransportFactory: { endpoint in
                 try await transportFactory.nextTransport(for: endpoint)
-            }
+            },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
         )
         let store = SnapshotStore()
         let magnet = "magnet:?xt=urn:btih:\(infoHash.hexEncodedString)&dn=payload.bin&tr=\(Self.percentEncoded(trackerURL))"
@@ -588,7 +600,9 @@ struct TorrentDownloadEngineTests {
             ),
             peerTransportFactory: { endpoint in
                 try await transportFactory.nextTransport(for: endpoint)
-            }
+            },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
         )
         let store = SnapshotStore()
         let magnet = "magnet:?xt=urn:btih:\(wrongHash.hexEncodedString)&dn=payload.bin&tr=\(Self.percentEncoded(trackerURL))"
@@ -656,7 +670,9 @@ struct TorrentDownloadEngineTests {
                 httpTransport: httpTransport,
                 retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
             ),
-            peerTransportFactory: { _ in peerTransport }
+            peerTransportFactory: { _ in peerTransport },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
         )
         let store = SnapshotStore()
         let request = TorrentStartRequest(
@@ -765,7 +781,9 @@ struct TorrentDownloadEngineTests {
                     throw TorrentPeerWireError.transport("missing mock peer")
                 }
                 return transport
-            }
+            },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
         )
         await adapter.setSpeedLimit(downloadBytesPerSecond: 4_000, uploadBytesPerSecond: 512)
         let store = SnapshotStore()
@@ -876,7 +894,9 @@ struct TorrentDownloadEngineTests {
                 httpTransport: httpTransport,
                 retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
             ),
-            peerTransportFactory: { _ in peerTransport }
+            peerTransportFactory: { _ in peerTransport },
+            dhtTransport: nil,
+            dhtBootstrapNodes: []
         )
         let store = SnapshotStore()
         let request = TorrentStartRequest(
@@ -935,7 +955,7 @@ struct TorrentDownloadEngineTests {
         )
         
         await dhtTransport.setResponses(
-            nodes: [try TorrentDHTNode(id: Data(repeating: 8, count: 20), host: "127.0.0.2", port: 6882)],
+            nodes: [],
             peers: [TorrentPeerEndpoint(host: "192.168.1.5", port: 6889)]
         )
 
@@ -943,6 +963,9 @@ struct TorrentDownloadEngineTests {
             trackerClient: TorrentTrackerClient(
                 retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
             ),
+            peerTransportFactory: { _ in
+                throw TorrentPeerWireError.transport("peer transport is not exercised by this discovery test")
+            },
             dhtTransport: dhtTransport,
             dhtBootstrapNodes: [bootstrapNode],
             peerExchangeProvider: { _, _ in
@@ -986,7 +1009,7 @@ struct TorrentDownloadEngineTests {
         let snapshots = try await store.snapshots(count: 2)
         let last = try #require(snapshots.last)
 
-        #expect(last.torrentHealth?.dhtNodeCount == 2)
+        #expect(last.torrentHealth?.dhtNodeCount == 1)
         #expect(last.torrentHealth?.dhtPeerCount == 1)
         #expect(last.torrentHealth?.pexPeerCount == 1)
         #expect(last.torrentHealth?.lsdPeerCount == 1)
@@ -1458,7 +1481,7 @@ private actor AppMockDHTTransport: TorrentDHTTransport {
             return try TorrentDHTKRPC.response(
                 transactionID: t,
                 nodeID: nodeID,
-                nodes: responseNodes
+                nodes: responseNodes.isEmpty ? [node] : responseNodes
             )
         } else if q == "get_peers" {
             return try TorrentDHTKRPC.response(
@@ -1641,4 +1664,3 @@ private extension BencodeValue {
         return data
     }
 }
-

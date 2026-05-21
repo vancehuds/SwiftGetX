@@ -12,6 +12,7 @@ jobs:
   release:
     name: Build and Release
     runs-on: macos-15
+    timeout-minutes: 45
 
     steps:
       - name: Check out repository
@@ -20,9 +21,12 @@ jobs:
           fetch-depth: 0
 
       - name: Show Swift version
-        run: swift --version
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Run tests
+        timeout-minutes: 15
         run: swift test
 
       - name: Install native packaging dependencies
