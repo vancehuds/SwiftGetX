@@ -5,6 +5,8 @@ import SwiftData
 @MainActor
 @Observable
 final class AppSettings {
+    nonisolated static let languageUserDefaultsKey = "app_language"
+
     var defaultDownloadDirectory: URL = FileManager.default.urls(
         for: .downloadsDirectory,
         in: .userDomainMask
@@ -34,9 +36,9 @@ final class AppSettings {
     var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
     var torrentEngine: TorrentEngineKind = .swift
     var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
-    var language: AppLanguage = .system {
+    var language: AppLanguage = AppLanguage.storedPreference {
         didSet {
-            UserDefaults.standard.set(language.rawValue, forKey: "app_language")
+            UserDefaults.standard.set(language.rawValue, forKey: Self.languageUserDefaultsKey)
         }
     }
 
@@ -67,7 +69,7 @@ final class AppSettings {
         torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
         torrentEngine = TorrentEngineKind(rawValue: record.torrentEngineRawValue) ?? .swift
         torrentDHTBootstrapNodes = record.torrentDHTBootstrapNodes
-        language = AppLanguage(rawValue: record.languageRawValue) ?? .system
+        language = AppLanguage.storedPreference(from: record.languageRawValue)
     }
 
     func makeRecord() -> AppSettingsRecord {
@@ -152,6 +154,24 @@ enum AppLanguage: String, Codable, CaseIterable, Identifiable {
     case zhHans = "zh-Hans"
 
     var id: String { rawValue }
+
+    static var storedPreference: AppLanguage {
+        guard let rawValue = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey) else {
+            return .system
+        }
+        return AppLanguage(rawValue: rawValue) ?? .system
+    }
+
+    static func storedPreference(from recordRawValue: String) -> AppLanguage {
+        let recordLanguage = AppLanguage(rawValue: recordRawValue) ?? .system
+        guard let rawValue = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey),
+              let userDefaultsLanguage = AppLanguage(rawValue: rawValue),
+              userDefaultsLanguage != recordLanguage
+        else {
+            return recordLanguage
+        }
+        return userDefaultsLanguage
+    }
 
     var title: String {
         switch self {

@@ -9,7 +9,7 @@ enum AppResources {
 
     static var localizationBundle: Bundle {
         let baseBundle = bundle
-        if let langCode = UserDefaults.standard.string(forKey: "app_language"),
+        if let langCode = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey),
            langCode != "system",
            let path = baseBundle.path(forResource: langCode, ofType: "lproj"),
            let languageBundle = Bundle(path: path) {

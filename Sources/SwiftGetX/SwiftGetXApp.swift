@@ -61,25 +61,11 @@ struct SwiftGetXApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
-            CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updater: softwareUpdater)
-            }
-            CommandGroup(after: .newItem) {
-                Button(L10n.string("command_new_download")) {
-                    NotificationCenter.default.post(name: .showNewTaskSheet, object: nil)
-                }
-                .keyboardShortcut("n")
-
-                Button(L10n.string("command_pause_all")) {
-                    coordinator.pauseAll()
-                }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
-
-                Button(L10n.string("command_resume_all")) {
-                    coordinator.resumeAll()
-                }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-            }
+            AppCommands(
+                language: appSettings.language,
+                coordinator: coordinator,
+                updater: softwareUpdater
+            )
         }
 
         Settings {
@@ -88,6 +74,7 @@ struct SwiftGetXApp: App {
                 .environment(coordinator)
                 .modelContainer(modelContainer)
                 .frame(minWidth: 420, idealWidth: 520, minHeight: 390, idealHeight: 480)
+                .id(appSettings.language)
         }
     }
 
@@ -248,6 +235,35 @@ struct SwiftGetXApp: App {
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("action_ok"))
         alert.runModal()
+    }
+}
+
+struct AppCommands: Commands {
+    let language: AppLanguage
+    let coordinator: DownloadCoordinator
+    let updater: SoftwareUpdater
+
+    var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            CheckForUpdatesView(updater: updater)
+                .id(language)
+        }
+        CommandGroup(after: .newItem) {
+            Button(L10n.string("command_new_download")) {
+                NotificationCenter.default.post(name: .showNewTaskSheet, object: nil)
+            }
+            .keyboardShortcut("n")
+
+            Button(L10n.string("command_pause_all")) {
+                coordinator.pauseAll()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+
+            Button(L10n.string("command_resume_all")) {
+                coordinator.resumeAll()
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+        }
     }
 }
 
