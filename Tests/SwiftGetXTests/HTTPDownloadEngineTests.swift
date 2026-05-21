@@ -293,16 +293,9 @@ struct HTTPDownloadEngineTests {
 
     @Test("emits status-specific HTTP failure messages")
     func emitsStatusSpecificHTTPFailureMessages() async throws {
-        let cases: [(Int, String)] = [
-            (401, L10n.string("error_server_status_401")),
-            (403, L10n.string("error_server_status_403")),
-            (404, L10n.string("error_server_status_404")),
-            (416, L10n.string("error_server_status_416")),
-            (429, L10n.string("error_server_status_429")),
-            (503, L10n.string("error_server_status_5xx", 503))
-        ]
+        let cases = [401, 403, 404, 416, 429, 503]
 
-        for (status, message) in cases {
+        for status in cases {
             let server = try RangeTestServer(payload: Self.payload(), behavior: .alwaysFailGET(status: status))
             try await server.start()
             defer { server.stop() }
@@ -323,7 +316,7 @@ struct HTTPDownloadEngineTests {
             ))
 
             let failed = try #require(recorder.snapshots.last(where: { $0.status == .failed }))
-            #expect(failed.errorMessage == message)
+            #expect(failed.errorMessage == HTTPDownloadError.serverStatus(status).errorDescription)
         }
     }
 

@@ -6,6 +6,7 @@ import SwiftData
 @Observable
 final class AppSettings {
     nonisolated static let languageUserDefaultsKey = "app_language"
+    @ObservationIgnored private let userDefaults: UserDefaults
 
     var defaultDownloadDirectory: URL = FileManager.default.urls(
         for: .downloadsDirectory,
@@ -36,12 +37,16 @@ final class AppSettings {
     var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
     var torrentEngine: TorrentEngineKind = .swift
     var torrentDHTBootstrapNodes: [String] = ["router.bittorrent.com:6881", "dht.transmissionbt.com:6881", "router.utorrent.com:6881"]
-    var language: AppLanguage = AppLanguage.storedPreference {
+    var language: AppLanguage = .system {
         didSet {
-            UserDefaults.standard.set(language.rawValue, forKey: Self.languageUserDefaultsKey)
+            userDefaults.set(language.rawValue, forKey: Self.languageUserDefaultsKey)
         }
     }
 
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+        language = AppLanguage.storedPreference(in: userDefaults)
+    }
 
     func apply(_ record: AppSettingsRecord) {
         defaultDownloadDirectory = URL(fileURLWithPath: record.defaultDownloadDirectoryPath)
@@ -69,7 +74,7 @@ final class AppSettings {
         torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
         torrentEngine = TorrentEngineKind(rawValue: record.torrentEngineRawValue) ?? .swift
         torrentDHTBootstrapNodes = record.torrentDHTBootstrapNodes
-        language = AppLanguage.storedPreference(from: record.languageRawValue)
+        language = AppLanguage.storedPreference(from: record.languageRawValue, in: userDefaults)
     }
 
     func makeRecord() -> AppSettingsRecord {
@@ -156,15 +161,19 @@ enum AppLanguage: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     static var storedPreference: AppLanguage {
-        guard let rawValue = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey) else {
+        storedPreference(in: .standard)
+    }
+
+    static func storedPreference(in userDefaults: UserDefaults) -> AppLanguage {
+        guard let rawValue = userDefaults.string(forKey: AppSettings.languageUserDefaultsKey) else {
             return .system
         }
         return AppLanguage(rawValue: rawValue) ?? .system
     }
 
-    static func storedPreference(from recordRawValue: String) -> AppLanguage {
+    static func storedPreference(from recordRawValue: String, in userDefaults: UserDefaults = .standard) -> AppLanguage {
         let recordLanguage = AppLanguage(rawValue: recordRawValue) ?? .system
-        guard let rawValue = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey),
+        guard let rawValue = userDefaults.string(forKey: AppSettings.languageUserDefaultsKey),
               let userDefaultsLanguage = AppLanguage(rawValue: rawValue),
               userDefaultsLanguage != recordLanguage
         else {

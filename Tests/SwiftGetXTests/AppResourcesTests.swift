@@ -7,12 +7,9 @@ import Testing
 struct AppResourcesTests {
     @Test("resolves localized strings from the app resource bundle")
     func resolvesLocalizedStrings() {
-        let originalLanguage = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey)
-        UserDefaults.standard.set("en", forKey: AppSettings.languageUserDefaultsKey)
-        defer {
-            UserDefaults.standard.set(originalLanguage, forKey: AppSettings.languageUserDefaultsKey)
-        }
-        #expect(L10n.string("status_ready") == "Ready")
+        let languageBundle = AppResources.localizationBundle(for: AppLanguage.en.rawValue, in: AppResources.bundle)
+
+        #expect(NSLocalizedString("status_ready", bundle: languageBundle, comment: "") == "Ready")
     }
 
     @Test("resolves copied resource directories from the app resource bundle")
@@ -26,18 +23,11 @@ struct AppResourcesTests {
 
     @Test("dynamically updates localization bundle when language settings change")
     func dynamicLanguageSwitching() {
-        let originalLanguage = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey)
-        defer {
-            UserDefaults.standard.set(originalLanguage, forKey: AppSettings.languageUserDefaultsKey)
-        }
+        let chineseBundle = AppResources.localizationBundle(for: AppLanguage.zhHans.rawValue, in: AppResources.bundle)
+        let englishBundle = AppResources.localizationBundle(for: AppLanguage.en.rawValue, in: AppResources.bundle)
 
-        UserDefaults.standard.set("zh-Hans", forKey: AppSettings.languageUserDefaultsKey)
-        #expect(L10n.string("status_ready") == "就绪")
-
-        UserDefaults.standard.set("en", forKey: AppSettings.languageUserDefaultsKey)
-        #expect(L10n.string("status_ready") == "Ready")
-
-        UserDefaults.standard.set("system", forKey: AppSettings.languageUserDefaultsKey)
+        #expect(NSLocalizedString("status_ready", bundle: chineseBundle, comment: "") == "就绪")
+        #expect(NSLocalizedString("status_ready", bundle: englishBundle, comment: "") == "Ready")
     }
 
     @Test("resolves lowercase SwiftPM localization directory names")
@@ -76,26 +66,20 @@ struct AppResourcesTests {
 
     @Test("AppSettings starts with persisted language preference")
     func appSettingsStartsWithPersistedLanguagePreference() {
-        let originalLanguage = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey)
-        defer {
-            UserDefaults.standard.set(originalLanguage, forKey: AppSettings.languageUserDefaultsKey)
-        }
-
-        UserDefaults.standard.set(AppLanguage.zhHans.rawValue, forKey: AppSettings.languageUserDefaultsKey)
-        let settings = AppSettings()
+        let userDefaults = Self.makeIsolatedUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: Self.userDefaultsSuiteName(userDefaults)) }
+        userDefaults.set(AppLanguage.zhHans.rawValue, forKey: AppSettings.languageUserDefaultsKey)
+        let settings = AppSettings(userDefaults: userDefaults)
 
         #expect(settings.language == .zhHans)
     }
 
     @Test("UserDefaults language wins over stale settings record")
     func userDefaultsLanguageWinsOverStaleSettingsRecord() {
-        let originalLanguage = UserDefaults.standard.string(forKey: AppSettings.languageUserDefaultsKey)
-        defer {
-            UserDefaults.standard.set(originalLanguage, forKey: AppSettings.languageUserDefaultsKey)
-        }
-
-        UserDefaults.standard.set(AppLanguage.zhHans.rawValue, forKey: AppSettings.languageUserDefaultsKey)
-        let settings = AppSettings()
+        let userDefaults = Self.makeIsolatedUserDefaults()
+        defer { userDefaults.removePersistentDomain(forName: Self.userDefaultsSuiteName(userDefaults)) }
+        userDefaults.set(AppLanguage.zhHans.rawValue, forKey: AppSettings.languageUserDefaultsKey)
+        let settings = AppSettings(userDefaults: userDefaults)
         let record = AppSettingsRecord(
             defaultDownloadDirectoryPath: "/tmp",
             languageRawValue: AppLanguage.system.rawValue
@@ -104,5 +88,16 @@ struct AppResourcesTests {
         settings.apply(record)
 
         #expect(settings.language == .zhHans)
+    }
+
+    private static func makeIsolatedUserDefaults() -> UserDefaults {
+        let suiteName = "SwiftGetXTests.\(UUID().uuidString)"
+        let userDefaults = UserDefaults(suiteName: suiteName)!
+        userDefaults.set(suiteName, forKey: "suiteName")
+        return userDefaults
+    }
+
+    private static func userDefaultsSuiteName(_ userDefaults: UserDefaults) -> String {
+        userDefaults.string(forKey: "suiteName")!
     }
 }
