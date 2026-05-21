@@ -150,7 +150,11 @@ final class DownloadTask {
     }
 
     var usesActiveDownloadSlot: Bool {
-        status == .running || status == .fetchingPeers || status == .connectingPeers || status == .verifying
+        status == .running
+            || status == .fetchingMetadata
+            || status == .fetchingPeers
+            || status == .connectingPeers
+            || status == .verifying
     }
 
     var isQueueManageable: Bool {
@@ -445,6 +449,7 @@ enum DownloadKind: String, Codable, CaseIterable, Identifiable {
 enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
     case queued
     case running
+    case fetchingMetadata
     case fetchingPeers
     case connectingPeers
     case seeding
@@ -462,6 +467,8 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             L10n.string("download_status_queued")
         case .running:
             L10n.string("download_status_running")
+        case .fetchingMetadata:
+            L10n.string("download_status_fetching_metadata")
         case .fetchingPeers:
             L10n.string("download_status_fetching_peers")
         case .connectingPeers:
@@ -487,6 +494,8 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             "clock"
         case .running:
             "arrow.down.circle.fill"
+        case .fetchingMetadata:
+            "doc.text.magnifyingglass"
         case .fetchingPeers:
             "antenna.radiowaves.left.and.right"
         case .connectingPeers:

@@ -47,7 +47,7 @@ struct TaskListView: View {
                                     }
                                 }
                                 .contextMenu {
-                                    let isPausable = task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding || task.status == .verifying
+                                    let isPausable = task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding || task.status == .verifying
                                     Button(isPausable ? L10n.string("action_pause") : L10n.string("action_start")) {
                                         if isPausable {
                                             coordinator.pause(task)
@@ -259,7 +259,7 @@ private struct TaskRowView: View {
                         }
                         .font(layout.font(11, design: .monospaced))
                         .foregroundStyle(.secondary)
-                    } else if task.status == .fetchingPeers || task.status == .connectingPeers {
+                    } else if task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers {
                         Text(task.status.title)
                             .font(layout.font(11, weight: .medium))
                             .foregroundStyle(.blue)
@@ -297,7 +297,7 @@ private struct TaskRowView: View {
         .overlay(alignment: .topTrailing) {
             if isHovered {
                 HStack(spacing: layout.value(6)) {
-                    let isPausable = task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding || task.status == .verifying
+                    let isPausable = task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding || task.status == .verifying
                     Button {
                         if isPausable {
                             coordinator.pause(task)
@@ -362,6 +362,8 @@ private struct TaskRowView: View {
             .secondary
         case .running:
             .blue
+        case .fetchingMetadata:
+            .purple
         case .fetchingPeers:
             .cyan
         case .connectingPeers:

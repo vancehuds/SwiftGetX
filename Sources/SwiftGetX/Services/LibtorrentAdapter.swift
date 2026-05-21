@@ -467,6 +467,9 @@ actor LibtorrentAdapter: TorrentEngineAdapter {
         if nativeStatus.state == 1 || nativeStatus.state == 2 {
             return .verifying
         }
+        if nativeStatus.has_metadata == 0 {
+            return .fetchingMetadata
+        }
         if completed && nativeStatus.is_seeding != 0 {
             return .seeding
         }

@@ -1014,24 +1014,26 @@ final class DownloadCoordinator {
         switch status {
         case .running:
             0
-        case .fetchingPeers:
+        case .fetchingMetadata:
             1
-        case .connectingPeers:
+        case .fetchingPeers:
             2
-        case .verifying:
+        case .connectingPeers:
             3
-        case .queued:
+        case .verifying:
             4
-        case .paused:
+        case .queued:
             5
-        case .failed:
+        case .paused:
             6
-        case .cancelled:
+        case .failed:
             7
-        case .seeding:
+        case .cancelled:
             8
-        case .completed:
+        case .seeding:
             9
+        case .completed:
+            10
         }
     }
 
@@ -1110,7 +1112,7 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         case .all:
             true
         case .running:
-            task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers
+            task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers
         case .seeding:
             task.status == .seeding
         case .queued:

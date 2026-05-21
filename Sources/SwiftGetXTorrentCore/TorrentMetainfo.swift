@@ -124,6 +124,50 @@ public struct TorrentMetainfo: Equatable, Sendable {
         )
     }
 
+    public static func parseInfoDictionary(
+        data: Data,
+        announce: String? = nil,
+        announceList: [[String]] = [],
+        limits: BencodeLimits = .default
+    ) throws -> TorrentMetainfo {
+        let infoValue: BencodeValue
+        do {
+            infoValue = try BencodeParser(data: data, limits: limits).parse()
+        } catch let error as BencodeError {
+            throw TorrentCoreError.invalidBencode(error)
+        }
+        guard case .dictionary(let info) = infoValue else {
+            throw TorrentCoreError.invalidMetainfo("Missing torrent info dictionary.")
+        }
+
+        let name = string(in: info, preferredKey: "name.utf-8", fallbackKey: "name") ?? "torrent"
+        let pieceLength = integer(in: info, key: "piece length")
+        guard let pieceLength, pieceLength > 0 else {
+            throw TorrentCoreError.invalidMetainfo("Missing or invalid piece length.")
+        }
+        let pieces = try pieces(from: info[stringKey("pieces")])
+        let parsedFiles = try files(from: info, rootName: name)
+        let totalLength = try totalLength(from: parsedFiles.files)
+        try validatePieceCoverage(
+            totalLength: totalLength,
+            pieceLength: pieceLength,
+            pieceCount: pieces.count
+        )
+
+        return TorrentMetainfo(
+            name: name,
+            files: parsedFiles.files,
+            pieceLength: pieceLength,
+            pieces: pieces,
+            announce: announce,
+            announceList: announceList,
+            isPrivate: integer(in: info, key: "private") == 1,
+            isMultiFile: parsedFiles.isMultiFile,
+            infoDictionaryBytes: data,
+            infoHashV1: Data(Insecure.SHA1.hash(data: data))
+        )
+    }
+
     public static func parse(url: URL, limits: BencodeLimits = .default) throws -> TorrentMetainfo {
         if url.isFileURL,
            let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,

@@ -141,7 +141,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         submenu.addItem(disabledItem(taskDetailTitle(for: task)))
         submenu.addItem(NSMenuItem.separator())
 
-        let isPausable = task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding
+        let isPausable = task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding
         let toggleItem = submenu.addItem(
             withTitle: isPausable ? L10n.string("action_pause") : L10n.string("action_start"),
             action: #selector(toggleTask(_:)),
@@ -201,7 +201,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func taskMenuTitle(for task: MenuBarTaskSnapshot) -> String {
         let percent = Int((task.progress * 100).rounded())
         switch task.status {
-        case .running, .fetchingPeers, .connectingPeers:
+        case .running, .fetchingMetadata, .fetchingPeers, .connectingPeers:
             let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond)
             return speed == "0 bytes" ? "\(task.name) · \(task.status.title)" : "\(task.name) · \(percent)% · \(speed)/s"
         case .seeding:
@@ -219,7 +219,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func taskDetailTitle(for task: MenuBarTaskSnapshot) -> String {
         let percent = Int((task.progress * 100).rounded())
-        if task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers {
+        if task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers {
             let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond)
             return speed == "0 bytes" ? "\(task.status.title) · \(percent)%" : "\(task.status.title) · \(percent)% · \(speed)/s"
         }
@@ -285,7 +285,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             return
         }
 
-        if task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding {
+        if task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding {
             coordinator?.pause(task)
         } else {
             coordinator?.resume(task)

@@ -768,17 +768,42 @@ Next step:
 
 ## Task 18: Magnet Metadata
 
-Status: [ ]
+Status: [x]
 
 Implement BEP 10 extension handshake and BEP 9 `ut_metadata` exchange, metadata assembly and info-hash verification, fetching-metadata UI state, timeout actions, and mock extended-peer tests.
 
 Work performed:
 
+- Added `TorrentExtensionProtocol` in `SwiftGetXTorrentCore` with BEP 10 extension handshakes, BEP 9 `ut_metadata` request/data/reject message encoding and decoding, metadata piece assembly, size validation, and info-hash verification.
+- Extended peer-wire message support for message id 20 extended messages and extension-protocol reserved handshake bits without coupling the core to app UI, SwiftData, AppKit, or libtorrent.
+- Added `TorrentMetainfo.parseInfoDictionary(...)` so fetched magnet metadata can become a normal v1 `TorrentMetainfo` after SHA-1 info-hash validation.
+- Wired `SwiftTorrentEngineAdapter` so magnet tasks announce trackers, connect to peers, enter `fetchingMetadata`, fetch metadata over BEP 9, refresh in-memory file/layout metadata, and then continue through the existing Swift piece download path.
+- Added timeout-visible behavior for magnet metadata fetches: the Swift adapter emits a `fetchingMetadata` snapshot with the timeout error while the metadata fetch continues in the background unless the user pauses/cancels the task.
+- Added `fetchingMetadata` status handling across model state, queue/activity accounting, menu bar, toolbar/task controls, task list, inspector colors, localization, and libtorrent status mapping.
+- Added deterministic tests for BEP 10/BEP 9 message encoding, mock extended-peer metadata fetch, metadata hash rejection, Swift adapter magnet metadata-to-download completion, timeout-then-continue behavior, and wrong-info-hash adapter failure.
+
 Verification evidence:
+
+- `swift test --filter TorrentPeerWire --filter TorrentDownloadEngine --filter SwiftGetXTorrentCore` passed with 55 tests across 3 suites.
+- `swift build` passed.
+- `swift test` passed with 198 tests across 15 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static libtorrent audit with `rg -n "CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore Sources/SwiftGetX/Services/TorrentDownloadEngine.swift Package.swift` found no libtorrent references in `Sources/SwiftGetXTorrentCore`; remaining matches are the existing optional `Package.swift` gate and app adapter boundary.
+- Static core isolation audit with `rg -n "import (SwiftUI|SwiftData|AppKit)|CSwiftGetXLibtorrent|LibtorrentAdapter" Sources/SwiftGetXTorrentCore` found no matches.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the local native libtorrent archive present; the linker emitted the existing local OpenSSL dylib deployment-target warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 201 tests across 16 suites; the same local OpenSSL deployment-target linker warnings were present.
 
 Remaining risk:
 
+- Magnet metadata fetching currently depends on tracker-discovered peers; trackerless magnet metadata still needs DHT/PEX/LSD work from Task 19.
+- BEP 9 requests are sequential and use one peer at a time. Parallel metadata piece requests, peer rotation during a slow exchange, and richer timeout/retry policy remain future runtime hardening.
+- Timeout handling now keeps the task in `fetchingMetadata` and leaves pause/cancel available, but richer explicit UI actions such as “copy magnet” or a dedicated “continue waiting” button remain later UX/support-tooling scope.
+- A real public magnet was not exercised in this session to keep tests deterministic and avoid external network dependence; local mock extended peers cover the protocol and adapter behavior.
+
 Next step:
+
+- Large Check 6: Peer Wire and Magnet MVP.
 
 ## Large Check 6: Peer Wire and Magnet MVP
 

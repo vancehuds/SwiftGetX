@@ -12,6 +12,12 @@ public enum TorrentPeerWireError: Error, Equatable, Sendable, LocalizedError {
     case invalidPieceIndex(Int)
     case invalidBlockLength(pieceIndex: Int, begin: Int, length: Int)
     case invalidPieceHash(pieceIndex: Int)
+    case extensionProtocolUnavailable
+    case metadataExtensionUnavailable
+    case invalidExtendedMessage
+    case invalidMetadataSize(Int)
+    case metadataRejected(pieceIndex: Int)
+    case invalidMetadataHash(expected: String, actual: String)
     case timeout
     case transport(String)
 
@@ -35,6 +41,18 @@ public enum TorrentPeerWireError: Error, Equatable, Sendable, LocalizedError {
             "Torrent peer piece \(pieceIndex) has an invalid block at \(begin) with length \(length)."
         case .invalidPieceHash(let pieceIndex):
             "Torrent peer piece \(pieceIndex) failed SHA-1 validation."
+        case .extensionProtocolUnavailable:
+            "Torrent peer does not support the extension protocol."
+        case .metadataExtensionUnavailable:
+            "Torrent peer does not support magnet metadata exchange."
+        case .invalidExtendedMessage:
+            "Torrent peer sent an invalid extended protocol message."
+        case .invalidMetadataSize(let size):
+            "Torrent peer reported an invalid metadata size: \(size)."
+        case .metadataRejected(let pieceIndex):
+            "Torrent peer rejected metadata piece \(pieceIndex)."
+        case .invalidMetadataHash(let expected, let actual):
+            "Torrent metadata hash mismatch. Expected \(expected), received \(actual)."
         case .timeout:
             "Torrent peer timed out while waiting for data."
         case .transport(let message):
@@ -46,6 +64,8 @@ public enum TorrentPeerWireError: Error, Equatable, Sendable, LocalizedError {
 public struct TorrentPeerWireHandshake: Equatable, Sendable {
     public static let protocolString = "BitTorrent protocol"
     public static let handshakeLength = 68
+    public static let extensionProtocolReservedByteIndex = 5
+    public static let extensionProtocolReservedBit: UInt8 = 0x10
 
     public var infoHash: Data
     public var peerID: Data
@@ -58,6 +78,17 @@ public struct TorrentPeerWireHandshake: Equatable, Sendable {
         self.infoHash = infoHash
         self.peerID = peerID
         self.reserved = reserved
+    }
+
+    public static var extensionProtocolReservedBytes: Data {
+        var reserved = Data(repeating: 0, count: 8)
+        reserved[extensionProtocolReservedByteIndex] = extensionProtocolReservedBit
+        return reserved
+    }
+
+    public var supportsExtensionProtocol: Bool {
+        reserved.count == 8
+            && (reserved[Self.extensionProtocolReservedByteIndex] & Self.extensionProtocolReservedBit) != 0
     }
 
     public func encodedData() -> Data {
@@ -108,6 +139,7 @@ public enum TorrentPeerWireMessage: Equatable, Sendable {
     case piece(pieceIndex: Int, begin: Int, block: Data)
     case cancel(pieceIndex: Int, begin: Int, length: Int)
     case port(Int)
+    case extended(extendedID: UInt8, payload: Data)
     case unknown(id: UInt8, payload: Data)
 
     public func encodedData() throws -> Data {
@@ -155,6 +187,10 @@ public enum TorrentPeerWireMessage: Equatable, Sendable {
             var payload = Data()
             payload.appendUInt16(UInt16(port))
             return Self.encodedFrame(messageID: 9, payload: payload)
+        case .extended(let extendedID, let payload):
+            var extendedPayload = Data([extendedID])
+            extendedPayload.append(payload)
+            return Self.encodedFrame(messageID: 20, payload: extendedPayload)
         case .unknown(let id, let payload):
             return Self.encodedFrame(messageID: id, payload: payload)
         }
@@ -221,6 +257,9 @@ public enum TorrentPeerWireMessage: Equatable, Sendable {
         case 9:
             guard payload.count == 2 else { throw TorrentPeerWireError.invalidMessage }
             return .port(Int(payload.uint16(at: 0)))
+        case 20:
+            guard let extendedID = payload.first else { throw TorrentPeerWireError.invalidExtendedMessage }
+            return .extended(extendedID: extendedID, payload: Data(payload.dropFirst()))
         default:
             return .unknown(id: messageID, payload: payload)
         }
@@ -645,7 +684,7 @@ public actor TorrentPeerWireSession {
                 case .unchoke:
                     isUnchoked = true
                     continue
-                case .keepAlive, .interested, .notInterested, .have, .bitfield, .request, .cancel, .port, .unknown:
+                case .keepAlive, .interested, .notInterested, .have, .bitfield, .request, .cancel, .port, .extended, .unknown:
                     continue
                 case .piece:
                     continue
@@ -766,7 +805,7 @@ public actor TorrentPeerWireSession {
             case .choke:
                 isUnchoked = false
                 continue
-            case .keepAlive, .interested, .notInterested, .have, .bitfield, .request, .piece, .cancel, .port, .unknown:
+            case .keepAlive, .interested, .notInterested, .have, .bitfield, .request, .piece, .cancel, .port, .extended, .unknown:
                 continue
             }
         }

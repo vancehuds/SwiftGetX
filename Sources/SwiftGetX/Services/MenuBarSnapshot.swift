@@ -25,7 +25,7 @@ struct MenuBarSnapshot: Equatable {
 
     init(tasks: [DownloadTask], recentLimit: Int = 5) {
         totalCount = tasks.count
-        runningCount = tasks.count { $0.status == .running || $0.status == .fetchingPeers || $0.status == .connectingPeers }
+        runningCount = tasks.count { $0.status == .running || $0.status == .fetchingMetadata || $0.status == .fetchingPeers || $0.status == .connectingPeers }
         seedingCount = tasks.count { $0.status == .seeding }
         queuedCount = tasks.count { $0.status == .queued }
         pausedCount = tasks.count { $0.status == .paused }
@@ -34,7 +34,7 @@ struct MenuBarSnapshot: Equatable {
         failedCount = tasks.count { $0.status == .failed }
         cancelledCount = tasks.count { $0.status == .cancelled }
         totalDownloadSpeed = tasks
-            .filter { $0.status == .running || $0.status == .fetchingPeers || $0.status == .connectingPeers }
+            .filter { $0.status == .running || $0.status == .fetchingMetadata || $0.status == .fetchingPeers || $0.status == .connectingPeers }
             .reduce(Int64(0)) { $0 + $1.speedBytesPerSecond }
 
         recentTasks = tasks
@@ -94,24 +94,26 @@ struct MenuBarSnapshot: Equatable {
         switch status {
         case .running:
             0
-        case .fetchingPeers:
+        case .fetchingMetadata:
             1
-        case .connectingPeers:
+        case .fetchingPeers:
             2
-        case .verifying:
+        case .connectingPeers:
             3
-        case .seeding:
+        case .verifying:
             4
-        case .queued:
+        case .seeding:
             5
-        case .paused:
+        case .queued:
             6
-        case .failed:
+        case .paused:
             7
-        case .cancelled:
+        case .failed:
             8
-        case .completed:
+        case .cancelled:
             9
+        case .completed:
+            10
         }
     }
 }

@@ -107,6 +107,7 @@
 "download_status_connecting_peers" = "Connecting peers";
 "download_status_completed" = "Completed";
 "download_status_failed" = "Failed";
+"download_status_fetching_metadata" = "Fetching metadata";
 "download_status_fetching_peers" = "Fetching peers";
 "download_status_paused" = "Paused";
 "download_status_queued" = "Queued";

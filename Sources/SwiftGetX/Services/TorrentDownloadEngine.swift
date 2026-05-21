@@ -301,7 +301,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     ) async throws {
         requests[request.id] = request
         snapshotHandlers[request.id] = onSnapshot
-        let metadata = metadataSnapshot(for: request)
+        var metadata = metadataSnapshot(for: request)
         metadataByID[request.id] = metadata
         let trackerSession = SwiftTorrentTrackerSession(
             descriptors: metadata.trackerDescriptors,
@@ -313,7 +313,17 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             peers: [],
             successfulTrackerURL: nil
         )
-        if !metadata.trackerDescriptors.isEmpty, metadata.infoHashV1 != nil {
+        let needsMagnetMetadata = request.displaySource.lowercased().hasPrefix("magnet:")
+            && metadata.metainfo == nil
+            && metadata.infoHashV1 != nil
+        if needsMagnetMetadata {
+            onSnapshot(snapshot(
+                for: request,
+                status: .fetchingMetadata,
+                metadata: metadata,
+                trackerSummary: initialTrackerSummary
+            ))
+        } else if !metadata.trackerDescriptors.isEmpty, metadata.infoHashV1 != nil {
             onSnapshot(snapshot(
                 for: request,
                 status: .fetchingPeers,
@@ -346,6 +356,52 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
                 trackerSummary: trackerSummary
             ))
             return
+        }
+
+        if needsMagnetMetadata, let infoHash = metadata.infoHashV1 {
+            onSnapshot(snapshot(
+                for: request,
+                status: .fetchingMetadata,
+                metadata: metadata,
+                trackerSummary: trackerSummary
+            ))
+            do {
+                let metadataFetchTask = Task {
+                    try await Self.fetchMagnetMetadataFromPeers(
+                        infoHash: infoHash,
+                        trackers: metadata.trackerDescriptors.map(\.url),
+                        peers: deduplicatedPeers(
+                            trackerSummary.peers,
+                            limit: max(1, request.runtimeOptions.maxConnections)
+                        ),
+                        peerTransportFactory: peerTransportFactory
+                    )
+                }
+                if await Self.metadataFetchTimedOut(
+                    metadataFetchTask,
+                    timeoutSeconds: request.runtimeOptions.magnetMetadataTimeoutSeconds
+                ) {
+                    onSnapshot(snapshot(
+                        for: request,
+                        status: .fetchingMetadata,
+                        metadata: metadata,
+                        trackerSummary: trackerSummary,
+                        errorMessageOverride: TorrentMetadataError.metadataTimeout.localizedDescription
+                    ))
+                }
+                let metainfo = try await metadataFetchTask.value
+                metadata = metadataSnapshot(for: request, metainfo: metainfo)
+                metadataByID[request.id] = metadata
+            } catch {
+                onSnapshot(snapshot(
+                    for: request,
+                    status: .failed,
+                    metadata: metadata,
+                    trackerSummary: trackerSummary,
+                    errorMessageOverride: error.localizedDescription
+                ))
+                return
+            }
         }
 
         onSnapshot(snapshot(
@@ -706,6 +762,48 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         return session
     }
 
+    private static func metadataFetchTimedOut(
+        _ task: Task<TorrentMetainfo, Error>,
+        timeoutSeconds: Int
+    ) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                try? await Task.sleep(for: .seconds(max(1, timeoutSeconds)))
+                return true
+            }
+            group.addTask {
+                _ = try? await task.value
+                return false
+            }
+            let timedOut = await group.next() ?? false
+            group.cancelAll()
+            return timedOut
+        }
+    }
+
+    private static func fetchMagnetMetadataFromPeers(
+        infoHash: Data,
+        trackers: [String],
+        peers: [TorrentPeerEndpoint],
+        peerTransportFactory: @escaping PeerTransportFactory
+    ) async throws -> TorrentMetainfo {
+        var lastError: Error?
+        for peer in peers {
+            do {
+                let transport = try await peerTransportFactory(peer)
+                let session = try TorrentMagnetMetadataSession(
+                    infoHash: infoHash,
+                    trackers: trackers,
+                    transport: transport
+                )
+                return try await session.fetchMetadata()
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? TorrentPeerWireError.metadataExtensionUnavailable
+    }
+
     private func deduplicatedPeers(
         _ peers: [TorrentPeerEndpoint],
         limit: Int
@@ -864,9 +962,15 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
     ) -> DownloadSnapshot {
         let options = request.runtimeOptions
         let isMagnet = request.displaySource.lowercased().hasPrefix("magnet:")
-        let metadataStatus: TorrentMetadataStatus = metadata.files.isEmpty
-            ? (isMagnet ? .fetching : .unavailable)
-            : .available
+        let metadataStatus: TorrentMetadataStatus = {
+            if !metadata.files.isEmpty {
+                return .available
+            }
+            if status == .failed {
+                return .failed
+            }
+            return isMagnet ? .fetching : .unavailable
+        }()
         let trackers = trackerSummary?.trackers ?? metadata.trackers
         let peers = !peerStates.isEmpty ? peerStates.map(\.peerInfo).sorted { $0.address < $1.address } : trackerSummary?.peers.map {
             TorrentPeerInfo(
@@ -951,6 +1055,8 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         switch status {
         case .running:
             L10n.string("download_status_running")
+        case .fetchingMetadata:
+            L10n.string("download_status_fetching_metadata")
         case .fetchingPeers:
             L10n.string("torrent_tracker_fetching_peers")
         case .connectingPeers:
@@ -967,7 +1073,7 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
         trackerSummary: SwiftTorrentTrackerAnnounceSummary?
     ) -> String? {
         switch status {
-        case .fetchingPeers, .connectingPeers, .running, .completed:
+        case .fetchingMetadata, .fetchingPeers, .connectingPeers, .running, .completed:
             nil
         case .failed where trackerSummary?.successfulTrackerURL == nil && trackerSummary != nil:
             L10n.string("torrent_tracker_no_peers")
@@ -1025,6 +1131,13 @@ actor SwiftTorrentEngineAdapter: TorrentEngineAdapter {
             )
         }
 
+        return metadataSnapshot(for: request, metainfo: metainfo)
+    }
+
+    private func metadataSnapshot(
+        for request: TorrentStartRequest,
+        metainfo: TorrentMetainfo
+    ) -> SwiftTorrentMetadataSnapshot {
         let tiers = !metainfo.announceList.isEmpty
             ? metainfo.announceList
             : metainfo.announce.map { [[$0]] } ?? []

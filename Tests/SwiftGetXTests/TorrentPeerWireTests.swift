@@ -33,6 +33,11 @@ struct TorrentPeerWireTests {
         for message in messages {
             #expect(try TorrentPeerWireMessage.decodeFrame(message.encodedData()) == message)
         }
+        let extended = TorrentPeerWireMessage.extended(
+            extendedID: 3,
+            payload: Data([1, 2, 3])
+        )
+        #expect(try TorrentPeerWireMessage.decodeFrame(extended.encodedData()) == extended)
 
         let blockPlanner = try TorrentPeerBlockPlanner.requests(pieceLength: 20, maximumBlockLength: 8)
         #expect(blockPlanner.map(\.begin) == [0, 8, 16])
@@ -87,6 +92,137 @@ struct TorrentPeerWireTests {
             completedPieceIndexes: [0],
             activePeerCount: 2
         ))
+    }
+
+    @Test("encodes BEP 10 and BEP 9 metadata messages")
+    func encodesBEP10AndBEP9MetadataMessages() throws {
+        let handshake = try TorrentPeerExtensionHandshake(utMetadataMessageID: 7, metadataSize: 32_768)
+        #expect(try TorrentPeerExtensionHandshake.decode(handshake.encodedPayload()) == handshake)
+
+        let request = TorrentMetadataExtensionMessage.request(pieceIndex: 2)
+        #expect(try TorrentMetadataExtensionMessage.decode(request.encodedPayload()) == request)
+
+        let metadata = Data((0..<12).map(UInt8.init))
+        let data = TorrentMetadataExtensionMessage.data(pieceIndex: 1, totalSize: 20_000, metadata: metadata)
+        #expect(try TorrentMetadataExtensionMessage.decode(data.encodedPayload()) == data)
+
+        let reject = TorrentMetadataExtensionMessage.reject(pieceIndex: 3)
+        #expect(try TorrentMetadataExtensionMessage.decode(reject.encodedPayload()) == reject)
+    }
+
+    @Test("fetches magnet metadata through an extended peer")
+    func fetchesMagnetMetadataThroughExtendedPeer() async throws {
+        let info = bencodeDictionary([
+            ("length", bencodeInteger(20)),
+            ("name", bencodeString("demo.bin")),
+            ("piece length", bencodeInteger(20)),
+            ("pieces", bencodeData(Data(Insecure.SHA1.hash(data: Data((0..<20).map(UInt8.init))))))
+        ])
+        let infoHash = Data(Insecure.SHA1.hash(data: info))
+        let metadataMessageID: UInt8 = 4
+        let transport = MockTorrentPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: infoHash,
+                    peerID: Data((60..<80).map(UInt8.init)),
+                    reserved: TorrentPeerWireHandshake.extensionProtocolReservedBytes
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: TorrentPeerExtensionHandshake.handshakeExtendedID,
+                    payload: TorrentPeerExtensionHandshake(
+                        utMetadataMessageID: metadataMessageID,
+                        metadataSize: info.count
+                    ).encodedPayload()
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: metadataMessageID,
+                    payload: TorrentMetadataExtensionMessage.data(
+                        pieceIndex: 0,
+                        totalSize: info.count,
+                        metadata: info
+                    ).encodedPayload()
+                ).encodedData()
+            ]
+        )
+        let session = try TorrentMagnetMetadataSession(
+            infoHash: infoHash,
+            trackers: ["http://tracker.example/announce"],
+            transport: transport,
+            peerID: Data((40..<60).map(UInt8.init))
+        )
+
+        let metainfo = try await session.fetchMetadata()
+
+        #expect(metainfo.name == "demo.bin")
+        #expect(metainfo.infoHashV1 == infoHash)
+        #expect(metainfo.trackerURLs == ["http://tracker.example/announce"])
+
+        let sentFrames = await transport.sentFrames
+        #expect(sentFrames.count == 3)
+        let sentHandshake = try TorrentPeerWireHandshake.decode(sentFrames[0], expectedInfoHash: infoHash)
+        #expect(sentHandshake.supportsExtensionProtocol)
+        guard case .extended(let handshakeID, _) = try TorrentPeerWireMessage.decodeFrame(sentFrames[1]) else {
+            Issue.record("Expected a local extension handshake.")
+            return
+        }
+        #expect(handshakeID == TorrentPeerExtensionHandshake.handshakeExtendedID)
+        #expect(
+            try TorrentPeerWireMessage.decodeFrame(sentFrames[2]) == .extended(
+                extendedID: metadataMessageID,
+                payload: TorrentMetadataExtensionMessage.request(pieceIndex: 0).encodedPayload()
+            )
+        )
+    }
+
+    @Test("rejects magnet metadata when the info hash does not match")
+    func rejectsMagnetMetadataWhenInfoHashDoesNotMatch() async throws {
+        let info = bencodeDictionary([
+            ("length", bencodeInteger(20)),
+            ("name", bencodeString("demo.bin")),
+            ("piece length", bencodeInteger(20)),
+            ("pieces", bencodeData(Data(Insecure.SHA1.hash(data: Data((0..<20).map(UInt8.init))))))
+        ])
+        let expectedInfoHash = Data(repeating: 7, count: 20)
+        let metadataMessageID: UInt8 = 5
+        let transport = MockTorrentPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: expectedInfoHash,
+                    peerID: Data((60..<80).map(UInt8.init)),
+                    reserved: TorrentPeerWireHandshake.extensionProtocolReservedBytes
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: TorrentPeerExtensionHandshake.handshakeExtendedID,
+                    payload: TorrentPeerExtensionHandshake(
+                        utMetadataMessageID: metadataMessageID,
+                        metadataSize: info.count
+                    ).encodedPayload()
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: metadataMessageID,
+                    payload: TorrentMetadataExtensionMessage.data(
+                        pieceIndex: 0,
+                        totalSize: info.count,
+                        metadata: info
+                    ).encodedPayload()
+                ).encodedData()
+            ]
+        )
+        let session = try TorrentMagnetMetadataSession(
+            infoHash: expectedInfoHash,
+            trackers: [],
+            transport: transport
+        )
+
+        do {
+            _ = try await session.fetchMetadata()
+            Issue.record("Expected metadata hash validation to fail.")
+        } catch TorrentPeerWireError.invalidMetadataHash(let expected, let actual) {
+            #expect(expected == expectedInfoHash.map { String(format: "%02x", $0) }.joined())
+            #expect(actual == Data(Insecure.SHA1.hash(data: info)).map { String(format: "%02x", $0) }.joined())
+        } catch {
+            Issue.record("Expected an invalid metadata hash error.")
+        }
     }
 
     @Test("writes single-file torrent content")

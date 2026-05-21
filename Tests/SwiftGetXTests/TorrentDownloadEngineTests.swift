@@ -322,6 +322,309 @@ struct TorrentDownloadEngineTests {
         #expect(announceURL.contains("left=42"))
     }
 
+    @Test("Swift adapter fetches magnet metadata through an extended peer and downloads")
+    func swiftAdapterFetchesMagnetMetadataThroughExtendedPeerAndDownloads() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trackerURL = "http://tracker.local/announce"
+        let contents = Data((0..<20).map(UInt8.init))
+        let info = Self.singleFileInfoData(
+            name: "payload.bin",
+            length: contents.count,
+            pieceLength: contents.count,
+            pieceHashes: Data(Insecure.SHA1.hash(data: contents))
+        )
+        let infoHash = Data(Insecure.SHA1.hash(data: info))
+        let metadataMessageID: UInt8 = 4
+        let metadataTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: infoHash,
+                    peerID: Data((60..<80).map(UInt8.init)),
+                    reserved: TorrentPeerWireHandshake.extensionProtocolReservedBytes
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: TorrentPeerExtensionHandshake.handshakeExtendedID,
+                    payload: TorrentPeerExtensionHandshake(
+                        utMetadataMessageID: metadataMessageID,
+                        metadataSize: info.count
+                    ).encodedPayload()
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: metadataMessageID,
+                    payload: TorrentMetadataExtensionMessage.data(
+                        pieceIndex: 0,
+                        totalSize: info.count,
+                        metadata: info
+                    ).encodedPayload()
+                ).encodedData()
+            ]
+        )
+        let downloadTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: infoHash,
+                    peerID: Data((80..<100).map(UInt8.init))
+                ).encodedData(),
+                try TorrentPeerWireMessage.unchoke.encodedData(),
+                try TorrentPeerWireMessage.piece(pieceIndex: 0, begin: 0, block: contents).encodedData()
+            ]
+        )
+        let peer = TorrentPeerEndpoint(host: "127.0.0.1", port: 6_881)
+        let transportFactory = AppQueuedPeerWireTransportFactory(transports: [
+            peer.address: [metadataTransport, downloadTransport]
+        ])
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse(peers: [peer]))
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { endpoint in
+                try await transportFactory.nextTransport(for: endpoint)
+            }
+        )
+        let store = SnapshotStore()
+        let magnet = "magnet:?xt=urn:btih:\(infoHash.hexEncodedString)&dn=payload.bin&xl=\(contents.count)&tr=\(Self.percentEncoded(trackerURL))"
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: magnet,
+            resolvedTorrentFilePath: nil,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: Int64(contents.count),
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift, magnetMetadataTimeoutSeconds: 2),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshots = try await store.snapshots(count: 6)
+        let final = try #require(snapshots.last)
+        let savedData = try Data(contentsOf: directory.appendingPathComponent("payload.bin"))
+
+        #expect(snapshots.map(\.status) == [.fetchingMetadata, .fetchingMetadata, .connectingPeers, .running, .running, .completed])
+        #expect(snapshots[1].torrentMetadataStatus == .fetching)
+        #expect(snapshots[2].torrentMetadataStatus == .available)
+        #expect(final.torrentFiles == [
+            TorrentFile(index: 0, path: "payload.bin", size: Int64(contents.count), priority: TorrentFilePriority.normal.rawValue, progress: 1)
+        ])
+        #expect(savedData == contents)
+        #expect(try TorrentPeerWireMessage.decodeFrame((await metadataTransport.sentFrames)[1]) == .extended(
+            extendedID: TorrentPeerExtensionHandshake.handshakeExtendedID,
+            payload: try TorrentPeerExtensionHandshake().encodedPayload()
+        ))
+        #expect(try TorrentPeerWireMessage.decodeFrame((await metadataTransport.sentFrames)[2]) == .extended(
+            extendedID: metadataMessageID,
+            payload: TorrentMetadataExtensionMessage.request(pieceIndex: 0).encodedPayload()
+        ))
+    }
+
+    @Test("Swift adapter keeps waiting after magnet metadata timeout")
+    func swiftAdapterKeepsWaitingAfterMagnetMetadataTimeout() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trackerURL = "http://tracker.local/announce"
+        let contents = Data((0..<8).map(UInt8.init))
+        let info = Self.singleFileInfoData(
+            name: "payload.bin",
+            length: contents.count,
+            pieceLength: contents.count,
+            pieceHashes: Data(Insecure.SHA1.hash(data: contents))
+        )
+        let infoHash = Data(Insecure.SHA1.hash(data: info))
+        let metadataMessageID: UInt8 = 6
+        let metadataTransport = AppDelayedPeerWireTransport(
+            responses: [
+                .init(data: try TorrentPeerWireHandshake(
+                    infoHash: infoHash,
+                    peerID: Data((60..<80).map(UInt8.init)),
+                    reserved: TorrentPeerWireHandshake.extensionProtocolReservedBytes
+                ).encodedData()),
+                .init(data: try TorrentPeerWireMessage.extended(
+                    extendedID: TorrentPeerExtensionHandshake.handshakeExtendedID,
+                    payload: TorrentPeerExtensionHandshake(
+                        utMetadataMessageID: metadataMessageID,
+                        metadataSize: info.count
+                    ).encodedPayload()
+                ).encodedData()),
+                .init(
+                    data: try TorrentPeerWireMessage.extended(
+                        extendedID: metadataMessageID,
+                        payload: TorrentMetadataExtensionMessage.data(
+                            pieceIndex: 0,
+                            totalSize: info.count,
+                            metadata: info
+                        ).encodedPayload()
+                    ).encodedData(),
+                    delay: .milliseconds(1_100)
+                )
+            ]
+        )
+        let downloadTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: infoHash,
+                    peerID: Data((80..<100).map(UInt8.init))
+                ).encodedData(),
+                try TorrentPeerWireMessage.unchoke.encodedData(),
+                try TorrentPeerWireMessage.piece(pieceIndex: 0, begin: 0, block: contents).encodedData()
+            ]
+        )
+        let peer = TorrentPeerEndpoint(host: "127.0.0.1", port: 6_881)
+        let transportFactory = AppQueuedPeerWireTransportFactory(transports: [
+            peer.address: [metadataTransport, downloadTransport]
+        ])
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse(peers: [peer]))
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { endpoint in
+                try await transportFactory.nextTransport(for: endpoint)
+            }
+        )
+        let store = SnapshotStore()
+        let magnet = "magnet:?xt=urn:btih:\(infoHash.hexEncodedString)&dn=payload.bin&tr=\(Self.percentEncoded(trackerURL))"
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: magnet,
+            resolvedTorrentFilePath: nil,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift, magnetMetadataTimeoutSeconds: 1),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshots = try await store.snapshots(count: 7)
+
+        #expect(snapshots.map(\.status) == [
+            .fetchingMetadata,
+            .fetchingMetadata,
+            .fetchingMetadata,
+            .connectingPeers,
+            .running,
+            .running,
+            .completed
+        ])
+        #expect(snapshots[2].errorMessage == TorrentMetadataError.metadataTimeout.localizedDescription)
+        #expect(snapshots.last?.torrentMetadataStatus == .available)
+        #expect(try Data(contentsOf: directory.appendingPathComponent("payload.bin")) == contents)
+    }
+
+    @Test("Swift adapter rejects magnet metadata with the wrong info hash")
+    func swiftAdapterRejectsMagnetMetadataWithWrongInfoHash() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trackerURL = "http://tracker.local/announce"
+        let contents = Data((0..<20).map(UInt8.init))
+        let info = Self.singleFileInfoData(
+            name: "payload.bin",
+            length: contents.count,
+            pieceLength: contents.count,
+            pieceHashes: Data(Insecure.SHA1.hash(data: contents))
+        )
+        let wrongHash = Data(repeating: 7, count: 20)
+        let metadataMessageID: UInt8 = 4
+        let peer = TorrentPeerEndpoint(host: "127.0.0.1", port: 6_881)
+        let metadataTransport = AppMockPeerWireTransport(
+            responses: [
+                try TorrentPeerWireHandshake(
+                    infoHash: wrongHash,
+                    peerID: Data((60..<80).map(UInt8.init)),
+                    reserved: TorrentPeerWireHandshake.extensionProtocolReservedBytes
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: TorrentPeerExtensionHandshake.handshakeExtendedID,
+                    payload: TorrentPeerExtensionHandshake(
+                        utMetadataMessageID: metadataMessageID,
+                        metadataSize: info.count
+                    ).encodedPayload()
+                ).encodedData(),
+                try TorrentPeerWireMessage.extended(
+                    extendedID: metadataMessageID,
+                    payload: TorrentMetadataExtensionMessage.data(
+                        pieceIndex: 0,
+                        totalSize: info.count,
+                        metadata: info
+                    ).encodedPayload()
+                ).encodedData()
+            ]
+        )
+        let transportFactory = AppQueuedPeerWireTransportFactory(transports: [
+            peer.address: [metadataTransport]
+        ])
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse(peers: [peer]))
+        let adapter = SwiftTorrentEngineAdapter(
+            trackerClient: TorrentTrackerClient(
+                httpTransport: httpTransport,
+                retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+            ),
+            peerTransportFactory: { endpoint in
+                try await transportFactory.nextTransport(for: endpoint)
+            }
+        )
+        let store = SnapshotStore()
+        let magnet = "magnet:?xt=urn:btih:\(wrongHash.hexEncodedString)&dn=payload.bin&tr=\(Self.percentEncoded(trackerURL))"
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: magnet,
+            resolvedTorrentFilePath: nil,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: directory.appendingPathComponent("fixture.resume.json").path,
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift, magnetMetadataTimeoutSeconds: 2),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshots = try await store.snapshots(count: 3)
+        let final = try #require(snapshots.last)
+
+        #expect(snapshots.map(\.status) == [.fetchingMetadata, .fetchingMetadata, .failed])
+        #expect(final.torrentMetadataStatus == .failed)
+        #expect(final.errorMessage?.contains("metadata hash mismatch") == true)
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("payload.bin").path))
+    }
+
     @Test("Swift adapter completes a single-file download through a mocked peer")
     func swiftAdapterCompletesSingleFileDownloadThroughMockedPeer() async throws {
         let directory = try Self.makeTemporaryDirectory()
@@ -660,16 +963,30 @@ struct TorrentDownloadEngineTests {
         pieceLength: Int = 16_384,
         pieceHashes: Data? = nil
     ) -> Data {
-        let hashes = pieceHashes ?? Data("aaaaaaaaaaaaaaaaaaaa".utf8)
         var data = Data("d".utf8)
         if let announce {
             data.append(bencodeString("announce"))
             data.append(bencodeString(announce))
         }
         data.append(bencodeString("info"))
-        data.append(Data("d6:lengthi\(length)e4:name\(name.count):\(name)12:piece lengthi\(pieceLength)e6:pieces\(hashes.count):".utf8))
-        data.append(hashes)
+        data.append(singleFileInfoData(
+            name: name,
+            length: length,
+            pieceLength: pieceLength,
+            pieceHashes: pieceHashes ?? Data("aaaaaaaaaaaaaaaaaaaa".utf8)
+        ))
         data.append(UInt8(ascii: "e"))
+        return data
+    }
+
+    private static func singleFileInfoData(
+        name: String,
+        length: Int,
+        pieceLength: Int,
+        pieceHashes: Data
+    ) -> Data {
+        var data = Data("d6:lengthi\(length)e4:name\(name.count):\(name)12:piece lengthi\(pieceLength)e6:pieces\(pieceHashes.count):".utf8)
+        data.append(pieceHashes)
         data.append(UInt8(ascii: "e"))
         return data
     }
@@ -772,6 +1089,12 @@ struct TorrentDownloadEngineTests {
         return data
     }
 
+    private static func percentEncoded(_ value: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: ":/?#[]@!$&'()*+,;=")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
     private static func makeTemporaryDirectory() throws -> URL {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
@@ -853,6 +1176,66 @@ private actor AppMockPeerWireTransport: TorrentPeerWireTransport {
     }
 }
 
+private struct DelayedPeerWireResponse: Sendable {
+    var data: Data
+    var delay: Duration?
+
+    init(data: Data, delay: Duration? = nil) {
+        self.data = data
+        self.delay = delay
+    }
+}
+
+private actor AppDelayedPeerWireTransport: TorrentPeerWireTransport {
+    private var responses: [DelayedPeerWireResponse]
+    private(set) var sentFrames = [Data]()
+
+    init(responses: [DelayedPeerWireResponse]) {
+        self.responses = responses
+    }
+
+    func send(_ data: Data) async throws {
+        sentFrames.append(data)
+    }
+
+    func receive(maximumLength: Int) async throws -> Data {
+        guard !responses.isEmpty else {
+            return Data()
+        }
+        var next = responses.removeFirst()
+        if let delay = next.delay {
+            try await Task.sleep(for: delay)
+            next.delay = nil
+        }
+        if next.data.count <= maximumLength {
+            return next.data
+        }
+        let chunk = next.data.prefix(maximumLength)
+        next.data.removeFirst(maximumLength)
+        responses.insert(next, at: 0)
+        return Data(chunk)
+    }
+}
+
+private actor AppQueuedPeerWireTransportFactory {
+    private var transports: [String: [any TorrentPeerWireTransport]]
+
+    init(transports: [String: [any TorrentPeerWireTransport]]) {
+        self.transports = transports
+    }
+
+    func nextTransport(for endpoint: TorrentPeerEndpoint) throws -> any TorrentPeerWireTransport {
+        guard var queue = transports[endpoint.address],
+              !queue.isEmpty
+        else {
+            throw TorrentPeerWireError.transport("missing mock peer")
+        }
+        let transport = queue.removeFirst()
+        transports[endpoint.address] = queue
+        return transport
+    }
+}
+
 private actor RecordingTorrentAdapter: TorrentEngineAdapter {
     nonisolated var engineKind: TorrentEngineKind { .swift }
     nonisolated var engineStatus: TorrentEngineStatus { .metadataOnly }
@@ -913,5 +1296,11 @@ private actor RecordingTorrentAdapter: TorrentEngineAdapter {
 
     func configure(runtimeOptions: TorrentRuntimeOptions) async {
         runtimeConfigurations.append(runtimeOptions)
+    }
+}
+
+private extension Data {
+    var hexEncodedString: String {
+        map { String(format: "%02x", $0) }.joined()
     }
 }
