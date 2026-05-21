@@ -16,18 +16,51 @@ private struct SettingsHost: View {
     @Environment(\.responsiveLayout) private var parentLayout
     let diagnostics: NativeHostDiagnostics
 
-    var body: some View {
-        content.modifier(lifecycleModifier)
-            .id(settings.language)
-    }
+    @State private var activeTab = 0
 
-    private var content: SettingsContent {
-        SettingsContent(
-            settings: settings,
-            diagnostics: diagnostics,
-            parentLayout: parentLayout,
-            chooseDirectory: chooseDirectory
-        )
+    var body: some View {
+        TabView(selection: $activeTab) {
+            DownloadSettingsTab(
+                settings: settings,
+                layout: parentLayout,
+                chooseDirectory: chooseDirectory
+            )
+            .tabItem {
+                Label(L10n.string("settings_download_section"), systemImage: "arrow.down.circle")
+            }
+            .tag(0)
+
+            TorrentSettingsTab(
+                settings: settings,
+                layout: parentLayout
+            )
+            .tabItem {
+                Label("BT", systemImage: "bolt.horizontal")
+            }
+            .tag(1)
+
+            SystemSettingsTab(
+                settings: settings,
+                layout: parentLayout
+            )
+            .tabItem {
+                Label(L10n.string("settings_system_section"), systemImage: "gearshape")
+            }
+            .tag(2)
+
+            BrowserIntegrationTab(
+                settings: settings,
+                diagnostics: diagnostics,
+                layout: parentLayout
+            )
+            .tabItem {
+                Label(L10n.string("browser_integration_section"), systemImage: "safari")
+            }
+            .tag(3)
+        }
+        .frame(width: parentLayout.value(520), height: parentLayout.value(440))
+        .modifier(lifecycleModifier)
+        .id(settings.language)
     }
 
     private var lifecycleModifier: SettingsLifecycleModifier {
@@ -66,7 +99,6 @@ private struct SettingsHost: View {
             assertionFailure("Failed to persist settings: \(error)")
         }
     }
-
 }
 
 private struct SettingsSnapshot: Equatable {
@@ -95,7 +127,6 @@ private struct SettingsSnapshot: Equatable {
     let torrentSeedingLimitMode: TorrentSeedingLimitMode
     let torrentEngine: TorrentEngineKind
     let language: AppLanguage
-
 
     @MainActor
     init(_ settings: AppSettings) {
@@ -148,149 +179,76 @@ private struct SettingsLifecycleModifier: ViewModifier {
     }
 }
 
-private struct SettingsContent: View {
-    let settings: AppSettings
-    let diagnostics: NativeHostDiagnostics
-    let parentLayout: ResponsiveLayout
-    let chooseDirectory: () -> Void
-
-    var body: some View {
-        GeometryReader(content: panelFrame)
-    }
-
-    private func panelFrame(for proxy: GeometryProxy) -> SettingsPanelFrame {
-        SettingsPanelFrame(
-            settings: settings,
-            diagnostics: diagnostics,
-            parentLayout: parentLayout,
-            size: proxy.size,
-            chooseDirectory: chooseDirectory
-        )
-    }
-}
-
-private struct SettingsPanelFrame: View {
-    let settings: AppSettings
-    let diagnostics: NativeHostDiagnostics
-    let parentLayout: ResponsiveLayout
-    let size: CGSize
-    let chooseDirectory: () -> Void
-
-    var body: some View {
-        SettingsPanel(
-            settings: settings,
-            diagnostics: diagnostics,
-            layout: layout,
-            chooseDirectory: chooseDirectory
-        )
-        .environment(\.responsiveLayout, layout)
-    }
-
-    private var layout: ResponsiveLayout {
-        let widthScale = max(size.width, 1) / 520
-        let heightScale = max(size.height, 1) / 480
-        let settingsScale = min(widthScale, heightScale)
-        return ResponsiveLayout(scale: max(parentLayout.scale, settingsScale))
-    }
-}
-
-private struct SettingsPanel: View {
-    let settings: AppSettings
-    let diagnostics: NativeHostDiagnostics
-    let layout: ResponsiveLayout
-    let chooseDirectory: () -> Void
-
-    var body: some View {
-        ZStack {
-            MonochromeWindowBackground()
-
-            GlassSurface(level: .panel, cornerRadius: 18) {
-                SettingsForm(
-                    settings: settings,
-                    diagnostics: diagnostics,
-                    layout: layout,
-                    chooseDirectory: chooseDirectory
-                )
-            }
-            .padding(layout.value(10))
-        }
-    }
-}
-
-private struct SettingsForm: View {
-    let settings: AppSettings
-    let diagnostics: NativeHostDiagnostics
-    let layout: ResponsiveLayout
-    let chooseDirectory: () -> Void
-
-    var body: some View {
-        Form {
-            DownloadSettingsSection(
-                settings: settings,
-                layout: layout,
-                chooseDirectory: chooseDirectory
-            )
-            TorrentSettingsSection(settings: settings)
-            SystemSettingsSection(settings: settings)
-            BrowserIntegrationSection(settings: settings, diagnostics: diagnostics, layout: layout)
-        }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-    }
-}
-
-private struct DownloadSettingsSection: View {
+// MARK: - Download Tab
+private struct DownloadSettingsTab: View {
     @Bindable var settings: AppSettings
     let layout: ResponsiveLayout
     let chooseDirectory: () -> Void
 
     var body: some View {
-        Section(L10n.string("settings_download_section")) {
-            downloadDirectoryRow
-            Stepper(
-                L10n.string("settings_concurrent_tasks", settings.concurrentTaskLimit),
-                value: $settings.concurrentTaskLimit,
-                in: 1...12
-            )
-            Toggle(L10n.string("settings_enable_http_multithreading"), isOn: $settings.httpMultithreadingEnabled)
-            Stepper(
-                L10n.string("settings_http_thread_count", settings.httpSegmentCount),
-                value: $settings.httpSegmentCount,
-                in: 1...32
-            )
-                .disabled(!settings.httpMultithreadingEnabled)
-            Toggle(L10n.string("settings_hide_http_temp_files"), isOn: $settings.hideHTTPTemporaryFiles)
-            Stepper(
-                L10n.string("settings_retry_count", settings.retryLimit),
-                value: $settings.retryLimit,
-                in: 0...10
-            )
-            Picker(L10n.string("queue_restart_policy"), selection: $settings.downloadRestartPolicy) {
-                ForEach(DownloadRestartPolicy.allCases) { policy in
-                    Text(policy.title).tag(policy)
-                }
+        Form {
+            Section {
+                downloadDirectoryRow
             }
-            Toggle(L10n.string("queue_auto_requeue_failed"), isOn: $settings.automaticallyRequeuesFailedTasks)
-            Stepper(
-                L10n.string("queue_retry_limit", settings.queueFailureRetryLimit),
-                value: $settings.queueFailureRetryLimit,
-                in: 0...10
-            )
-            .disabled(!settings.automaticallyRequeuesFailedTasks)
-            SpeedLimitSettingsRow(
-                title: L10n.string("download_speed_limit"),
-                value: $settings.globalDownloadLimitBytes,
-                values: [0, 1_000_000, 5_000_000, 10_000_000, 20_000_000]
-            )
+
+            Section(L10n.string("settings_download_section")) {
+                Stepper(
+                    L10n.string("settings_concurrent_tasks", settings.concurrentTaskLimit),
+                    value: $settings.concurrentTaskLimit,
+                    in: 1...12
+                )
+                
+                Picker(L10n.string("queue_restart_policy"), selection: $settings.downloadRestartPolicy) {
+                    ForEach(DownloadRestartPolicy.allCases) { policy in
+                        Text(policy.title).tag(policy)
+                    }
+                }
+                
+                Toggle(L10n.string("queue_auto_requeue_failed"), isOn: $settings.automaticallyRequeuesFailedTasks)
+                
+                Stepper(
+                    L10n.string("queue_retry_limit", settings.queueFailureRetryLimit),
+                    value: $settings.queueFailureRetryLimit,
+                    in: 0...10
+                )
+                .disabled(!settings.automaticallyRequeuesFailedTasks)
+                
+                SpeedLimitSettingsRow(
+                    title: L10n.string("download_speed_limit"),
+                    value: $settings.globalDownloadLimitBytes,
+                    values: [0, 1_000_000, 5_000_000, 10_000_000, 20_000_000]
+                )
+            }
+
+            Section("HTTP 多线程") {
+                Toggle(L10n.string("settings_enable_http_multithreading"), isOn: $settings.httpMultithreadingEnabled)
+                
+                Stepper(
+                    L10n.string("settings_http_thread_count", settings.httpSegmentCount),
+                    value: $settings.httpSegmentCount,
+                    in: 1...32
+                )
+                .disabled(!settings.httpMultithreadingEnabled)
+                
+                Toggle(L10n.string("settings_hide_http_temp_files"), isOn: $settings.hideHTTPTemporaryFiles)
+                
+                Stepper(
+                    L10n.string("settings_retry_count", settings.retryLimit),
+                    value: $settings.retryLimit,
+                    in: 0...10
+                )
+            }
         }
+        .formStyle(.grouped)
     }
 
     private var downloadDirectoryRow: some View {
         HStack {
             VStack(alignment: .leading, spacing: layout.value(4)) {
                 Text(L10n.string("default_download_directory"))
+                    .font(layout.font(13, weight: .semibold))
                 Text(settings.defaultDownloadDirectory.path)
-                    .font(layout.font(12))
+                    .font(layout.font(11.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -298,111 +256,153 @@ private struct DownloadSettingsSection: View {
             Button(L10n.string("action_choose")) {
                 chooseDirectory()
             }
+            .buttonStyle(.bordered)
+        }
+        .padding(layout.value(10))
+        .background {
+            ContentSurfaceBackground(cornerRadius: 10)
         }
     }
 }
 
-private struct TorrentSettingsSection: View {
+// MARK: - BT Tab
+private struct TorrentSettingsTab: View {
     @Bindable var settings: AppSettings
+    let layout: ResponsiveLayout
 
     var body: some View {
-        Section("BT") {
-            Picker(L10n.string("torrent_engine"), selection: $settings.torrentEngine) {
-                ForEach(TorrentEngineKind.allCases) { engine in
-                    Text(engine.title).tag(engine)
+        Form {
+            Section("BT 引擎") {
+                Picker(L10n.string("torrent_engine"), selection: $settings.torrentEngine) {
+                    ForEach(TorrentEngineKind.allCases) { engine in
+                        Text(engine.title).tag(engine)
+                    }
+                }
+                
+                Text(settings.torrentEngine == .swift
+                    ? L10n.string("torrent_engine_swift_status")
+                    : L10n.string("torrent_engine_libtorrent_status"))
+                    .font(layout.font(11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("网络与连接") {
+                Toggle(L10n.string("torrent_enable_dht"), isOn: $settings.torrentDHTEnabled)
+                
+                if settings.torrentDHTEnabled {
+                    VStack(alignment: .leading, spacing: layout.value(4)) {
+                        Text(L10n.string("torrent_dht_bootstrap_nodes"))
+                            .font(layout.font(11, weight: .semibold))
+                        
+                        TextEditor(text: Binding(
+                            get: { settings.torrentDHTBootstrapNodes.joined(separator: "\n") },
+                            set: { settings.torrentDHTBootstrapNodes = $0.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
+                        ))
+                        .frame(height: layout.value(64))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                        )
+                        .font(.system(.body, design: .monospaced))
+                    }
+                    .padding(.vertical, layout.value(4))
+                }
+
+                Toggle(L10n.string("torrent_enable_pex"), isOn: $settings.torrentPEXEnabled)
+                Toggle(L10n.string("torrent_enable_lsd"), isOn: $settings.torrentLSDEnabled)
+                Toggle(L10n.string("torrent_enable_sequential_default"), isOn: $settings.torrentSequentialDownloadEnabled)
+
+                Stepper(
+                    L10n.string("torrent_magnet_timeout_seconds", settings.torrentMagnetMetadataTimeoutSeconds),
+                    value: $settings.torrentMagnetMetadataTimeoutSeconds,
+                    in: 3...120
+                )
+                Stepper(
+                    L10n.string("torrent_max_connections", settings.torrentMaxConnections),
+                    value: $settings.torrentMaxConnections,
+                    in: 2...1000
+                )
+                Stepper(
+                    L10n.string("torrent_max_upload_slots", settings.torrentMaxUploadSlots),
+                    value: $settings.torrentMaxUploadSlots,
+                    in: -1...128
+                )
+            }
+
+            Section("做种与限速") {
+                SpeedLimitSettingsRow(
+                    title: L10n.string("upload_speed_limit"),
+                    value: $settings.globalUploadLimitBytes,
+                    values: [0, 256_000, 512_000, 1_000_000, 5_000_000]
+                )
+
+                Picker(L10n.string("torrent_seeding_mode"), selection: $settings.torrentSeedingLimitMode) {
+                    ForEach(TorrentSeedingLimitMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+
+                if settings.torrentSeedingLimitMode == .stopAtRatio {
+                    VStack(alignment: .leading, spacing: layout.value(4)) {
+                        Slider(value: $settings.stopSeedingAtRatio, in: 0...5, step: 0.1) {
+                            Text(L10n.string("share_ratio_limit"))
+                        }
+                        
+                        Text(L10n.string("stop_seeding_ratio_message", settings.stopSeedingAtRatio))
+                            .font(layout.font(11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, layout.value(4))
                 }
             }
-            Text(settings.torrentEngine == .swift
-                ? L10n.string("torrent_engine_swift_status")
-                : L10n.string("torrent_engine_libtorrent_status"))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Toggle(L10n.string("torrent_enable_dht"), isOn: $settings.torrentDHTEnabled)
-            if settings.torrentDHTEnabled {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.string("torrent_dht_bootstrap_nodes"))
-                        .font(.subheadline)
-                    TextEditor(text: Binding(
-                        get: { settings.torrentDHTBootstrapNodes.joined(separator: "\n") },
-                        set: { settings.torrentDHTBootstrapNodes = $0.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
-                    ))
-                    .frame(height: 64)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                    )
-                    .font(.system(.body, design: .monospaced))
-                }
-                .padding(.vertical, 4)
-            }
-            Toggle(L10n.string("torrent_enable_pex"), isOn: $settings.torrentPEXEnabled)
-            Toggle(L10n.string("torrent_enable_lsd"), isOn: $settings.torrentLSDEnabled)
-            Toggle(L10n.string("torrent_enable_sequential_default"), isOn: $settings.torrentSequentialDownloadEnabled)
-            Stepper(
-                L10n.string("torrent_magnet_timeout_seconds", settings.torrentMagnetMetadataTimeoutSeconds),
-                value: $settings.torrentMagnetMetadataTimeoutSeconds,
-                in: 3...120
-            )
-            Stepper(
-                L10n.string("torrent_max_connections", settings.torrentMaxConnections),
-                value: $settings.torrentMaxConnections,
-                in: 2...1000
-            )
-            Stepper(
-                L10n.string("torrent_max_upload_slots", settings.torrentMaxUploadSlots),
-                value: $settings.torrentMaxUploadSlots,
-                in: -1...128
-            )
-            SpeedLimitSettingsRow(
-                title: L10n.string("upload_speed_limit"),
-                value: $settings.globalUploadLimitBytes,
-                values: [0, 256_000, 512_000, 1_000_000, 5_000_000]
-            )
-            Picker(L10n.string("torrent_seeding_mode"), selection: $settings.torrentSeedingLimitMode) {
-                ForEach(TorrentSeedingLimitMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            Slider(value: $settings.stopSeedingAtRatio, in: 0...5, step: 0.1) {
-                Text(L10n.string("share_ratio_limit"))
-            }
-            .disabled(settings.torrentSeedingLimitMode != .stopAtRatio)
-            Text(L10n.string("stop_seeding_ratio_message", settings.stopSeedingAtRatio))
-                .foregroundStyle(.secondary)
-                .opacity(settings.torrentSeedingLimitMode == .stopAtRatio ? 1 : 0.55)
         }
+        .formStyle(.grouped)
     }
 }
 
-private struct SystemSettingsSection: View {
+// MARK: - System Tab
+private struct SystemSettingsTab: View {
     @Bindable var settings: AppSettings
+    let layout: ResponsiveLayout
 
     var body: some View {
-        Section(L10n.string("settings_system_section")) {
-            Picker(L10n.string("settings_system_language"), selection: $settings.language) {
-                ForEach(AppLanguage.allCases) { language in
-                    Text(language.title).tag(language)
+        Form {
+            Section(L10n.string("settings_system_section")) {
+                Picker(L10n.string("settings_system_language"), selection: $settings.language) {
+                    ForEach(AppLanguage.allCases) { language in
+                        Text(language.title).tag(language)
+                    }
                 }
+                
+                Toggle(L10n.string("completion_notifications"), isOn: $settings.completionNotificationsEnabled)
+                Toggle(L10n.string("clipboard_link_detection"), isOn: $settings.clipboardDetectionEnabled)
             }
-            Toggle(L10n.string("completion_notifications"), isOn: $settings.completionNotificationsEnabled)
-            Toggle(L10n.string("clipboard_link_detection"), isOn: $settings.clipboardDetectionEnabled)
         }
+        .formStyle(.grouped)
     }
 }
 
-private struct BrowserIntegrationSection: View {
+// MARK: - Browser Tab
+private struct BrowserIntegrationTab: View {
     @Bindable var settings: AppSettings
     let diagnostics: NativeHostDiagnostics
     let layout: ResponsiveLayout
 
     var body: some View {
-        Section(L10n.string("browser_integration_section")) {
-            Toggle(L10n.string("confirm_browser_takeover_downloads"), isOn: $settings.confirmBrowserTakeoverDownloads)
-            BrowserIntegrationRow(diagnostics: diagnostics, layout: layout)
+        Form {
+            Section("选项") {
+                Toggle(L10n.string("confirm_browser_takeover_downloads"), isOn: $settings.confirmBrowserTakeoverDownloads)
+            }
+
+            Section(L10n.string("browser_integration_section")) {
+                BrowserIntegrationRow(diagnostics: diagnostics, layout: layout)
+            }
         }
+        .formStyle(.grouped)
     }
 }
 
+// MARK: - Components
 private struct SpeedLimitSettingsRow: View {
     let title: String
     @Binding var value: Int64
@@ -427,7 +427,7 @@ private struct BrowserIntegrationRow: View {
     let layout: ResponsiveLayout
 
     var body: some View {
-        VStack(alignment: .leading, spacing: layout.value(8)) {
+        VStack(alignment: .leading, spacing: layout.value(10)) {
             summaryRow
 
             if !diagnostics.detailMessage.isEmpty {
@@ -457,6 +457,10 @@ private struct BrowserIntegrationRow: View {
                 }
             }
         }
+        .padding(layout.value(12))
+        .background {
+            ContentSurfaceBackground(cornerRadius: 12)
+        }
     }
 
     private var summaryRow: some View {
@@ -464,6 +468,7 @@ private struct BrowserIntegrationRow: View {
             statusDot
             VStack(alignment: .leading, spacing: layout.value(2)) {
                 Text(L10n.string("browser_native_host"))
+                    .font(layout.font(13, weight: .semibold))
                 Text(diagnostics.statusMessage)
                     .font(layout.font(12))
                     .foregroundStyle(statusColor)
