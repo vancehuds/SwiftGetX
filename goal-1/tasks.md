@@ -695,17 +695,34 @@ Next step:
 
 ## Task 16: Peer Wire MVP and Torrent Storage
 
-Status: [ ]
+Status: [x]
 
 Implement minimal TCP peer-wire handshake/messages, request pipeline, block limits, piece SHA-1 validation, single/multi-file storage writes across boundaries, pause/resume/delete partial data, and mock peer tests.
 
 Work performed:
 
+- Added `TorrentPeerWireHandshake`, `TorrentPeerWireMessage`, `TorrentPeerBlockPlanner`, `TorrentPeerWireTCPTransport`, and `TorrentPeerWireSession` in `SwiftGetXTorrentCore` for BitTorrent handshakes, core peer-wire messages, block validation, request pipelining, timeout resend, unchoke gating, and SHA-1 piece validation.
+- Added `TorrentPeerWorkspace` and `TorrentContentStorage` for pure Swift torrent resume-state persistence, exact partial-data deletion, and random writes across single-file and multi-file torrent layout boundaries.
+- Wired `SwiftTorrentEngineAdapter` beyond tracker diagnostics: it now takes tracker peers, creates peer transports/sessions, downloads sequential pieces through the peer-wire session, writes verified content, saves resume state, and emits running/completed snapshots with downloaded bytes, speed, ETA, peer count, tracker rows, and Swift engine availability.
+- Preserved the existing `TorrentEngineAdapter` boundary and kept peer transport injectable so app-level tests can use deterministic mock tracker and peer transports without external network dependencies.
+- Added peer-wire and adapter tests for handshake/message framing, block planning, port framing, cross-file storage writes, mock peer single-piece download, invalid piece hash rejection, pause/resume/delete state handling, and end-to-end Swift adapter completion through a mocked tracker peer.
+
 Verification evidence:
+
+- `swift test --filter TorrentPeerWire` passed with 4 tests in 1 suite after rerunning with SwiftPM cache access.
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine --filter TorrentPeerWire` passed with 44 tests across 3 suites after rerunning with SwiftPM cache access.
+- `swift test` passed with 187 tests across 15 suites after rerunning with SwiftPM cache access.
+- `swift build` passed after rerunning with SwiftPM cache access.
 
 Remaining risk:
 
+- The Swift torrent runtime is still an MVP path: it uses sequential piece order and the first announced peer. Multi-peer pooling, rarest-first selection, peer scoring, endgame behavior, global/per-task speed limits, and tracker completed/stopped announces remain Task 17 scope.
+- Magnet metadata exchange is still unavailable until Task 18, so magnet tasks can parse trackers/info hashes but cannot yet fetch metadata over peer extensions.
+- Resume support now persists completed piece state and pause/delete boundaries, but richer sub-piece reuse across process restarts should be revisited when the Task 17 piece manager and peer pool land.
+
 Next step:
+
+- Task 17: Real Swarm MVP and Runtime Snapshots.
 
 ## Task 17: Real Swarm MVP and Runtime Snapshots
 
