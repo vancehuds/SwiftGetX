@@ -1207,17 +1207,43 @@ Next step:
 
 ## Task 26: Persistence, Sensitive Data, and Large-Scale Performance
 
-Status: [ ]
+Status: [x]
 
 Add schema migration strategy for new fields, robust JSON recovery/cleanup, import/export, Keychain or runtime-only sensitive header storage, URL/log redaction, paged fetches/archiving, and menu-bar snapshot performance safeguards.
 
 Work performed:
 
+- Added a versioned SwiftData persistence helper and migration-plan boundary for the current `DownloadTask` and `AppSettingsRecord` schema, then switched app startup to use it.
+- Added explicit settings schema version tracking plus startup repair for old settings records.
+- Added robust persisted-data repair for malformed optional JSON fields on tasks and settings, plus sanitization for valid legacy JSON that still contained sensitive browser context, HTTP option headers, HTTP metadata URLs, or rule headers.
+- Added `PrivacyRedactor` and wired log append/export, persisted error summaries, connection summaries, tracker errors, archive exports/imports, and URL query handling through redaction for token/auth/key/passkey/secret/session/signature-style values.
+- Added a JSON import/export archive model for app settings and tasks, including archive version validation, sanitized task reconstruction, duplicate-skip import behavior, and replace-existing import cleanup of runtime-only sensitive state.
+- Preserved runtime-only sensitive HTTP options for newly created HTTP tasks while keeping persisted options safe/redacted.
+- Reworked menu-bar snapshots to use count/fetch-limit queries and direct task lookup instead of loading the full task table for menu refreshes.
+- Added focused persistence/archive/redaction/menu performance tests, including versioned-container opening, legacy unversioned store reopening, invalid JSON repair, valid sensitive JSON cleanup, archive redaction/import, unsupported archive rejection, log redaction, and large menu-bar snapshot summarization.
+- Committed Task 26 implementation as `3661cfc Add persistence archive and data repair`.
+
 Verification evidence:
+
+- Initial `swift test --filter PersistenceArchive` failed in the sandbox because SwiftPM could not write `/Users/vancehudson/.cache/clang/ModuleCache`; rerun used approved SwiftPM cache access.
+- `swift test --filter PersistenceArchive` passed with 8 tests in 1 suite.
+- `swift build` passed.
+- `swift test` passed with 256 tests across 20 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static menu-bar performance search found no remaining `MenuBarController` paths that build snapshots from `coordinator?.allTasks()`.
 
 Remaining risk:
 
+- The import/export archive API is coordinator-level and covered by tests, but no dedicated Settings UI for manual archive selection was added in this task.
+- Sensitive browser/per-task HTTP headers remain runtime-only and are deliberately not persisted to Keychain; authenticated downloads still need live browser context or re-entry after restart.
+- Startup data repair currently fetches all tasks once to clean legacy JSON and text fields; this is acceptable for one-time cleanup but true paged repair/migration can be improved for very large existing libraries.
+- The menu-bar snapshot avoids full-table loads for counts and recent items, but active aggregate progress still fetches active/progress tasks; very large simultaneous active sets may need aggregate SQL-style summaries later.
+- Existing-store migration was covered with a local unversioned SwiftData store fixture, not a real user production store.
+
 Next step:
+
+- Task 27: Filesystem Safety and Protocol Expansion Boundaries.
 
 ## Task 27: Filesystem Safety and Protocol Expansion Boundaries
 
