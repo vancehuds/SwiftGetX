@@ -310,7 +310,8 @@ final class DownloadTask {
 
     func appendLog(_ message: String) {
         let formatter = DateFormatter.taskLogFormatter
-        logEntries.append("[\(formatter.string(from: .now))] \(message)")
+        let redactedMessage = PrivacyRedactor.redactedText(message)
+        logEntries.append("[\(formatter.string(from: .now))] \(redactedMessage)")
         if logEntries.count > 200 {
             logEntries.removeFirst(logEntries.count - 200)
         }
@@ -400,6 +401,104 @@ final class DownloadTask {
         set { httpSegmentsJSON = Self.encode(newValue.sorted { $0.index < $1.index }) }
     }
 
+    @discardableResult
+    func repairInvalidJSONFields() -> [String] {
+        var repaired = [String]()
+        repairSensitiveTextField(\.errorMessage, name: "errorMessage", repaired: &repaired)
+        repairSensitiveTextField(\.connectionSummary, name: "connectionSummary", repaired: &repaired)
+        let redactedLogEntries = logEntries.map(PrivacyRedactor.redactedText)
+        if redactedLogEntries != logEntries {
+            logEntries = redactedLogEntries
+            repaired.append("logEntries")
+        }
+        repairInvalidJSONField(
+            \.torrentFilesJSON,
+            as: [TorrentFile].self,
+            name: "torrentFilesJSON",
+            repaired: &repaired
+        )
+        repairInvalidJSONField(
+            \.torrentConnectionJSON,
+            as: TorrentConnectionInfo.self,
+            name: "torrentConnectionJSON",
+            repaired: &repaired
+        )
+        repairInvalidJSONField(
+            \.torrentResumeStateJSON,
+            as: TorrentResumeState.self,
+            name: "torrentResumeStateJSON",
+            repaired: &repaired
+        )
+        repairInvalidJSONField(
+            \.torrentTrackersJSON,
+            as: [TorrentTrackerInfo].self,
+            name: "torrentTrackersJSON",
+            repaired: &repaired
+        )
+        repairInvalidJSONField(
+            \.torrentPeersJSON,
+            as: [TorrentPeerInfo].self,
+            name: "torrentPeersJSON",
+            repaired: &repaired
+        )
+        repairInvalidJSONField(
+            \.torrentRuntimeOptionsJSON,
+            as: TorrentRuntimeOptions.self,
+            name: "torrentRuntimeOptionsJSON",
+            repaired: &repaired
+        )
+        repairInvalidJSONField(
+            \.torrentHealthJSON,
+            as: TorrentHealthInfo.self,
+            name: "torrentHealthJSON",
+            repaired: &repaired
+        )
+        repairInvalidJSONField(
+            \.browserContextJSON,
+            as: BrowserDownloadContext.self,
+            name: "browserContextJSON",
+            repaired: &repaired
+        )
+        sanitizeJSONField(
+            \.browserContextJSON,
+            as: BrowserDownloadContext.self,
+            name: "browserContextJSON",
+            repaired: &repaired
+        ) { $0.persistable }
+        repairInvalidJSONField(
+            \.httpResponseMetadataJSON,
+            as: HTTPResponseMetadata.self,
+            name: "httpResponseMetadataJSON",
+            repaired: &repaired
+        )
+        sanitizeJSONField(
+            \.httpResponseMetadataJSON,
+            as: HTTPResponseMetadata.self,
+            name: "httpResponseMetadataJSON",
+            repaired: &repaired,
+            sanitize: Self.sanitizedHTTPResponseMetadata
+        )
+        repairInvalidJSONField(
+            \.httpOptionsJSON,
+            as: HTTPDownloadOptions.self,
+            name: "httpOptionsJSON",
+            repaired: &repaired
+        )
+        sanitizeJSONField(
+            \.httpOptionsJSON,
+            as: HTTPDownloadOptions.self,
+            name: "httpOptionsJSON",
+            repaired: &repaired
+        ) { $0.persistable }
+        repairInvalidJSONField(
+            \.httpSegmentsJSON,
+            as: [HTTPSegmentInfo].self,
+            name: "httpSegmentsJSON",
+            repaired: &repaired
+        )
+        return repaired
+    }
+
     func applyTorrentLayout(
         saveDirectory: URL,
         outputName: String? = nil,
@@ -460,6 +559,74 @@ final class DownloadTask {
             return nil
         }
         return encode(persistable)
+    }
+
+    private func repairSensitiveTextField(
+        _ keyPath: ReferenceWritableKeyPath<DownloadTask, String?>,
+        name: String,
+        repaired: inout [String]
+    ) {
+        guard let value = self[keyPath: keyPath] else { return }
+        let redacted = PrivacyRedactor.redactedText(value)
+        if redacted != value {
+            self[keyPath: keyPath] = redacted
+            repaired.append(name)
+        }
+    }
+
+    private func repairInvalidJSONField<Value: Decodable>(
+        _ keyPath: ReferenceWritableKeyPath<DownloadTask, String?>,
+        as type: Value.Type,
+        name: String,
+        repaired: inout [String]
+    ) {
+        guard let json = self[keyPath: keyPath]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !json.isEmpty,
+              let data = json.data(using: .utf8),
+              (try? JSONDecoder().decode(type, from: data)) == nil
+        else {
+            return
+        }
+        self[keyPath: keyPath] = nil
+        repaired.append(name)
+    }
+
+    private func sanitizeJSONField<Value: Codable & Equatable>(
+        _ keyPath: ReferenceWritableKeyPath<DownloadTask, String?>,
+        as type: Value.Type,
+        name: String,
+        repaired: inout [String],
+        sanitize: (Value) -> Value
+    ) {
+        guard let json = self[keyPath: keyPath]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !json.isEmpty,
+              let value = Self.decode(type, from: json)
+        else {
+            return
+        }
+        let sanitized = sanitize(value)
+        guard sanitized != value || Self.encode(sanitized) != json else { return }
+        self[keyPath: keyPath] = Self.encode(sanitized)
+        repaired.append("\(name).sanitized")
+    }
+
+    private static func sanitizedHTTPResponseMetadata(_ metadata: HTTPResponseMetadata) -> HTTPResponseMetadata {
+        HTTPResponseMetadata(
+            originalURL: metadata.originalURL,
+            finalURL: metadata.finalURL,
+            sourcePageURL: metadata.sourcePageURL,
+            mimeType: metadata.mimeType,
+            contentDisposition: metadata.contentDisposition,
+            suggestedFilename: metadata.suggestedFilename,
+            server: metadata.server,
+            supportsResume: metadata.supportsResume,
+            contentLength: metadata.contentLength,
+            eTag: metadata.eTag,
+            lastModified: metadata.lastModified,
+            redirects: metadata.redirects.map {
+                HTTPRedirectMetadata(statusCode: $0.statusCode, fromURL: $0.fromURL, toURL: $0.toURL)
+            }
+        )
     }
 
     private static func uniqueStandardizedURLs(_ urls: [URL]) -> [URL] {

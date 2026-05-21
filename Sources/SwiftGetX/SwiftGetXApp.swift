@@ -18,7 +18,7 @@ struct SwiftGetXApp: App {
 
     init() {
         do {
-            modelContainer = try ModelContainer(for: DownloadTask.self, AppSettingsRecord.self)
+            modelContainer = try SwiftGetXPersistence.makeModelContainer()
         } catch {
             fatalError("Unable to create SwiftData container: \(error)")
         }

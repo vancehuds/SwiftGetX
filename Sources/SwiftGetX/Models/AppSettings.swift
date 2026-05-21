@@ -145,6 +145,7 @@ final class AppSettings {
     }
 
     func update(_ record: AppSettingsRecord) {
+        record.schemaVersion = SwiftGetXDataSchema.currentModelVersion
         record.defaultDownloadDirectoryPath = defaultDownloadDirectory.path
         record.concurrentTaskLimit = concurrentTaskLimit
         record.httpMultithreadingEnabled = httpMultithreadingEnabled
@@ -298,6 +299,7 @@ enum DownloadRestartPolicy: String, Codable, CaseIterable, Identifiable {
 @Model
 final class AppSettingsRecord {
     @Attribute(.unique) var id: String
+    var schemaVersion: Int = SwiftGetXDataSchema.currentModelVersion
     var defaultDownloadDirectoryPath: String
     var concurrentTaskLimit: Int
     var httpMultithreadingEnabled: Bool = true
@@ -340,6 +342,7 @@ final class AppSettingsRecord {
 
     init(
         id: String = "default",
+        schemaVersion: Int = SwiftGetXDataSchema.currentModelVersion,
         defaultDownloadDirectoryPath: String,
         concurrentTaskLimit: Int = 3,
         httpMultithreadingEnabled: Bool = true,
@@ -380,6 +383,7 @@ final class AppSettingsRecord {
         languageRawValue: String = AppLanguage.system.rawValue
     ) {
         self.id = id
+        self.schemaVersion = schemaVersion
         self.defaultDownloadDirectoryPath = defaultDownloadDirectoryPath
         self.concurrentTaskLimit = concurrentTaskLimit
         self.httpMultithreadingEnabled = httpMultithreadingEnabled

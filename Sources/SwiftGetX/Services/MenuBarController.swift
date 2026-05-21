@@ -202,14 +202,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     private func makeSnapshot() -> MenuBarSnapshot {
-        MenuBarSnapshot(tasks: coordinator?.allTasks() ?? [])
+        coordinator?.menuBarSnapshot() ?? MenuBarSnapshot(tasks: [])
     }
 
     private func task(for id: UUID) -> DownloadTask? {
         if let task = taskLookup[id] {
             return task
         }
-        return coordinator?.allTasks().first { $0.id == id }
+        return coordinator?.task(with: id)
     }
 
     private func taskMenuTitle(for task: MenuBarTaskSnapshot) -> String {

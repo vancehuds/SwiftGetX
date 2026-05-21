@@ -257,6 +257,9 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         return lowercased.contains("token")
             || lowercased.contains("auth")
             || lowercased.contains("key")
+            || lowercased.contains("passkey")
+            || lowercased.contains("secret")
+            || lowercased.contains("session")
             || lowercased.contains("signature")
             || lowercased == "sig"
             || lowercased == "expires"

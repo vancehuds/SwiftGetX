@@ -89,6 +89,7 @@ final class DownloadCoordinator {
             uploadBytesPerSecond: settings.globalUploadLimitBytes
         )
         SystemBehaviorController.shared.applyLaunchAtLogin(enabled: settings.launchAtLoginEnabled)
+        repairPersistedData()
         normalizeMissingQueuePositions()
         updateSleepPrevention()
     }
@@ -211,6 +212,36 @@ final class DownloadCoordinator {
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         return sortedTasks((try? modelContext.fetch(descriptor)) ?? [])
+    }
+
+    func task(with id: UUID) -> DownloadTask? {
+        guard let modelContext else { return nil }
+        let descriptor = FetchDescriptor<DownloadTask>(
+            predicate: #Predicate { $0.id == id }
+        )
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    func menuBarSnapshot(recentLimit: Int = 5) -> MenuBarSnapshot {
+        guard modelContext != nil else { return MenuBarSnapshot(tasks: []) }
+        let runningTasks = menuBarTasksMatchingActiveDownloadStatuses()
+        let activeProgressTasks = menuBarTasksMatchingProgressStatuses()
+            .filter { $0.totalBytes > 0 }
+        return MenuBarSnapshot(
+            totalCount: fetchTaskCount(),
+            runningCount: runningTasks.count,
+            seedingCount: fetchTaskCount(status: .seeding),
+            queuedCount: fetchTaskCount(status: .queued),
+            pausedCount: fetchTaskCount(status: .paused),
+            verifyingCount: fetchTaskCount(status: .verifying),
+            completedCount: fetchTaskCount(status: .completed),
+            failedCount: fetchTaskCount(status: .failed),
+            cancelledCount: fetchTaskCount(status: .cancelled),
+            totalDownloadSpeed: runningTasks.reduce(Int64(0)) { $0 + $1.speedBytesPerSecond },
+            activeDownloadedBytes: activeProgressTasks.reduce(Int64(0)) { $0 + max(0, $1.downloadedBytes) },
+            activeTotalBytes: activeProgressTasks.reduce(Int64(0)) { $0 + max(0, $1.totalBytes) },
+            recentTasks: fetchRecentMenuBarTaskSnapshots(limit: recentLimit)
+        )
     }
 
     var hasActiveDownloadsForSystemPolicy: Bool {
@@ -509,7 +540,7 @@ final class DownloadCoordinator {
     ) -> [DownloadTask] {
         let sources = SourceParser.extractSources(from: source)
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
-        let tasks = sources.map { source in
+        let taskRuntimePairs = sources.map { source -> (task: DownloadTask, runtimeHTTPOptions: HTTPDownloadOptions?) in
             let kind = SourceParser.kind(for: source)
             let creationSuggestedFilename = sources.count == 1 ? suggestedFilename : nil
             let initialDisplayName = displayName(
@@ -563,18 +594,19 @@ final class DownloadCoordinator {
             )
             configureTorrentDefaults(for: task)
             task.appendLog(L10n.string("log_task_created"))
-            return task
+            return (task, kind == .http ? resolvedHTTPOptions : nil)
         }
+        let tasks = taskRuntimePairs.map(\.task)
 
         guard let modelContext else { return tasks }
         assignQueuePositions(to: tasks)
-        for task in tasks {
+        for (task, runtimeOptions) in taskRuntimePairs {
             modelContext.insert(task)
             if let browserContext {
                 runtimeBrowserContexts[task.id] = browserContext
             }
-            if task.kind == .http, let httpOptions = task.httpOptions {
-                runtimeHTTPOptions[task.id] = httpOptions
+            if task.kind == .http, let runtimeOptions {
+                runtimeHTTPOptions[task.id] = runtimeOptions
             }
         }
         if let firstTask = tasks.first {
@@ -595,7 +627,7 @@ final class DownloadCoordinator {
         httpOptions: HTTPDownloadOptions? = nil
     ) -> [DownloadTask] {
         let saveDirectory = saveDirectory ?? settings?.defaultDownloadDirectory ?? AppDefaults.downloadDirectory
-        let tasks = previews.map { preview in
+        let taskRuntimePairs = previews.map { preview -> (task: DownloadTask, runtimeHTTPOptions: HTTPDownloadOptions?) in
             let savePath = preview.kind == .http
                 ? preview.savePath ?? saveDirectory.appendingPathComponent(preview.displayName).path
                 : saveDirectory.path
@@ -671,20 +703,21 @@ final class DownloadCoordinator {
             if let errorMessage = preview.errorMessage {
                 task.appendLog(errorMessage)
             }
-            return task
+            return (task, preview.kind == .http ? resolvedHTTPOptions : nil)
         }
+        let tasks = taskRuntimePairs.map(\.task)
 
         guard let modelContext else { return tasks }
         assignQueuePositions(to: tasks)
-        for task in tasks {
+        for (task, runtimeOptions) in taskRuntimePairs {
             modelContext.insert(task)
             if let preview = previews.first(where: { $0.source == task.source }),
                let browserContext = preview.browserContext
             {
                 runtimeBrowserContexts[task.id] = browserContext
             }
-            if task.kind == .http, let httpOptions = task.httpOptions {
-                runtimeHTTPOptions[task.id] = httpOptions
+            if task.kind == .http, let runtimeOptions {
+                runtimeHTTPOptions[task.id] = runtimeOptions
             }
         }
         if let firstTask = tasks.first {
@@ -1462,6 +1495,98 @@ final class DownloadCoordinator {
         }
     }
 
+    func makeDataArchive(redactsSensitiveData: Bool = true) -> SwiftGetXDataArchive {
+        SwiftGetXDataArchive(
+            settingsRecord: settingsRecord(),
+            tasks: allTasks(),
+            redactsSensitiveData: redactsSensitiveData
+        )
+    }
+
+    func exportDataArchive(to url: URL, redactsSensitiveData: Bool = true) throws {
+        let archive = makeDataArchive(redactsSensitiveData: redactsSensitiveData)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(archive)
+        try data.write(to: url, options: .atomic)
+    }
+
+    @discardableResult
+    func importDataArchive(from url: URL, replacesExisting: Bool = false) throws -> Int {
+        let data = try Data(contentsOf: url)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let archive = try decoder.decode(SwiftGetXDataArchive.self, from: data)
+        return try importDataArchive(archive, replacesExisting: replacesExisting)
+    }
+
+    @discardableResult
+    func importDataArchive(
+        _ archive: SwiftGetXDataArchive,
+        replacesExisting: Bool = false
+    ) throws -> Int {
+        try archive.validateSupportedVersion()
+        guard let modelContext else { return 0 }
+
+        if replacesExisting {
+            for task in allTasks() {
+                modelContext.delete(task)
+            }
+            selectedTaskID = nil
+            selectedTaskIDs.removeAll()
+            runtimeBrowserContexts.removeAll()
+            runtimeHTTPOptions.removeAll()
+            try modelContext.save()
+        }
+
+        if let settingsArchive = archive.settings {
+            let importedRecord = settingsArchive.makeRecord()
+            if let existing = settingsRecord() {
+                let importedSettings = AppSettings()
+                importedSettings.apply(importedRecord)
+                importedSettings.update(existing)
+                settings?.apply(existing)
+            } else {
+                modelContext.insert(importedRecord)
+                settings?.apply(importedRecord)
+            }
+        }
+
+        let existingIDs = replacesExisting ? Set<UUID>() : Set(allTasks().map(\.id))
+        var insertedCount = 0
+        for taskArchive in archive.tasks where !existingIDs.contains(taskArchive.id) {
+            let task = taskArchive.makeTask()
+            task.repairInvalidJSONFields()
+            modelContext.insert(task)
+            insertedCount += 1
+        }
+        try modelContext.save()
+        return insertedCount
+    }
+
+    @discardableResult
+    func repairPersistedData() -> [String] {
+        guard let modelContext else { return [] }
+        var repairs = [String]()
+
+        if let record = settingsRecord() {
+            repairs.append(contentsOf: record.repairInvalidJSONFields().map { "settings.\($0)" })
+        }
+
+        let descriptor = FetchDescriptor<DownloadTask>()
+        let tasks = (try? modelContext.fetch(descriptor)) ?? []
+        for task in tasks {
+            let repairedFields = task.repairInvalidJSONFields()
+            repairs.append(contentsOf: repairedFields.map { "\(task.id.uuidString).\($0)" })
+        }
+
+        if !repairs.isEmpty {
+            save()
+        }
+        return repairs
+    }
+
     func scheduleQueue() {
         let now = Date()
         let tasks = allTasks()
@@ -1669,6 +1794,98 @@ final class DownloadCoordinator {
         } catch {
             statusMessage = L10n.string("status_save_failed", error.localizedDescription)
         }
+    }
+
+    private func settingsRecord() -> AppSettingsRecord? {
+        guard let modelContext else { return nil }
+        let descriptor = FetchDescriptor<AppSettingsRecord>(
+            predicate: #Predicate { $0.id == "default" }
+        )
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func fetchTaskCount(status: DownloadStatus? = nil) -> Int {
+        guard let modelContext else { return 0 }
+        if let status {
+            let rawValue = status.rawValue
+            let descriptor = FetchDescriptor<DownloadTask>(
+                predicate: #Predicate { $0.statusRawValue == rawValue && $0.archivedAt == nil }
+            )
+            return (try? modelContext.fetchCount(descriptor)) ?? 0
+        }
+        let descriptor = FetchDescriptor<DownloadTask>(
+            predicate: #Predicate { $0.archivedAt == nil }
+        )
+        return (try? modelContext.fetchCount(descriptor)) ?? 0
+    }
+
+    private func menuBarTasksMatchingActiveDownloadStatuses() -> [DownloadTask] {
+        guard let modelContext else { return [] }
+        let descriptor = FetchDescriptor<DownloadTask>(
+            predicate: #Predicate {
+                $0.archivedAt == nil
+                    && (
+                        $0.statusRawValue == "running"
+                            || $0.statusRawValue == "fetchingMetadata"
+                            || $0.statusRawValue == "fetchingPeers"
+                            || $0.statusRawValue == "connectingPeers"
+                    )
+            }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    private func menuBarTasksMatchingProgressStatuses() -> [DownloadTask] {
+        guard let modelContext else { return [] }
+        let descriptor = FetchDescriptor<DownloadTask>(
+            predicate: #Predicate {
+                $0.archivedAt == nil
+                    && (
+                        $0.statusRawValue == "running"
+                            || $0.statusRawValue == "fetchingMetadata"
+                            || $0.statusRawValue == "fetchingPeers"
+                            || $0.statusRawValue == "connectingPeers"
+                            || $0.statusRawValue == "verifying"
+                    )
+            }
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
+    private func fetchRecentMenuBarTaskSnapshots(limit: Int) -> [MenuBarTaskSnapshot] {
+        guard limit > 0, let modelContext else { return [] }
+        var snapshots = [MenuBarTaskSnapshot]()
+        var seen = Set<UUID>()
+        let statuses: [DownloadStatus] = [
+            .running,
+            .fetchingMetadata,
+            .fetchingPeers,
+            .connectingPeers,
+            .verifying,
+            .seeding,
+            .queued,
+            .paused,
+            .failed,
+            .cancelled,
+            .completed
+        ]
+
+        for status in statuses where snapshots.count < limit {
+            let rawValue = status.rawValue
+            var descriptor = FetchDescriptor<DownloadTask>(
+                predicate: #Predicate { $0.statusRawValue == rawValue && $0.archivedAt == nil },
+                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+            )
+            descriptor.fetchLimit = max(0, limit - snapshots.count)
+            let tasks = (try? modelContext.fetch(descriptor)) ?? []
+            for task in tasks where seen.insert(task.id).inserted {
+                snapshots.append(MenuBarSnapshot.taskSnapshot(task))
+                if snapshots.count >= limit {
+                    break
+                }
+            }
+        }
+        return snapshots
     }
 
     private func updateSleepPrevention() {
@@ -1995,7 +2212,7 @@ final class DownloadCoordinator {
     }
 
     private static func logExportText(for task: DownloadTask) -> String {
-        task.logEntries.joined(separator: "\n")
+        task.logEntries.map(PrivacyRedactor.redactedText).joined(separator: "\n")
     }
 
     private func formattedSpeedLimit(_ bytesPerSecond: Int64) -> String {

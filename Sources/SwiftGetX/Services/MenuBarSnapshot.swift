@@ -27,17 +27,18 @@ struct MenuBarSnapshot: Equatable {
     let recentTasks: [MenuBarTaskSnapshot]
 
     init(tasks: [DownloadTask], recentLimit: Int = 5) {
-        let activeProgressTasks = tasks.filter(Self.contributesToAggregateProgress)
-        totalCount = tasks.count
-        runningCount = tasks.count { $0.status == .running || $0.status == .fetchingMetadata || $0.status == .fetchingPeers || $0.status == .connectingPeers }
-        seedingCount = tasks.count { $0.status == .seeding }
-        queuedCount = tasks.count { $0.status == .queued }
-        pausedCount = tasks.count { $0.status == .paused }
-        verifyingCount = tasks.count { $0.status == .verifying }
-        completedCount = tasks.count { $0.status == .completed }
-        failedCount = tasks.count { $0.status == .failed }
-        cancelledCount = tasks.count { $0.status == .cancelled }
-        totalDownloadSpeed = tasks
+        let visibleTasks = tasks.filter { !$0.isArchived }
+        let activeProgressTasks = visibleTasks.filter(Self.contributesToAggregateProgress)
+        totalCount = visibleTasks.count
+        runningCount = visibleTasks.count { $0.status == .running || $0.status == .fetchingMetadata || $0.status == .fetchingPeers || $0.status == .connectingPeers }
+        seedingCount = visibleTasks.count { $0.status == .seeding }
+        queuedCount = visibleTasks.count { $0.status == .queued }
+        pausedCount = visibleTasks.count { $0.status == .paused }
+        verifyingCount = visibleTasks.count { $0.status == .verifying }
+        completedCount = visibleTasks.count { $0.status == .completed }
+        failedCount = visibleTasks.count { $0.status == .failed }
+        cancelledCount = visibleTasks.count { $0.status == .cancelled }
+        totalDownloadSpeed = visibleTasks
             .filter { $0.status == .running || $0.status == .fetchingMetadata || $0.status == .fetchingPeers || $0.status == .connectingPeers }
             .reduce(Int64(0)) { $0 + $1.speedBytesPerSecond }
         activeDownloadedBytes = activeProgressTasks.reduce(Int64(0)) { $0 + max(0, $1.downloadedBytes) }
@@ -48,7 +49,7 @@ struct MenuBarSnapshot: Equatable {
             aggregateProgress = nil
         }
 
-        recentTasks = tasks
+        recentTasks = visibleTasks
             .sorted(by: Self.sortTasks)
             .prefix(max(0, recentLimit))
             .map {
@@ -62,6 +63,63 @@ struct MenuBarSnapshot: Equatable {
                     createdAt: $0.createdAt
                 )
             }
+    }
+
+    init(
+        totalCount: Int,
+        runningCount: Int,
+        seedingCount: Int,
+        queuedCount: Int,
+        pausedCount: Int,
+        verifyingCount: Int,
+        completedCount: Int,
+        failedCount: Int,
+        cancelledCount: Int,
+        totalDownloadSpeed: Int64,
+        activeDownloadedBytes: Int64,
+        activeTotalBytes: Int64,
+        recentTasks: [MenuBarTaskSnapshot]
+    ) {
+        self.totalCount = max(0, totalCount)
+        self.runningCount = max(0, runningCount)
+        self.seedingCount = max(0, seedingCount)
+        self.queuedCount = max(0, queuedCount)
+        self.pausedCount = max(0, pausedCount)
+        self.verifyingCount = max(0, verifyingCount)
+        self.completedCount = max(0, completedCount)
+        self.failedCount = max(0, failedCount)
+        self.cancelledCount = max(0, cancelledCount)
+        self.totalDownloadSpeed = max(0, totalDownloadSpeed)
+        self.activeDownloadedBytes = max(0, activeDownloadedBytes)
+        self.activeTotalBytes = max(0, activeTotalBytes)
+        if activeTotalBytes > 0 {
+            aggregateProgress = min(max(Double(activeDownloadedBytes) / Double(activeTotalBytes), 0), 1)
+        } else {
+            aggregateProgress = nil
+        }
+        self.recentTasks = recentTasks
+    }
+
+    static func taskSnapshot(_ task: DownloadTask) -> MenuBarTaskSnapshot {
+        MenuBarTaskSnapshot(
+            id: task.id,
+            name: task.name,
+            status: task.status,
+            progress: task.progress,
+            speedBytesPerSecond: task.speedBytesPerSecond,
+            savePath: task.displaySavePath,
+            createdAt: task.createdAt
+        )
+    }
+
+    static func sortedRecentTaskSnapshots(
+        from tasks: [DownloadTask],
+        recentLimit: Int = 5
+    ) -> [MenuBarTaskSnapshot] {
+        tasks
+            .sorted(by: sortTasks)
+            .prefix(max(0, recentLimit))
+            .map(taskSnapshot)
     }
 
     var statusSymbolName: String {
@@ -117,7 +175,7 @@ struct MenuBarSnapshot: Equatable {
         return "\(Int((aggregateProgress * 100).rounded()))%"
     }
 
-    private static func sortTasks(_ lhs: DownloadTask, _ rhs: DownloadTask) -> Bool {
+    static func sortTasks(_ lhs: DownloadTask, _ rhs: DownloadTask) -> Bool {
         let lhsPriority = statusPriority(lhs.status)
         let rhsPriority = statusPriority(rhs.status)
         if lhsPriority != rhsPriority {
