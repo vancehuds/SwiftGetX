@@ -258,11 +258,13 @@
 "menu_open_download_directory" = "Open Downloads Folder";
 "menu_quit_app" = "Quit SwiftGetX";
 "menu_recent_tasks" = "Recent Tasks";
+"menu_progress_summary" = "Progress %@ · %d active";
 "menu_settings" = "Settings...";
 "menu_settings_plain" = "Settings";
 "menu_speed_summary" = "Speed %@/s · Completed %d · Failed %d";
 "menu_summary" = "All %d · Downloading %d · Queued %d";
 "menu_tooltip" = "SwiftGetX · %d downloading · %@/s";
+"menu_tooltip_with_progress" = "SwiftGetX · %d downloading · %@ · %@/s";
 "metric_download_speed" = "Download Speed";
 "metric_downloaded" = "Downloaded";
 "metric_eta" = "Time Remaining";
@@ -329,6 +331,7 @@
 "restart_policy_auto_resume" = "Auto-resume unfinished tasks";
 "restart_policy_restore_paused" = "Restore unfinished tasks paused";
 "search_placeholder" = "Search tasks, links, or filenames...";
+"service_no_downloadable_input" = "SwiftGetX could not find a supported download link, magnet link, or .torrent file in the shared input.";
 "settings_concurrent_tasks" = "Concurrent downloads: %d";
 "settings_download_section" = "Downloads";
 "settings_enable_http_multithreading" = "Enable HTTP multithreaded downloads";

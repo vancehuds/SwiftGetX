@@ -17,8 +17,8 @@ struct MenuBarSnapshotTests {
     @Test("counts states and adds running speed")
     func countsStatesAndAddsRunningSpeed() {
         let tasks = [
-            makeTask(status: .running, speed: 1_000),
-            makeTask(status: .running, speed: 2_500),
+            makeTask(status: .running, speed: 1_000, totalBytes: 100, downloadedBytes: 25),
+            makeTask(status: .running, speed: 2_500, totalBytes: 300, downloadedBytes: 75),
             makeTask(status: .seeding, speed: 900),
             makeTask(status: .queued),
             makeTask(status: .completed),
@@ -36,7 +36,35 @@ struct MenuBarSnapshotTests {
         #expect(snapshot.failedCount == 1)
         #expect(snapshot.cancelledCount == 1)
         #expect(snapshot.totalDownloadSpeed == 3_500)
+        #expect(snapshot.activeDownloadedBytes == 100)
+        #expect(snapshot.activeTotalBytes == 400)
+        #expect(snapshot.aggregateProgress == 0.25)
+        #expect(snapshot.compactProgressTitle == "25%")
+        #expect(snapshot.dockBadgeLabel == "25%")
         #expect(snapshot.statusSymbolName == "arrow.down.circle.fill")
+    }
+
+    @Test("dock badge falls back to non-progress states")
+    func dockBadgeFallsBackToNonProgressStates() {
+        #expect(MenuBarSnapshot(tasks: [makeTask(status: .seeding)]).dockBadgeLabel == "↑1")
+        #expect(MenuBarSnapshot(tasks: [makeTask(status: .failed), makeTask(status: .failed)]).dockBadgeLabel == "!2")
+        #expect(MenuBarSnapshot(tasks: [makeTask(status: .queued), makeTask(status: .queued)]).dockBadgeLabel == "2")
+        #expect(MenuBarSnapshot(tasks: [makeTask(status: .completed)]).dockBadgeLabel == nil)
+    }
+
+    @Test("aggregate progress includes verifying tasks and ignores unknown sizes")
+    func aggregateProgressIncludesVerifyingTasksAndIgnoresUnknownSizes() {
+        let snapshot = MenuBarSnapshot(tasks: [
+            makeTask(status: .running, totalBytes: 0, downloadedBytes: 50),
+            makeTask(status: .verifying, totalBytes: 200, downloadedBytes: 160),
+            makeTask(status: .completed, totalBytes: 100, downloadedBytes: 100)
+        ])
+
+        #expect(snapshot.activeProgressCount == 2)
+        #expect(snapshot.activeDownloadedBytes == 160)
+        #expect(snapshot.activeTotalBytes == 200)
+        #expect(snapshot.aggregateProgress == 0.8)
+        #expect(snapshot.compactProgressTitle == "80%")
     }
 
     @Test("cancelled tasks affect status when no active tasks exist")
@@ -82,7 +110,9 @@ struct MenuBarSnapshotTests {
         name: String = UUID().uuidString,
         status: DownloadStatus,
         speed: Int64 = 0,
-        createdAt: Date = .now
+        createdAt: Date = .now,
+        totalBytes: Int64 = 100,
+        downloadedBytes: Int64? = nil
     ) -> DownloadTask {
         DownloadTask(
             name: name,
@@ -90,8 +120,8 @@ struct MenuBarSnapshotTests {
             kind: .http,
             status: status,
             savePath: "/tmp/\(name)",
-            totalBytes: 100,
-            downloadedBytes: status == .completed ? 100 : 50,
+            totalBytes: totalBytes,
+            downloadedBytes: downloadedBytes ?? (status == .completed ? totalBytes : totalBytes / 2),
             speedBytesPerSecond: speed,
             createdAt: createdAt
         )

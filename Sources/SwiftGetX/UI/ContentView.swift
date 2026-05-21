@@ -10,6 +10,7 @@ struct ContentView: View {
     @Query(sort: \DownloadTask.createdAt, order: .reverse) private var allTasks: [DownloadTask]
     @State private var showingNewTask = false
     @State private var newTaskDraft: DownloadDraft?
+    @State private var isDropTargeted = false
 
     var body: some View {
         GeometryReader { proxy in
@@ -52,22 +53,31 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, horizontalPadding)
                 .allowsHitTesting(clipboardMonitor.suggestedSource != nil)
+
+                if isDropTargeted {
+                    DropTargetOverlay()
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                }
             }
             .environment(\.responsiveLayout, layout)
             .sheet(isPresented: $showingNewTask) {
                 NewTaskSheet(draft: newTaskDraft)
             }
+            .onDrop(
+                of: DownloadDropSourceLoader.supportedTypeIdentifiers,
+                isTargeted: $isDropTargeted
+            ) { providers in
+                DownloadDropSourceLoader.loadDraft(from: providers) { draft in
+                    guard let draft else { return }
+                    presentDownloadDraft(draft)
+                }
+            }
         }
         .frame(minWidth: 720, minHeight: 450)
         .id(settings.language)
         .onReceive(NotificationCenter.default.publisher(for: .showNewTaskSheet)) { notification in
-            let incomingDraft = notification.object as? DownloadDraft
-            PendingNativeHandoffPolicy.rejectIfReplaced(
-                current: newTaskDraft,
-                incoming: incomingDraft
-            )
-            newTaskDraft = incomingDraft
-            showingNewTask = true
+            presentDownloadDraft(notification.object as? DownloadDraft)
         }
         .onChange(of: showingNewTask) { _, isShowing in
             if !isShowing {
@@ -93,6 +103,36 @@ struct ContentView: View {
 
     private func filteredTasks() -> [DownloadTask] {
         coordinator.filteredTasks(from: allTasks)
+    }
+
+    private func presentDownloadDraft(_ draft: DownloadDraft?) {
+        PendingNativeHandoffPolicy.rejectIfReplaced(
+            current: newTaskDraft,
+            incoming: draft
+        )
+        newTaskDraft = draft
+        showingNewTask = true
+    }
+}
+
+private struct DropTargetOverlay: View {
+    @Environment(\.responsiveLayout) private var layout
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: layout.value(18), style: .continuous)
+            .strokeBorder(
+                Color.accentColor.opacity(0.72),
+                style: StrokeStyle(lineWidth: layout.value(2), dash: [layout.value(8), layout.value(6)])
+            )
+            .background(Color.accentColor.opacity(0.06))
+            .overlay {
+                Image(systemName: "square.and.arrow.down")
+                    .font(layout.font(30, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(layout.value(20))
+                    .background(.thinMaterial, in: Circle())
+            }
+            .padding(layout.value(12))
     }
 }
 

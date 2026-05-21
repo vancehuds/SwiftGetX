@@ -4,6 +4,7 @@ import AppKit
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
+    private let dockProgressView = DockTileProgressView(frame: NSRect(x: 0, y: 0, width: 128, height: 128))
     private weak var coordinator: DownloadCoordinator?
     private weak var settings: AppSettings?
     private var refreshTimer: Timer?
@@ -122,6 +123,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         summary.image = NSImage(systemSymbolName: snapshot.statusSymbolName, accessibilityDescription: nil)
         menu.addItem(summary)
 
+        if let progressTitle = snapshot.compactProgressTitle {
+            menu.addItem(disabledItem(
+                L10n.string("menu_progress_summary", progressTitle, snapshot.activeProgressCount)
+            ))
+        }
+
         let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: snapshot.totalDownloadSpeed)
         menu.addItem(disabledItem(
             L10n.string("menu_speed_summary", speed, snapshot.completedCount, snapshot.failedCount)
@@ -178,13 +185,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         image?.isTemplate = true
         statusItem.button?.image = image
 
-        if snapshot.totalDownloadSpeed > 0 {
-            statusItem.button?.title = ByteCountFormatter.downloadFormatter
-                .string(fromByteCount: snapshot.totalDownloadSpeed) + "/s"
+        let speedTitle = snapshot.totalDownloadSpeed > 0
+            ? ByteCountFormatter.downloadFormatter.string(fromByteCount: snapshot.totalDownloadSpeed) + "/s"
+            : nil
+        if let progressTitle = snapshot.compactProgressTitle, let speedTitle {
+            statusItem.button?.title = "\(progressTitle) · \(speedTitle)"
+        } else if let speedTitle {
+            statusItem.button?.title = speedTitle
+        } else if let progressTitle = snapshot.compactProgressTitle {
+            statusItem.button?.title = progressTitle
         } else {
             statusItem.button?.title = ""
         }
         statusItem.button?.toolTip = toolTip(for: snapshot)
+        updateDockTile(snapshot)
     }
 
     private func makeSnapshot() -> MenuBarSnapshot {
@@ -228,7 +242,21 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func toolTip(for snapshot: MenuBarSnapshot) -> String {
         let speed = ByteCountFormatter.downloadFormatter.string(fromByteCount: snapshot.totalDownloadSpeed)
+        if let progress = snapshot.compactProgressTitle {
+            return L10n.string("menu_tooltip_with_progress", snapshot.runningCount, progress, speed)
+        }
         return L10n.string("menu_tooltip", snapshot.runningCount, speed)
+    }
+
+    private func updateDockTile(_ snapshot: MenuBarSnapshot) {
+        NSApp.dockTile.badgeLabel = snapshot.dockBadgeLabel
+        if let progress = snapshot.aggregateProgress {
+            dockProgressView.progress = progress
+            NSApp.dockTile.contentView = dockProgressView
+        } else {
+            NSApp.dockTile.contentView = nil
+        }
+        NSApp.dockTile.display()
     }
 
     private func disabledItem(_ title: String) -> NSMenuItem {
@@ -312,6 +340,35 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
         coordinator?.remove(task, deletingFiles: !task.hasFinishedDownloading)
         updateStatusItem()
+    }
+}
+
+private final class DockTileProgressView: NSView {
+    var progress: Double = 0 {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.clear.setFill()
+        dirtyRect.fill()
+
+        let iconInset = bounds.width * 0.08
+        let iconRect = bounds.insetBy(dx: iconInset, dy: iconInset)
+        NSApp.applicationIconImage.draw(in: iconRect)
+
+        let clampedProgress = min(max(progress, 0), 1)
+        let barHeight = max(bounds.height * 0.105, 10)
+        let barWidth = bounds.width * 0.78
+        let barX = (bounds.width - barWidth) / 2
+        let barY = bounds.height * 0.13
+        let trackRect = NSRect(x: barX, y: barY, width: barWidth, height: barHeight)
+        let fillRect = NSRect(x: barX, y: barY, width: barWidth * clampedProgress, height: barHeight)
+
+        NSColor.black.withAlphaComponent(0.34).setFill()
+        NSBezierPath(roundedRect: trackRect, xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
+
+        NSColor.controlAccentColor.setFill()
+        NSBezierPath(roundedRect: fillRect, xRadius: barHeight / 2, yRadius: barHeight / 2).fill()
     }
 }
 

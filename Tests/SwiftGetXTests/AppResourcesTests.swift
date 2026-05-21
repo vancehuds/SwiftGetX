@@ -21,6 +21,32 @@ struct AppResourcesTests {
         ))
     }
 
+    @Test("AppInfo declares torrent files and Services input")
+    func appInfoDeclaresTorrentFilesAndServicesInput() throws {
+        let appInfoURL = try #require(AppResources.url(forResource: "AppInfo", withExtension: "plist"))
+        let data = try Data(contentsOf: appInfoURL)
+        let plist = try #require(PropertyListSerialization.propertyList(from: data) as? [String: Any])
+
+        let documentTypes = try #require(plist["CFBundleDocumentTypes"] as? [[String: Any]])
+        let torrentType = try #require(documentTypes.first)
+        #expect((torrentType["CFBundleTypeExtensions"] as? [String])?.contains("torrent") == true)
+        #expect((torrentType["LSItemContentTypes"] as? [String])?.contains("org.bittorrent.torrent") == true)
+
+        let importedTypes = try #require(plist["UTImportedTypeDeclarations"] as? [[String: Any]])
+        #expect(importedTypes.contains { declaration in
+            declaration["UTTypeIdentifier"] as? String == "org.bittorrent.torrent"
+        })
+
+        let services = try #require(plist["NSServices"] as? [[String: Any]])
+        let service = try #require(services.first)
+        #expect(service["NSMessage"] as? String == "addDownloadFromService")
+        let sendTypes = try #require(service["NSSendTypes"] as? [String])
+        #expect(sendTypes.contains("public.url"))
+        #expect(sendTypes.contains("public.file-url"))
+        #expect(sendTypes.contains("public.utf8-plain-text"))
+        #expect(sendTypes.contains("NSFilenamesPboardType"))
+    }
+
     @Test("dynamically updates localization bundle when language settings change")
     func dynamicLanguageSwitching() {
         let chineseBundle = AppResources.localizationBundle(for: AppLanguage.zhHans.rawValue, in: AppResources.bundle)

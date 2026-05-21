@@ -258,11 +258,13 @@
 "menu_open_download_directory" = "打开下载目录";
 "menu_quit_app" = "退出 SwiftGetX";
 "menu_recent_tasks" = "最近任务";
+"menu_progress_summary" = "进度 %@ · %d 个活跃任务";
 "menu_settings" = "设置…";
 "menu_settings_plain" = "设置";
 "menu_speed_summary" = "速度 %@/s · 已完成 %d · 失败 %d";
 "menu_summary" = "全部 %d · 下载中 %d · 等待 %d";
 "menu_tooltip" = "SwiftGetX · %d 下载中 · %@/s";
+"menu_tooltip_with_progress" = "SwiftGetX · %d 下载中 · %@ · %@/s";
 "metric_download_speed" = "下载速度";
 "metric_downloaded" = "已下载比例";
 "metric_eta" = "剩余时间";
@@ -329,6 +331,7 @@
 "restart_policy_auto_resume" = "自动恢复未完成任务";
 "restart_policy_restore_paused" = "将未完成任务恢复为暂停";
 "search_placeholder" = "搜索任务、链接或文件名...";
+"service_no_downloadable_input" = "SwiftGetX 未在共享内容中找到支持的下载链接、磁力链接或 .torrent 文件。";
 "settings_concurrent_tasks" = "同时下载任务：%d";
 "settings_download_section" = "下载";
 "settings_enable_http_multithreading" = "启用 HTTP 多线程下载";

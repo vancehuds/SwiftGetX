@@ -54,6 +54,8 @@ struct SwiftGetXApp: App {
                         handleBrowserSetupRequest(setupRequest)
                     } else if DeepLinkParser.isBrowserSetupURL(url) {
                         return
+                    } else if let draft = DownloadInputSourceCollector.draft(urls: [url]) {
+                        handleDownloadDraft(draft)
                     } else {
                         coordinator.add(source: url.absoluteString)
                     }
@@ -421,11 +423,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationManager.setDelegate(self)
         menuBarController = MenuBarController()
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
         registerChromeNativeHost()
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         registerChromeNativeHost()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let draft = DownloadInputSourceCollector.draft(urls: urls) else { return }
+        postDownloadDraft(draft)
+    }
+
+    @objc(addDownloadFromService:userData:error:)
+    func addDownloadFromService(
+        _ pasteboard: NSPasteboard,
+        userData: String?,
+        error: AutoreleasingUnsafeMutablePointer<NSString?>
+    ) {
+        guard let draft = DownloadInputSourceCollector.draft(from: pasteboard) else {
+            error.pointee = L10n.string("service_no_downloadable_input") as NSString
+            return
+        }
+        postDownloadDraft(draft)
     }
 
     @MainActor
@@ -452,6 +474,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func registerChromeNativeHost() {
         _ = chromeNativeHostRegistrar.register()
+    }
+
+    private func postDownloadDraft(_ draft: DownloadDraft) {
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
+        }
     }
 }
 
