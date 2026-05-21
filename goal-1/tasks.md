@@ -706,13 +706,16 @@ Work performed:
 - Wired `SwiftTorrentEngineAdapter` beyond tracker diagnostics: it now takes tracker peers, creates peer transports/sessions, downloads sequential pieces through the peer-wire session, writes verified content, saves resume state, and emits running/completed snapshots with downloaded bytes, speed, ETA, peer count, tracker rows, and Swift engine availability.
 - Preserved the existing `TorrentEngineAdapter` boundary and kept peer transport injectable so app-level tests can use deterministic mock tracker and peer transports without external network dependencies.
 - Added peer-wire and adapter tests for handshake/message framing, block planning, port framing, cross-file storage writes, mock peer single-piece download, invalid piece hash rejection, pause/resume/delete state handling, and end-to-end Swift adapter completion through a mocked tracker peer.
+- Hardened the timeout-resend mock peer fixture so timeout recovery is tested after the normal unchoke gate.
 
 Verification evidence:
 
-- `swift test --filter TorrentPeerWire` passed with 4 tests in 1 suite after rerunning with SwiftPM cache access.
-- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine --filter TorrentPeerWire` passed with 44 tests across 3 suites after rerunning with SwiftPM cache access.
-- `swift test` passed with 187 tests across 15 suites after rerunning with SwiftPM cache access.
+- `swift test --filter TorrentPeerWire` passed with 7 tests in 1 suite after rerunning with SwiftPM cache access.
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine --filter TorrentPeerWire` passed with 47 tests across 3 suites after rerunning with SwiftPM cache access.
+- `swift test` passed with 190 tests across 15 suites after rerunning with SwiftPM cache access.
 - `swift build` passed after rerunning with SwiftPM cache access.
+- `git diff --check` passed.
+- Static audits confirmed `SwiftGetXTorrentCore` still has no SwiftUI, SwiftData, AppKit, `CSwiftGetXLibtorrent`, or `LibtorrentAdapter` imports/references; libtorrent references remain limited to the optional Package.swift gate and existing app adapter boundary.
 
 Remaining risk:
 

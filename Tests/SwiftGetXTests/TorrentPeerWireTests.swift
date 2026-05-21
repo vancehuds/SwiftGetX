@@ -211,6 +211,7 @@ struct TorrentPeerWireTests {
                     infoHash: metainfo.infoHashV1,
                     peerID: Data((60..<80).map(UInt8.init))
                 ).encodedData()),
+                .data(try TorrentPeerWireMessage.unchoke.encodedData()),
                 .timeout,
                 .data(try TorrentPeerWireMessage.piece(pieceIndex: 0, begin: 0, block: contents).encodedData())
             ]
