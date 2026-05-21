@@ -516,3 +516,9 @@
 "updates_feed_url" = "更新订阅：%@";
 "updates_last_checked" = "上次检查：%@";
 "updates_last_checked_never" = "上次检查：从未";
+"updates_manual_check_disabled" = "当前无法手动检查更新。";
+"updates_manual_check_failed" = "更新检查失败：%@";
+"updates_manual_check_found" = "发现可用更新 %@。";
+"updates_manual_check_ready" = "可以检查更新。";
+"updates_manual_check_requested" = "已于 %@ 请求手动检查。";
+"updates_manual_check_up_to_date" = "截至 %@ 未发现更新。";

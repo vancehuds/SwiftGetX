@@ -548,6 +548,9 @@ private struct UpdateSettingsTab: View {
                             Text(lastCheckedText)
                                 .font(layout.font(11.5))
                                 .foregroundStyle(.secondary)
+                            Text(updater.manualCheckStatusText)
+                                .font(layout.font(11))
+                                .foregroundStyle(.secondary)
                         }
 
                         Spacer()
@@ -556,6 +559,7 @@ private struct UpdateSettingsTab: View {
                             updater.checkForUpdates()
                         }
                         .disabled(!updater.canCheckForUpdates)
+                        .help(updater.manualCheckStatusText)
                     }
 
                     if let feedURL = updater.feedURL {

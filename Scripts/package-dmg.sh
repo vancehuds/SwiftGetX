@@ -12,6 +12,9 @@ STAGED_APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
 STAGED_FRAMEWORKS_DIR="$STAGED_APP_BUNDLE/Contents/Frameworks"
 INFO_PLIST="Sources/SwiftGetX/Resources/AppInfo.plist"
 ICON_FILE="Sources/SwiftGetX/Resources/Assets/AppIcon.icns"
+RELEASE_STRICT="${SWIFTGETX_RELEASE_STRICT:-0}"
+CODESIGN_IDENTITY="${SWIFTGETX_CODESIGN_IDENTITY:-${APPLE_DEVELOPER_ID_APPLICATION_IDENTITY:-}}"
+DMG_CODESIGN_IDENTITY="${SWIFTGETX_DMG_CODESIGN_IDENTITY:-${APPLE_DEVELOPER_ID_DMG_IDENTITY:-${CODESIGN_IDENTITY}}}"
 
 # Derive version from git tag (e.g. v1.2.3 → 1.2.3), fallback to 0.1.0-dev
 GIT_TAG="$(git describe --tags --exact-match 2>/dev/null || echo "")"
@@ -27,6 +30,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+fail() {
+    printf 'Packaging failed: %s\n' "$*" >&2
+    exit 1
+}
+
 remove_packaging_xattrs() {
     local bundle_path="$1"
     local attribute
@@ -38,6 +46,85 @@ remove_packaging_xattrs() {
             xattr -d "$attribute" "$path" 2>/dev/null || true
         done < <(find "$bundle_path" -xattrname "$attribute" -print0)
     done
+}
+
+require_command() {
+    local command_name="$1"
+    command -v "$command_name" >/dev/null 2>&1 || fail "Missing required command: $command_name"
+}
+
+sign_app_bundle() {
+    local bundle_path="$1"
+    if [[ "$RELEASE_STRICT" == "1" ]]; then
+        [[ -n "$CODESIGN_IDENTITY" ]] || fail "SWIFTGETX_CODESIGN_IDENTITY or APPLE_DEVELOPER_ID_APPLICATION_IDENTITY is required when SWIFTGETX_RELEASE_STRICT=1"
+        codesign --force --deep --options runtime --timestamp --sign "$CODESIGN_IDENTITY" "$bundle_path"
+    else
+        codesign --force --deep --sign - "$bundle_path"
+    fi
+}
+
+verify_app_bundle() {
+    local bundle_path="$1"
+    if [[ "$RELEASE_STRICT" == "1" ]]; then
+        Scripts/validate-release.sh app "$bundle_path"
+    else
+        codesign --verify --deep "$bundle_path"
+    fi
+}
+
+decode_base64_file() {
+    local value="$1"
+    local destination="$2"
+    if printf '%s' "$value" | base64 -D > "$destination" 2>/dev/null; then
+        return 0
+    fi
+    printf '%s' "$value" | base64 --decode > "$destination"
+}
+
+notary_key_path() {
+    if [[ -n "${APPLE_NOTARY_KEY_PATH:-}" ]]; then
+        printf '%s\n' "$APPLE_NOTARY_KEY_PATH"
+        return 0
+    fi
+
+    local generated_path="$STAGING_DIR/notary/AuthKey_${APPLE_NOTARY_KEY_ID:-SwiftGetX}.p8"
+    mkdir -p "$(dirname "$generated_path")"
+
+    if [[ -n "${APPLE_NOTARY_KEY_BASE64:-}" ]]; then
+        decode_base64_file "$APPLE_NOTARY_KEY_BASE64" "$generated_path"
+    elif [[ -n "${APPLE_NOTARY_KEY:-}" ]]; then
+        printf '%s' "$APPLE_NOTARY_KEY" > "$generated_path"
+    else
+        fail "APPLE_NOTARY_KEY_PATH, APPLE_NOTARY_KEY_BASE64, or APPLE_NOTARY_KEY is required when SWIFTGETX_RELEASE_STRICT=1"
+    fi
+
+    chmod 600 "$generated_path"
+    printf '%s\n' "$generated_path"
+}
+
+sign_dmg() {
+    local dmg_path="$1"
+    [[ "$RELEASE_STRICT" == "1" ]] || return 0
+    [[ -n "$DMG_CODESIGN_IDENTITY" ]] || fail "SWIFTGETX_DMG_CODESIGN_IDENTITY, APPLE_DEVELOPER_ID_DMG_IDENTITY, or app signing identity is required when SWIFTGETX_RELEASE_STRICT=1"
+    codesign --force --timestamp --sign "$DMG_CODESIGN_IDENTITY" "$dmg_path"
+}
+
+notarize_dmg() {
+    local dmg_path="$1"
+    [[ "$RELEASE_STRICT" == "1" ]] || return 0
+
+    require_command xcrun
+    [[ -n "${APPLE_NOTARY_KEY_ID:-}" ]] || fail "APPLE_NOTARY_KEY_ID is required when SWIFTGETX_RELEASE_STRICT=1"
+    [[ -n "${APPLE_NOTARY_ISSUER_ID:-}" ]] || fail "APPLE_NOTARY_ISSUER_ID is required when SWIFTGETX_RELEASE_STRICT=1"
+
+    local key_path
+    key_path="$(notary_key_path)"
+    xcrun notarytool submit "$dmg_path" \
+        --key "$key_path" \
+        --key-id "$APPLE_NOTARY_KEY_ID" \
+        --issuer "$APPLE_NOTARY_ISSUER_ID" \
+        --wait
+    xcrun stapler staple "$dmg_path"
 }
 
 case "$CONFIGURATION" in
@@ -104,19 +191,19 @@ if [[ -d "$RESOURCE_BUNDLE" ]]; then
 fi
 
 remove_packaging_xattrs "$STAGED_APP_BUNDLE"
-codesign --force --deep --sign - "$STAGED_APP_BUNDLE"
-codesign --verify --deep "$STAGED_APP_BUNDLE"
+sign_app_bundle "$STAGED_APP_BUNDLE"
+verify_app_bundle "$STAGED_APP_BUNDLE"
 mkdir -p "$OUTPUT_DIR"
 ditto --noextattr --noqtn "$STAGED_APP_BUNDLE" "$APP_BUNDLE"
 remove_packaging_xattrs "$APP_BUNDLE"
-codesign --verify --deep "$APP_BUNDLE"
+verify_app_bundle "$APP_BUNDLE"
 
 if [[ "$CREATE_DMG" == "--dmg" ]]; then
     rm -rf "$DMG_ROOT" "$OUTPUT_DIR/$APP_NAME.dmg"
     mkdir -p "$DMG_ROOT"
     ditto --noextattr --noqtn "$APP_BUNDLE" "$DMG_ROOT/$APP_NAME.app"
     remove_packaging_xattrs "$DMG_ROOT/$APP_NAME.app"
-    codesign --verify --deep "$DMG_ROOT/$APP_NAME.app"
+    verify_app_bundle "$DMG_ROOT/$APP_NAME.app"
     ln -s /Applications "$DMG_ROOT/Applications"
     hdiutil create \
         -volname "$APP_NAME" \
@@ -124,6 +211,9 @@ if [[ "$CREATE_DMG" == "--dmg" ]]; then
         -ov \
         -format UDZO \
         "$OUTPUT_DIR/$APP_NAME.dmg"
+    sign_dmg "$OUTPUT_DIR/$APP_NAME.dmg"
+    notarize_dmg "$OUTPUT_DIR/$APP_NAME.dmg"
+    Scripts/validate-release.sh dmg "$OUTPUT_DIR/$APP_NAME.dmg"
 fi
 
 printf 'Packaged %s\n' "$APP_BUNDLE"

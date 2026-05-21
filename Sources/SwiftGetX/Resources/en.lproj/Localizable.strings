@@ -516,3 +516,9 @@
 "updates_feed_url" = "Update feed: %@";
 "updates_last_checked" = "Last checked: %@";
 "updates_last_checked_never" = "Last checked: Never";
+"updates_manual_check_disabled" = "Manual update checks are currently unavailable.";
+"updates_manual_check_failed" = "Update check failed: %@";
+"updates_manual_check_found" = "Update %@ is available.";
+"updates_manual_check_ready" = "Ready to check for updates.";
+"updates_manual_check_requested" = "Manual check requested at %@.";
+"updates_manual_check_up_to_date" = "No updates found as of %@.";

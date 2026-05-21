@@ -2,10 +2,12 @@
 # generate-appcast.sh — Generate or update a Sparkle appcast.xml for a release.
 #
 # Usage:
-#   Scripts/generate-appcast.sh <dmg-path> <version> <download-url>
+#   Scripts/generate-appcast.sh <dmg-path> <version> <download-url> [output-dir]
 #
 # Environment:
-#   SPARKLE_EDDSA_PRIVATE_KEY  — Base64-encoded EdDSA private key for signing
+#   SPARKLE_EDDSA_PRIVATE_KEY       — Base64-encoded EdDSA private key for signing
+#   SWIFTGETX_RELEASE_NOTES_URL     — Optional release notes URL for Sparkle UI
+#   SWIFTGETX_RELEASE_NOTES_TEXT    — Optional short appcast description text
 #
 # Output:
 #   dist/appcast/appcast.xml
@@ -15,6 +17,9 @@ DMG_PATH="${1:?Usage: $0 <dmg-path> <version> <download-url>}"
 VERSION="${2:?Missing version argument}"
 DOWNLOAD_URL="${3:?Missing download URL argument}"
 OUTPUT_DIR="${4:-dist/appcast}"
+TAG_VERSION="${VERSION#v}"
+RELEASE_NOTES_URL="${SWIFTGETX_RELEASE_NOTES_URL:-https://github.com/vancehuds/SwiftGetX/releases/tag/v${TAG_VERSION}}"
+RELEASE_NOTES_TEXT="${SWIFTGETX_RELEASE_NOTES_TEXT:-Release notes are available on GitHub.}"
 
 if [[ -z "${SPARKLE_EDDSA_PRIVATE_KEY:-}" ]]; then
     printf 'Error: SPARKLE_EDDSA_PRIVATE_KEY environment variable is required.\n' >&2
@@ -59,6 +64,24 @@ if [[ -z "$SIG_VALUE" ]]; then
     SIG_VALUE="$ED_SIGNATURE"
 fi
 
+if [[ -z "$SIG_VALUE" ]]; then
+    printf 'Error: Sparkle sign_update returned an empty EdDSA signature.\n' >&2
+    exit 70
+fi
+
+xml_escape() {
+    local value="$1"
+    value="${value//&/&amp;}"
+    value="${value//</&lt;}"
+    value="${value//>/&gt;}"
+    value="${value//\"/&quot;}"
+    value="${value//\'/&apos;}"
+    printf '%s' "$value"
+}
+
+RELEASE_NOTES_URL_ESCAPED="$(xml_escape "$RELEASE_NOTES_URL")"
+RELEASE_NOTES_TEXT_ESCAPED="$(xml_escape "$RELEASE_NOTES_TEXT")"
+
 PUB_DATE="$(date -u '+%a, %d %b %Y %H:%M:%S %z')"
 
 mkdir -p "$OUTPUT_DIR"
@@ -73,9 +96,11 @@ cat > "$OUTPUT_DIR/appcast.xml" <<EOF
         <language>en</language>
         <item>
             <title>Version ${VERSION}</title>
-            <link>https://github.com/vancehuds/SwiftGetX/releases/tag/v${VERSION}</link>
+            <link>https://github.com/vancehuds/SwiftGetX/releases/tag/v${TAG_VERSION}</link>
             <sparkle:version>${VERSION}</sparkle:version>
             <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+            <sparkle:releaseNotesLink>${RELEASE_NOTES_URL_ESCAPED}</sparkle:releaseNotesLink>
+            <description>${RELEASE_NOTES_TEXT_ESCAPED}</description>
             <pubDate>${PUB_DATE}</pubDate>
             <enclosure url="${DOWNLOAD_URL}"
                        sparkle:edSignature="${SIG_VALUE}"

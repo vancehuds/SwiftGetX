@@ -25,6 +25,20 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Validate release secrets and Sparkle configuration
+        env:
+          SWIFTGETX_RELEASE_STRICT: "1"
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_DEVELOPER_ID_APPLICATION_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_IDENTITY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+          CHROME_EXTENSION_KEY_BASE64: ${{ secrets.CHROME_EXTENSION_KEY_BASE64 }}
+        run: Scripts/validate-release.sh environment
+
       - name: Run tests
         timeout-minutes: 15
         run: swift test
@@ -35,8 +49,46 @@ jobs:
             brew list "$formula" &>/dev/null || brew list "${formula}@3" &>/dev/null || brew install "$formula"
           done
 
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="${RUNNER_TEMP}/swiftgetx-developer-id.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/swiftgetx-release.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          printf '%s' "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
       - name: Package DMG
+        env:
+          SWIFTGETX_RELEASE_STRICT: "1"
+          SWIFTGETX_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_IDENTITY }}
+          SWIFTGETX_DMG_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_DMG_IDENTITY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
         run: Scripts/package-dmg.sh release dist --dmg
+
+      - name: Verify signed and notarized artifacts
+        env:
+          SWIFTGETX_RELEASE_STRICT: "1"
+        run: |
+          Scripts/validate-release.sh app dist/SwiftGetX.app
+          Scripts/validate-release.sh dmg dist/SwiftGetX.dmg
 
       - name: Package Chrome extension
         env:
@@ -46,11 +98,16 @@ jobs:
       - name: Generate Sparkle appcast
         env:
           SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+          SWIFTGETX_RELEASE_NOTES_URL: https://github.com/vancehuds/SwiftGetX/releases/tag/${{ github.ref_name }}
+          SWIFTGETX_RELEASE_NOTES_TEXT: Release notes for ${{ github.ref_name }} are available on GitHub.
         run: |
           Scripts/generate-appcast.sh \
             dist/SwiftGetX.dmg \
             "${GITHUB_REF_NAME#v}" \
             "https://github.com/vancehuds/SwiftGetX/releases/download/${GITHUB_REF_NAME}/SwiftGetX.dmg"
+
+      - name: Validate Sparkle appcast
+        run: Scripts/validate-release.sh appcast dist/appcast/appcast.xml
 
       - name: Publish appcast to gh-pages branch
         run: |

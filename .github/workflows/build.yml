@@ -22,6 +22,9 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Validate Sparkle configuration
+        run: Scripts/validate-release.sh sparkle
+
       - name: Run tests
         timeout-minutes: 15
         run: swift test
