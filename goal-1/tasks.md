@@ -1229,6 +1229,7 @@ Verification evidence:
 - `swift test --filter PersistenceArchive` passed with 8 tests in 1 suite.
 - `swift build` passed.
 - `swift test` passed with 256 tests across 20 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 259 tests across 21 suites.
 - `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
 - `git diff --check` passed.
 - Static menu-bar performance search found no remaining `MenuBarController` paths that build snapshots from `coordinator?.allTasks()`.
