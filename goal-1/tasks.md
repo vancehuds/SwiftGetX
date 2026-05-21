@@ -1358,6 +1358,8 @@ Verification evidence:
 - `swift build` passed after rerunning with approved SwiftPM cache access.
 - `swift test --filter ReleaseValidation --filter AppResources` passed with 15 tests across 2 suites.
 - `swift test` passed with 273 tests across 21 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed with the existing local Homebrew OpenSSL deployment-target linker warnings.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 276 tests across 22 suites; the same existing OpenSSL deployment-target warnings appeared during linking.
 
 Remaining risk:
 
@@ -1365,6 +1367,7 @@ Remaining risk:
 - The GitHub release workflow was statically verified and covered by tests but was not run on GitHub in this session.
 - The Sparkle public key is enforced as a valid non-placeholder Ed25519 public key, but the matching relationship between the committed public key and the GitHub `SPARKLE_EDDSA_PRIVATE_KEY` secret cannot be cryptographically proven here without access to the private secret.
 - Strict release validation checks the app bundle and DMG artifacts, but real user Gatekeeper behavior still depends on Apple notarization acceptance for the exact release artifact produced by CI.
+- Optional libtorrent verification still depends on the local native archive and Homebrew OpenSSL libraries, which continue to emit deployment-target linker warnings in this environment.
 
 Next step:
 
