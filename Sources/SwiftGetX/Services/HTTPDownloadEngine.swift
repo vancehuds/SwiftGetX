@@ -231,7 +231,7 @@ struct HTTPMetadataProbe: Sendable {
         do {
             let redirectRecorder = HTTPRedirectRecorder()
             let session = HTTPRequestFactory.redirectRecordingSession(redirectRecorder)
-            defer { session.finishTasksAndInvalidate() }
+            defer { session.invalidateAndCancel() }
             let (_, response) = try await session.data(for: headRequest)
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode)
@@ -282,7 +282,7 @@ struct HTTPMetadataProbe: Sendable {
         do {
             let redirectRecorder = HTTPRedirectRecorder()
             let session = HTTPRequestFactory.redirectRecordingSession(redirectRecorder)
-            defer { session.finishTasksAndInvalidate() }
+            defer { session.invalidateAndCancel() }
             let (_, response) = try await session.bytes(for: urlRequest)
             guard let httpResponse = response as? HTTPURLResponse else {
                 return .unknown
