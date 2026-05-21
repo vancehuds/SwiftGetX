@@ -150,7 +150,7 @@ final class DownloadTask {
     }
 
     var usesActiveDownloadSlot: Bool {
-        status == .running || status == .verifying
+        status == .running || status == .fetchingPeers || status == .connectingPeers || status == .verifying
     }
 
     var isQueueManageable: Bool {
@@ -445,6 +445,8 @@ enum DownloadKind: String, Codable, CaseIterable, Identifiable {
 enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
     case queued
     case running
+    case fetchingPeers
+    case connectingPeers
     case seeding
     case paused
     case verifying
@@ -460,6 +462,10 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             L10n.string("download_status_queued")
         case .running:
             L10n.string("download_status_running")
+        case .fetchingPeers:
+            L10n.string("download_status_fetching_peers")
+        case .connectingPeers:
+            L10n.string("download_status_connecting_peers")
         case .seeding:
             L10n.string("download_status_seeding")
         case .paused:
@@ -481,6 +487,10 @@ enum DownloadStatus: String, Codable, CaseIterable, Identifiable {
             "clock"
         case .running:
             "arrow.down.circle.fill"
+        case .fetchingPeers:
+            "antenna.radiowaves.left.and.right"
+        case .connectingPeers:
+            "point.3.connected.trianglepath.dotted"
         case .seeding:
             "arrow.up.circle.fill"
         case .paused:

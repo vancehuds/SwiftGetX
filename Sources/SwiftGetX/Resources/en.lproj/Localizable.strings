@@ -104,8 +104,10 @@
 "download_kind_magnet" = "Magnet";
 "download_speed_limit" = "Download Speed Limit";
 "download_status_cancelled" = "Cancelled";
+"download_status_connecting_peers" = "Connecting peers";
 "download_status_completed" = "Completed";
 "download_status_failed" = "Failed";
+"download_status_fetching_peers" = "Fetching peers";
 "download_status_paused" = "Paused";
 "download_status_queued" = "Queued";
 "download_status_running" = "Downloading";
@@ -364,7 +366,14 @@
 "torrent_sequential_download" = "Sequential";
 "torrent_share_ratio" = "Share Ratio";
 "torrent_tracker_url" = "Tracker URL";
+"torrent_tracker_announcing" = "announcing";
+"torrent_tracker_failed" = "failed";
+"torrent_tracker_fetching_peers" = "Fetching tracker peers...";
+"torrent_tracker_connecting_peers" = "Connecting %d tracker peers";
 "torrent_tracker_metadata_only" = "metadata only";
+"torrent_tracker_no_peers" = "No tracker peers were returned.";
+"torrent_tracker_waiting" = "waiting";
+"torrent_tracker_working" = "working";
 "torrent_trackers" = "Trackers";
 "torrent_trackers_empty" = "No trackers reported yet.";
 "torrent_upload_speed" = "Upload Speed";

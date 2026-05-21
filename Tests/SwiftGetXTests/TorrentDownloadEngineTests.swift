@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import SwiftGetX
+@testable import SwiftGetXTorrentCore
 
 @Suite("TorrentDownloadEngine")
 @MainActor
@@ -204,7 +205,7 @@ struct TorrentDownloadEngineTests {
         try Self.singleFileTorrentData(
             name: "payload.bin",
             length: 42,
-            announce: "udp://tracker.example:80"
+            announce: nil
         ).write(to: torrentURL)
         let adapter = SwiftTorrentEngineAdapter()
         let store = SnapshotStore()
@@ -241,12 +242,83 @@ struct TorrentDownloadEngineTests {
         #expect(snapshot.torrentFiles == [
             TorrentFile(index: 0, path: "payload.bin", size: 42, priority: TorrentFilePriority.normal.rawValue)
         ])
-        #expect(snapshot.torrentTrackers?.map(\.url) == ["udp://tracker.example:80"])
+        #expect(snapshot.torrentTrackers?.isEmpty == true)
         #expect(snapshot.torrentConnection?.engine == .swift)
         #expect(snapshot.torrentConnection?.engineStatus == .metadataOnly)
         #expect(snapshot.torrentHealth?.engine == .swift)
         #expect(snapshot.torrentHealth?.engineStatus == .metadataOnly)
         #expect(snapshot.torrentHealth?.hasMetadata == true)
+    }
+
+    @Test("Swift adapter reports tracker peer diagnostics from mocked HTTP tracker")
+    func swiftAdapterReportsTrackerPeerDiagnosticsFromMockedHTTPTracker() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let torrentURL = directory.appendingPathComponent("fixture.torrent")
+        let trackerURL = "http://tracker.local/announce"
+        try Self.singleFileTorrentData(
+            name: "payload.bin",
+            length: 42,
+            announce: trackerURL
+        ).write(to: torrentURL)
+        let httpTransport = AppMockHTTPTrackerTransport(response: Self.httpTrackerResponse())
+        let adapter = SwiftTorrentEngineAdapter(trackerClient: TorrentTrackerClient(
+            httpTransport: httpTransport,
+            retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .milliseconds(50))
+        ))
+        let store = SnapshotStore()
+        let request = TorrentStartRequest(
+            id: UUID(),
+            displaySource: "file://\(torrentURL.path)",
+            resolvedTorrentFilePath: torrentURL.path,
+            savePath: directory.path,
+            outputName: "payload.bin",
+            contentRootPath: directory.path,
+            finalFilePath: directory.appendingPathComponent("payload.bin").path,
+            totalBytes: 0,
+            downloadedBytes: 0,
+            selectedFileIndexes: [],
+            hasExplicitFileSelection: false,
+            filePriorities: [:],
+            resumeDataPath: nil,
+            runtimeOptions: TorrentRuntimeOptions(engine: .swift),
+            downloadLimitBytesPerSecond: 0,
+            uploadLimitBytesPerSecond: 0
+        )
+
+        try await adapter.start(request) { snapshot in
+            Task {
+                await store.append(snapshot)
+            }
+        }
+        let snapshots = try await store.snapshots(count: 2)
+
+        #expect(snapshots.map(\.status) == [.fetchingPeers, .connectingPeers])
+        #expect(snapshots.last?.errorMessage == nil)
+        #expect(snapshots.last?.connectionSummary == L10n.string("torrent_tracker_connecting_peers", 1))
+        #expect(snapshots.last?.torrentPeers == [
+            TorrentPeerInfo(
+                address: "127.0.0.1:6881",
+                client: "",
+                progress: 0,
+                downloadRate: 0,
+                uploadRate: 0,
+                direction: "tracker",
+                flags: "tracker"
+            )
+        ])
+        #expect(snapshots.last?.torrentTrackers?.first?.url == trackerURL)
+        #expect(snapshots.last?.torrentTrackers?.first?.status == L10n.string("torrent_tracker_working"))
+        #expect(snapshots.last?.torrentTrackers?.first?.seedCount == 5)
+        #expect(snapshots.last?.torrentTrackers?.first?.leecherCount == 6)
+        #expect(snapshots.last?.torrentTrackers?.first?.downloadedCount == 7)
+        #expect(snapshots.last?.torrentTrackers?.first?.nextAnnounce.isEmpty == false)
+        #expect(snapshots.last?.torrentConnection?.peerCount == 1)
+        #expect(snapshots.last?.torrentHealth?.peerCount == 1)
+        #expect(await httpTransport.requests.count == 1)
+        let announceURL = try #require(await httpTransport.requests.first?.url?.absoluteString)
+        #expect(announceURL.contains("event=started"))
+        #expect(announceURL.contains("left=42"))
     }
 
     private static func request(
@@ -311,6 +383,25 @@ struct TorrentDownloadEngineTests {
         return data
     }
 
+    private static func httpTrackerResponse() -> Data {
+        var data = Data("d".utf8)
+        data.append(bencodeString("complete"))
+        data.append(Data("i5e".utf8))
+        data.append(bencodeString("downloaded"))
+        data.append(Data("i7e".utf8))
+        data.append(bencodeString("incomplete"))
+        data.append(Data("i6e".utf8))
+        data.append(bencodeString("interval"))
+        data.append(Data("i30e".utf8))
+        data.append(bencodeString("min interval"))
+        data.append(Data("i15e".utf8))
+        data.append(bencodeString("peers"))
+        data.append(Data("6:".utf8))
+        data.append(contentsOf: [127, 0, 0, 1, 0x1a, 0xe1])
+        data.append(UInt8(ascii: "e"))
+        return data
+    }
+
     private static func makeTemporaryDirectory() throws -> URL {
         let directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString)
@@ -335,10 +426,34 @@ private actor SnapshotStore {
         }
         throw SnapshotStoreError.missingSnapshot
     }
+
+    func snapshots(count: Int) async throws -> [DownloadSnapshot] {
+        for _ in 0..<20 {
+            if snapshots.count >= count {
+                return Array(snapshots.prefix(count))
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw SnapshotStoreError.missingSnapshot
+    }
 }
 
 private enum SnapshotStoreError: Error {
     case missingSnapshot
+}
+
+private actor AppMockHTTPTrackerTransport: TorrentHTTPTrackerTransport {
+    private(set) var requests = [URLRequest]()
+    private let response: Data
+
+    init(response: Data) {
+        self.response = response
+    }
+
+    func load(_ request: URLRequest) async throws -> Data {
+        requests.append(request)
+        return response
+    }
 }
 
 private actor RecordingTorrentAdapter: TorrentEngineAdapter {

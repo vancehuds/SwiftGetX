@@ -619,17 +619,34 @@ Next step:
 
 ## Task 15: Tracker Client and Mock Tracker Tests
 
-Status: [ ]
+Status: [x]
 
 Implement HTTP and UDP tracker announce basics, compact/non-compact peer parsing, tier scheduling, retry/timeout state, scrape placeholders, diagnostics snapshots, and deterministic local mock tests.
 
 Work performed:
 
+- Added `TorrentTrackerClient` with HTTP announce support, UDP connect/announce support, transaction id validation, timeout/retry handling, and support for compact plus non-compact HTTP peer lists.
+- Added `TorrentTrackerScheduler` state tracking with failure backoff, tracker success state, announce timing, and tier-aware candidate selection that rotates through equally eligible trackers by announce recency.
+- Added `TorrentTrackerScrape` helpers for announce-to-scrape conversion and scrape result parsing, and normalized scrape parse failures into tracker errors.
+- Wired the pure Swift torrent adapter to emit tracker diagnostics snapshots, surface tracker peers, and move through `fetchingPeers` and `connectingPeers` states using the new tracker client.
+- Added deterministic local mock tests covering HTTP and UDP tracker announce flows, transaction id mismatch validation, timeout retry behavior, compact/non-compact peer parsing, scrape parsing, and tracker-aware adapter snapshots.
+
 Verification evidence:
+
+- `swift test --filter SwiftGetXTorrentCore --filter TorrentDownloadEngine` passed with 38 tests across 2 suites after rerunning with SwiftPM cache access.
+- `swift test` passed with 181 tests across 14 suites after rerunning with SwiftPM cache access.
+- `git diff --check` passed after the final tracker-client refinements.
+- `swift build` passed after rerunning with SwiftPM cache access.
 
 Remaining risk:
 
+- The Swift torrent adapter is still metadata/layout only beyond tracker diagnostics; peer-wire connections, storage writes, piece verification, and end-to-end swarm behavior remain in Tasks 16-18.
+- Switching the global engine changes the engine used for new/configured runtime starts, but already active torrent handles are not migrated between engines in this skeleton task.
+- Optional libtorrent verification depends on the local prebuilt `.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a` archive and Homebrew OpenSSL libraries; this task did not change the C wrapper or vendored native build.
+
 Next step:
+
+Large Check 5: Swift Torrent Adapter and Tracker.
 
 ## Large Check 5: Swift Torrent Adapter and Tracker
 

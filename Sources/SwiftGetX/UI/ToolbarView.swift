@@ -12,12 +12,14 @@ struct ToolbarView: View {
     @FocusState private var isSearchFocused: Bool
 
     private var totalDownloadSpeed: Int64 {
-        allTasks.filter { $0.status == .running }.reduce(0) { $0 + $1.speedBytesPerSecond }
+        allTasks
+            .filter { $0.status == .running || $0.status == .fetchingPeers || $0.status == .connectingPeers }
+            .reduce(0) { $0 + $1.speedBytesPerSecond }
     }
 
     private var selectedTaskIsPausable: Bool {
         guard let status = coordinator.selectedTask?.status else { return false }
-        return status == .running || status == .seeding || status == .verifying
+        return status == .running || status == .fetchingPeers || status == .connectingPeers || status == .seeding || status == .verifying
     }
 
     var body: some View {
@@ -52,7 +54,7 @@ struct ToolbarView: View {
                     Button {
                         guard let task = coordinator.selectedTask else { return }
                         switch task.status {
-                        case .running, .seeding, .verifying:
+                        case .running, .fetchingPeers, .connectingPeers, .seeding, .verifying:
                             coordinator.pause(task)
                         default:
                             coordinator.resume(task)

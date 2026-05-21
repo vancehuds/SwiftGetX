@@ -87,7 +87,7 @@ final class DownloadCoordinator {
         )
 
         guard let tasks = try? modelContext.fetch(descriptor) else { return }
-        for task in tasks where task.status == .running || task.status == .seeding || task.status == .verifying {
+        for task in tasks where task.usesActiveDownloadSlot || task.status == .seeding {
             task.speedBytesPerSecond = 0
             task.errorMessage = nil
             task.nextQueueRetryAt = nil
@@ -674,7 +674,7 @@ final class DownloadCoordinator {
     }
 
     func pauseAll() {
-        for task in allTasks() where task.status == .running || task.status == .seeding || task.status == .queued || task.status == .verifying {
+        for task in allTasks() where task.usesActiveDownloadSlot || task.status == .seeding || task.status == .queued {
             pause(task, schedulesQueueAfterFreeingSlot: false)
         }
     }
@@ -1014,20 +1014,24 @@ final class DownloadCoordinator {
         switch status {
         case .running:
             0
-        case .verifying:
+        case .fetchingPeers:
             1
-        case .queued:
+        case .connectingPeers:
             2
-        case .paused:
+        case .verifying:
             3
-        case .failed:
+        case .queued:
             4
-        case .cancelled:
+        case .paused:
             5
-        case .seeding:
+        case .failed:
             6
-        case .completed:
+        case .cancelled:
             7
+        case .seeding:
+            8
+        case .completed:
+            9
         }
     }
 
@@ -1106,7 +1110,7 @@ enum DownloadFilter: String, CaseIterable, Identifiable {
         case .all:
             true
         case .running:
-            task.status == .running
+            task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers
         case .seeding:
             task.status == .seeding
         case .queued:

@@ -104,8 +104,10 @@
 "download_kind_magnet" = "磁力";
 "download_speed_limit" = "下载限速";
 "download_status_cancelled" = "已取消";
+"download_status_connecting_peers" = "正在连接 Peer";
 "download_status_completed" = "已完成";
 "download_status_failed" = "失败";
+"download_status_fetching_peers" = "正在获取 Peer";
 "download_status_paused" = "已暂停";
 "download_status_queued" = "等待中";
 "download_status_running" = "下载中";
@@ -364,7 +366,14 @@
 "torrent_sequential_download" = "顺序下载";
 "torrent_share_ratio" = "分享率";
 "torrent_tracker_url" = "Tracker 地址";
+"torrent_tracker_announcing" = "正在汇报";
+"torrent_tracker_failed" = "失败";
+"torrent_tracker_fetching_peers" = "正在获取 Tracker Peer...";
+"torrent_tracker_connecting_peers" = "正在连接 %d 个 Tracker Peer";
 "torrent_tracker_metadata_only" = "仅 metadata";
+"torrent_tracker_no_peers" = "Tracker 未返回 Peer。";
+"torrent_tracker_waiting" = "等待中";
+"torrent_tracker_working" = "正常";
 "torrent_trackers" = "Tracker";
 "torrent_trackers_empty" = "暂未收到 Tracker 信息。";
 "torrent_upload_speed" = "上传速度";

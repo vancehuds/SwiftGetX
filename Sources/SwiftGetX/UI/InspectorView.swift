@@ -107,6 +107,8 @@ struct InspectorView: View {
         switch status {
         case .queued: .secondary
         case .running: .blue
+        case .fetchingPeers: .cyan
+        case .connectingPeers: .blue
         case .seeding: .mint
         case .paused: .orange
         case .verifying: .indigo
@@ -224,6 +226,8 @@ private struct OverviewPanel: View {
         switch task.status {
         case .queued: .secondary
         case .running: .blue
+        case .fetchingPeers: .cyan
+        case .connectingPeers: .blue
         case .seeding: .mint
         case .paused: .orange
         case .verifying: .indigo

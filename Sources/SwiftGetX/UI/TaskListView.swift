@@ -47,7 +47,7 @@ struct TaskListView: View {
                                     }
                                 }
                                 .contextMenu {
-                                    let isPausable = task.status == .running || task.status == .seeding || task.status == .verifying
+                                    let isPausable = task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding || task.status == .verifying
                                     Button(isPausable ? L10n.string("action_pause") : L10n.string("action_start")) {
                                         if isPausable {
                                             coordinator.pause(task)
@@ -173,7 +173,7 @@ struct TaskListView: View {
     }
 
     private func summary(for tasks: [DownloadTask]) -> String {
-        let running = tasks.filter { $0.status == .running }.count
+        let running = tasks.filter(\.usesActiveDownloadSlot).count
         let completed = tasks.filter(\.hasFinishedDownloading).count
         return L10n.string("task_list_summary", tasks.count, running, completed)
     }
@@ -259,6 +259,10 @@ private struct TaskRowView: View {
                         }
                         .font(layout.font(11, design: .monospaced))
                         .foregroundStyle(.secondary)
+                    } else if task.status == .fetchingPeers || task.status == .connectingPeers {
+                        Text(task.status.title)
+                            .font(layout.font(11, weight: .medium))
+                            .foregroundStyle(.blue)
                     } else if task.status == .completed {
                         HStack(spacing: layout.value(3)) {
                             Image(systemName: "checkmark.shield")
@@ -293,7 +297,7 @@ private struct TaskRowView: View {
         .overlay(alignment: .topTrailing) {
             if isHovered {
                 HStack(spacing: layout.value(6)) {
-                    let isPausable = task.status == .running || task.status == .seeding || task.status == .verifying
+                    let isPausable = task.status == .running || task.status == .fetchingPeers || task.status == .connectingPeers || task.status == .seeding || task.status == .verifying
                     Button {
                         if isPausable {
                             coordinator.pause(task)
@@ -357,6 +361,10 @@ private struct TaskRowView: View {
         case .queued:
             .secondary
         case .running:
+            .blue
+        case .fetchingPeers:
+            .cyan
+        case .connectingPeers:
             .blue
         case .seeding:
             .mint

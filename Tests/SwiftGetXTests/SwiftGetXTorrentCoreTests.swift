@@ -532,6 +532,256 @@ struct SwiftGetXTorrentCoreTests {
         }
     }
 
+    @Test("parses HTTP tracker compact and non-compact peers")
+    func parsesHTTPTrackerPeers() throws {
+        let compact = Data([127, 0, 0, 1, 0x1a, 0xe1])
+        let compactResponse = try TorrentHTTPTrackerResponse.parse(data: bencodeDictionary([
+            ("complete", bencodeInteger(3)),
+            ("downloaded", bencodeInteger(9)),
+            ("incomplete", bencodeInteger(4)),
+            ("interval", bencodeInteger(120)),
+            ("min interval", bencodeInteger(60)),
+            ("peers", bencodeData(compact)),
+            ("warning message", bencodeString("slow"))
+        ]))
+
+        #expect(compactResponse.announceResult.peers == [
+            TorrentPeerEndpoint(host: "127.0.0.1", port: 6881)
+        ])
+        #expect(compactResponse.announceResult.seedCount == 3)
+        #expect(compactResponse.announceResult.leecherCount == 4)
+        #expect(compactResponse.announceResult.downloadedCount == 9)
+        #expect(compactResponse.announceResult.warningMessage == "slow")
+
+        let peerID = Data("-SGX0001-ABCDEFGHIJK".utf8)
+        let listResponse = try TorrentHTTPTrackerResponse.parse(data: bencodeDictionary([
+            ("interval", bencodeInteger(90)),
+            ("peers", bencodeList([
+                bencodeDictionary([
+                    ("ip", bencodeString("192.0.2.10")),
+                    ("peer id", bencodeData(peerID)),
+                    ("port", bencodeInteger(51413))
+                ])
+            ]))
+        ]))
+
+        #expect(listResponse.announceResult.peers == [
+            TorrentPeerEndpoint(
+                host: "192.0.2.10",
+                port: 51413,
+                peerID: peerID.map { String(format: "%02x", $0) }.joined()
+            )
+        ])
+    }
+
+    @Test("builds HTTP tracker announce requests")
+    func buildsHTTPTrackerAnnounceRequests() throws {
+        let peerID = Data("-SGX0001-12345678901".utf8)
+        let request = try TorrentTrackerAnnounceRequest(
+            trackerURL: URL(string: "http://tracker.example/announce?existing=1")!,
+            infoHash: Data((0..<20).map(UInt8.init)),
+            peerID: peerID,
+            port: 6881,
+            uploaded: 2,
+            downloaded: 3,
+            left: 4,
+            event: .started,
+            compact: true,
+            numWant: 25,
+            key: 7
+        )
+        let url = try #require(request.httpURLRequest().url?.absoluteString)
+
+        #expect(url.contains("existing=1"))
+        #expect(url.contains("info_hash=%00%01%02%03%04%05%06%07%08%09%0A%0B%0C%0D%0E%0F%10%11%12%13"))
+        #expect(url.contains("peer_id=-SGX0001-12345678901"))
+        #expect(url.contains("port=6881"))
+        #expect(url.contains("event=started"))
+        #expect(url.contains("key=7"))
+
+        for event in [TorrentTrackerEvent.none, .started, .completed, .stopped] {
+            let eventRequest = try TorrentTrackerAnnounceRequest(
+                trackerURL: URL(string: "http://tracker.example/announce")!,
+                infoHash: Data((0..<20).map(UInt8.init)),
+                peerID: peerID,
+                left: 4,
+                event: event
+            )
+            let eventURL = try #require(eventRequest.httpURLRequest().url?.absoluteString)
+            if event == .none {
+                #expect(!eventURL.contains("event="))
+            } else {
+                #expect(eventURL.contains("event=\(event.rawValue)"))
+            }
+        }
+    }
+
+    @Test("announces through mocked HTTP and UDP tracker transports")
+    func announcesThroughMockedTrackerTransports() async throws {
+        let httpTransport = MockHTTPTrackerTransport(response: bencodeDictionary([
+            ("complete", bencodeInteger(1)),
+            ("incomplete", bencodeInteger(2)),
+            ("interval", bencodeInteger(30)),
+            ("peers", bencodeData(Data([10, 0, 0, 2, 0x1a, 0xe1])))
+        ]))
+        let udpTransport = MockUDPTrackerTransport()
+        let client = TorrentTrackerClient(
+            httpTransport: httpTransport,
+            udpTransport: udpTransport,
+            retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 0, timeout: .seconds(1)),
+            randomSource: TorrentTrackerRandomSource(
+                nextTransactionID: SequentialInt32Source([10, 11]).next,
+                nextKey: { 0 }
+            )
+        )
+        let httpRequest = try TorrentTrackerAnnounceRequest(
+            trackerURL: URL(string: "http://tracker.example/announce")!,
+            infoHash: Data((0..<20).map(UInt8.init)),
+            peerID: Data("-SGX0001-12345678901".utf8),
+            left: 42
+        )
+        let httpResult = try await client.announce(httpRequest)
+
+        #expect(httpResult.peers == [TorrentPeerEndpoint(host: "10.0.0.2", port: 6881)])
+        #expect(await httpTransport.requests.count == 1)
+
+        let udpRequest = try TorrentTrackerAnnounceRequest(
+            trackerURL: URL(string: "udp://tracker.example:80/announce")!,
+            infoHash: Data((0..<20).map(UInt8.init)),
+            peerID: Data("-SGX0001-12345678901".utf8),
+            left: 42
+        )
+        let udpResult = try await client.announce(udpRequest)
+
+        #expect(udpResult.peers == [TorrentPeerEndpoint(host: "203.0.113.9", port: 51413)])
+        #expect(await udpTransport.requests.count == 2)
+    }
+
+    @Test("retries HTTP tracker failures")
+    func retriesHTTPTrackerFailures() async throws {
+        let httpTransport = RetryingHTTPTrackerTransport(response: bencodeDictionary([
+            ("interval", bencodeInteger(45)),
+            ("peers", bencodeData(Data([192, 0, 2, 20, 0x1a, 0xe1])))
+        ]))
+        let client = TorrentTrackerClient(
+            httpTransport: httpTransport,
+            retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 1, timeout: .milliseconds(10))
+        )
+        let request = try TorrentTrackerAnnounceRequest(
+            trackerURL: URL(string: "http://tracker.example/announce")!,
+            infoHash: Data((0..<20).map(UInt8.init)),
+            peerID: Data("-SGX0001-12345678901".utf8),
+            left: 42
+        )
+
+        let result = try await client.announce(request)
+
+        #expect(result.interval == 45)
+        #expect(result.peers == [TorrentPeerEndpoint(host: "192.0.2.20", port: 6881)])
+        #expect(await httpTransport.requests.count == 2)
+    }
+
+    @Test("validates UDP tracker transaction ids and retries timeouts")
+    func validatesUDPTrackerTransactionIDsAndRetriesTimeouts() async throws {
+        var connectMismatch = Data()
+        connectMismatch.appendUInt32(0)
+        connectMismatch.appendInt32(99)
+        connectMismatch.appendInt64(0x0102030405060708)
+        #expect(throws: TorrentTrackerError.transactionIDMismatch(expected: 10, actual: 99)) {
+            try TorrentUDPTrackerPacket.parseConnectResponse(connectMismatch, expectedTransactionID: 10)
+        }
+
+        var announceMismatch = Data()
+        announceMismatch.appendUInt32(1)
+        announceMismatch.appendInt32(100)
+        announceMismatch.appendInt32(60)
+        announceMismatch.appendInt32(2)
+        announceMismatch.appendInt32(1)
+        #expect(throws: TorrentTrackerError.transactionIDMismatch(expected: 11, actual: 100)) {
+            try TorrentUDPTrackerPacket.parseAnnounceResponse(announceMismatch, expectedTransactionID: 11)
+        }
+
+        let udpTransport = RetryingUDPTrackerTransport()
+        let client = TorrentTrackerClient(
+            udpTransport: udpTransport,
+            retryPolicy: TorrentTrackerRetryPolicy(maximumRetries: 1, timeout: .milliseconds(10)),
+            randomSource: TorrentTrackerRandomSource(
+                nextTransactionID: SequentialInt32Source([20, 21, 22]).next,
+                nextKey: { 0 }
+            )
+        )
+        let request = try TorrentTrackerAnnounceRequest(
+            trackerURL: URL(string: "udp://tracker.example:80/announce")!,
+            infoHash: Data((0..<20).map(UInt8.init)),
+            peerID: Data("-SGX0001-12345678901".utf8),
+            left: 42
+        )
+        let result = try await client.announce(request)
+
+        #expect(result.peers == [TorrentPeerEndpoint(host: "198.51.100.10", port: 6000)])
+        #expect(await udpTransport.requests.count == 3)
+    }
+
+    @Test("schedules tracker tiers and retry backoff")
+    func schedulesTrackerTiersAndRetryBackoff() {
+        let start = Date(timeIntervalSince1970: 1_000)
+        var scheduler = TorrentTrackerScheduler(trackers: [
+            TorrentTrackerDescriptor(url: "http://primary/announce", tier: 0),
+            TorrentTrackerDescriptor(url: "http://backup/announce", tier: 1)
+        ], baseBackoffSeconds: 5)
+
+        #expect(scheduler.nextCandidate(now: start)?.url == "http://primary/announce")
+        scheduler.recordFailure(
+            url: "http://primary/announce",
+            error: TorrentTrackerError.timeout,
+            now: start
+        )
+        #expect(scheduler.nextCandidate(now: start)?.url == "http://backup/announce")
+        #expect(scheduler.states.first?.failureCount == 1)
+        #expect(scheduler.states.first?.nextAnnounceDate == start.addingTimeInterval(5))
+        scheduler.recordSuccess(
+            url: "http://backup/announce",
+            result: TorrentTrackerAnnounceResult(
+                interval: 30,
+                minInterval: 10,
+                peers: [TorrentPeerEndpoint(host: "192.0.2.1", port: 6881)],
+                seedCount: 11,
+                leecherCount: 12,
+                downloadedCount: 13
+            ),
+            now: start
+        )
+        let backupState = scheduler.states[1]
+        #expect(backupState.status == .working)
+        #expect(backupState.failureCount == 0)
+        #expect(backupState.seedCount == 11)
+        #expect(backupState.leecherCount == 12)
+        #expect(backupState.downloadedCount == 13)
+        #expect(backupState.nextAnnounceDate == start.addingTimeInterval(30))
+        #expect(scheduler.nextCandidate(now: start.addingTimeInterval(5))?.url == "http://primary/announce")
+    }
+
+    @Test("parses tracker scrape responses")
+    func parsesTrackerScrapeResponses() throws {
+        #expect(TorrentTrackerScrape.scrapeURL(from: URL(string: "http://tracker.example/announce")!)?.absoluteString == "http://tracker.example/scrape")
+
+        let infoHash = Data((0..<20).map(UInt8.init))
+        let result = try TorrentTrackerScrape.parse(
+            data: bencodeDictionary([
+                ("files", bencodeRawDictionary([
+                    (infoHash, bencodeDictionary([
+                        ("complete", bencodeInteger(7)),
+                        ("downloaded", bencodeInteger(8)),
+                        ("incomplete", bencodeInteger(9))
+                    ]))
+                ]))
+            ]),
+            infoHash: infoHash
+        )
+
+        #expect(result == TorrentTrackerScrapeResult(complete: 7, downloaded: 8, incomplete: 9))
+    }
+
     private func torrentData(announce: String?, announceList: [[String]] = [], info: Data) -> Data {
         var fields = [(String, Data)]()
         if let announce {
@@ -549,9 +799,13 @@ struct SwiftGetXTorrentCoreTests {
     }
 
     private func bencodeDictionary(_ fields: [(String, Data)]) -> Data {
+        bencodeRawDictionary(fields.map { (Data($0.0.utf8), $0.1) })
+    }
+
+    private func bencodeRawDictionary(_ fields: [(Data, Data)]) -> Data {
         var data = Data("d".utf8)
-        for (key, value) in fields.sorted(by: { Array($0.0.utf8).lexicographicallyPrecedes(Array($1.0.utf8)) }) {
-            data.append(bencodeString(key))
+        for (key, value) in fields.sorted(by: { [UInt8]($0.0).lexicographicallyPrecedes([UInt8]($1.0)) }) {
+            data.append(bencodeData(key))
             data.append(value)
         }
         data.append(UInt8(ascii: "e"))
@@ -583,5 +837,120 @@ struct SwiftGetXTorrentCoreTests {
 
     private func sha1Hex(_ data: Data) -> String {
         Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+private actor MockHTTPTrackerTransport: TorrentHTTPTrackerTransport {
+    private(set) var requests = [URLRequest]()
+    private let response: Data
+
+    init(response: Data) {
+        self.response = response
+    }
+
+    func load(_ request: URLRequest) async throws -> Data {
+        requests.append(request)
+        return response
+    }
+}
+
+private actor RetryingHTTPTrackerTransport: TorrentHTTPTrackerTransport {
+    private(set) var requests = [URLRequest]()
+    private let response: Data
+
+    init(response: Data) {
+        self.response = response
+    }
+
+    func load(_ request: URLRequest) async throws -> Data {
+        requests.append(request)
+        if requests.count == 1 {
+            throw TorrentTrackerError.timeout
+        }
+        return response
+    }
+}
+
+private actor MockUDPTrackerTransport: TorrentUDPTrackerTransport {
+    private(set) var requests = [Data]()
+
+    func send(_ data: Data, to url: URL, timeout: Duration) async throws -> Data {
+        requests.append(data)
+        if requests.count == 1 {
+            var response = Data()
+            response.appendUInt32(0)
+            response.appendInt32(10)
+            response.appendInt64(0x0102030405060708)
+            return response
+        }
+        var response = Data()
+        response.appendUInt32(1)
+        response.appendInt32(11)
+        response.appendInt32(60)
+        response.appendInt32(2)
+        response.appendInt32(1)
+        response.append(contentsOf: [203, 0, 113, 9, 0xc8, 0xd5])
+        return response
+    }
+}
+
+private actor RetryingUDPTrackerTransport: TorrentUDPTrackerTransport {
+    private(set) var requests = [Data]()
+
+    func send(_ data: Data, to url: URL, timeout: Duration) async throws -> Data {
+        requests.append(data)
+        switch requests.count {
+        case 1:
+            throw TorrentTrackerError.timeout
+        case 2:
+            var response = Data()
+            response.appendUInt32(0)
+            response.appendInt32(21)
+            response.appendInt64(0x0102030405060708)
+            return response
+        default:
+            var response = Data()
+            response.appendUInt32(1)
+            response.appendInt32(22)
+            response.appendInt32(60)
+            response.appendInt32(2)
+            response.appendInt32(1)
+            response.append(contentsOf: [198, 51, 100, 10, 0x17, 0x70])
+            return response
+        }
+    }
+}
+
+private final class SequentialInt32Source: @unchecked Sendable {
+    private let values: [Int32]
+    private var index = 0
+    private let lock = NSLock()
+
+    init(_ values: [Int32]) {
+        self.values = values
+    }
+
+    func next() -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        let value = values[min(index, values.count - 1)]
+        index += 1
+        return value
+    }
+}
+
+private extension Data {
+    mutating func appendUInt32(_ value: UInt32) {
+        var bigEndian = value.bigEndian
+        Swift.withUnsafeBytes(of: &bigEndian) { append(contentsOf: $0) }
+    }
+
+    mutating func appendInt32(_ value: Int32) {
+        appendUInt32(UInt32(bitPattern: value))
+    }
+
+    mutating func appendInt64(_ value: Int64) {
+        var bigEndian = value.bigEndian
+        Swift.withUnsafeBytes(of: &bigEndian) { append(contentsOf: $0) }
     }
 }
