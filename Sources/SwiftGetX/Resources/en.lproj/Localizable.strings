@@ -35,6 +35,8 @@
 "alert_allow_chrome_pairing_title" = "Allow Chrome extension to connect to SwiftGetX?";
 "alert_browser_pairing_rejected_message" = "SwiftGetX could not find a matching SwiftGetX extension in a supported Chromium browser profile, so pairing was rejected.\n\nExtension ID: %@";
 "alert_browser_pairing_rejected_title" = "Unable to verify browser extension";
+"alert_browser_pairing_incompatible_message" = "This SwiftGetX browser extension is not compatible with the installed app or native host. Update SwiftGetX and reinstall the extension package.";
+"alert_browser_pairing_incompatible_title" = "Browser extension is incompatible";
 "alert_chrome_pairing_rejected_message" = "SwiftGetX could not find a matching SwiftGetX extension in the Chrome profile, so pairing was rejected.\n\nExtension ID: %@";
 "alert_chrome_pairing_rejected_title" = "Unable to verify Chrome extension";
 "browser_bridge_missing_url" = "Browser message is missing a download URL";
@@ -54,6 +56,8 @@
 "browser_diagnostics_profile_path" = "Profile path: %@";
 "browser_diagnostics_sidebar_counts" = "%d configured · %d extension IDs found";
 "browser_diagnostics_supported_summary" = "%d detected · %d supported · %d configured";
+"browser_open_extension_release" = "Install Extension";
+"browser_open_extension_release_help" = "Open the latest SwiftGetX release page with Chrome extension artifacts.";
 "browser_extensions_ready" = "Safari + Chrome extensions are ready";
 "browser_generic" = "Browser";
 "browser_integration_section" = "Browser Integration";

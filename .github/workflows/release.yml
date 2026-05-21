@@ -37,17 +37,12 @@ jobs:
           APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
           SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
           CHROME_EXTENSION_KEY_BASE64: ${{ secrets.CHROME_EXTENSION_KEY_BASE64 }}
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
         run: Scripts/validate-release.sh environment
 
       - name: Run tests
         timeout-minutes: 15
         run: swift test
-
-      - name: Install native packaging dependencies
-        run: |
-          for formula in cmake boost openssl; do
-            brew list "$formula" &>/dev/null || brew list "${formula}@3" &>/dev/null || brew install "$formula"
-          done
 
       - name: Import Developer ID certificate
         env:
@@ -92,7 +87,9 @@ jobs:
 
       - name: Package Chrome extension
         env:
+          SWIFTGETX_RELEASE_STRICT: "1"
           SWIFTGETX_CHROME_EXTENSION_KEY_BASE64: ${{ secrets.CHROME_EXTENSION_KEY_BASE64 }}
+          SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
         run: Scripts/package-chrome-extension.sh Sources/SwiftGetX/Resources/ChromeExtension dist/chrome
 
       - name: Generate Sparkle appcast
@@ -131,6 +128,7 @@ jobs:
             dist/SwiftGetX.dmg
             dist/chrome/SwiftGetX-Chrome.zip
             dist/chrome/SwiftGetX-Chrome.crx
+            dist/chrome/SwiftGetX-Chrome.release.json
           generate_release_notes: true
           draft: false
           prerelease: false

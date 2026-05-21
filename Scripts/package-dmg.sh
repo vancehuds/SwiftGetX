@@ -136,7 +136,7 @@ case "$CONFIGURATION" in
         ;;
 esac
 
-if [[ "${SWIFTGETX_DISABLE_LIBTORRENT:-}" != "1" ]]; then
+if [[ "${SWIFTGETX_ENABLE_LIBTORRENT:-}" == "1" && "${SWIFTGETX_DISABLE_LIBTORRENT:-}" != "1" ]]; then
     Scripts/build-libtorrent.sh
     export SWIFTGETX_ENABLE_LIBTORRENT=1
 fi
@@ -185,6 +185,9 @@ cp "$INFO_PLIST" "$STAGED_APP_BUNDLE/Contents/Info.plist"
     || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $APP_VERSION" "$STAGED_APP_BUNDLE/Contents/Info.plist"
 
 cp "$ICON_FILE" "$STAGED_APP_BUNDLE/Contents/Resources/AppIcon.icns"
+if [[ -f "Sources/SwiftGetX/Resources/Acknowledgements.md" ]]; then
+    cp "Sources/SwiftGetX/Resources/Acknowledgements.md" "$STAGED_APP_BUNDLE/Contents/Resources/Acknowledgements.md"
+fi
 
 if [[ -d "$RESOURCE_BUNDLE" ]]; then
     cp -R "$RESOURCE_BUNDLE" "$STAGED_APP_BUNDLE/Contents/Resources/"

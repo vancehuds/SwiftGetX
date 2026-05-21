@@ -54,7 +54,12 @@ struct NativeMessageHostTests {
                 accepted: true,
                 queued: true,
                 requiresUserConfirmation: false,
-                requestID: "request-1"
+                requestID: "request-1",
+                protocolVersion: BrowserIntegrationCompatibility.protocolVersion,
+                minimumExtensionVersion: BrowserIntegrationCompatibility.minimumChromeExtensionVersion,
+                minimumNativeHostVersion: BrowserIntegrationCompatibility.minimumNativeHostVersion,
+                compatible: true,
+                compatibilityMessage: nil
             )
         )
 
@@ -69,6 +74,68 @@ struct NativeMessageHostTests {
         #expect(response.queued == true)
         #expect(response.requiresUserConfirmation == false)
         #expect(response.requestID == "request-1")
+        #expect(response.protocolVersion == BrowserIntegrationCompatibility.protocolVersion)
+        #expect(response.minimumExtensionVersion == BrowserIntegrationCompatibility.minimumChromeExtensionVersion)
+        #expect(response.minimumNativeHostVersion == BrowserIntegrationCompatibility.minimumNativeHostVersion)
+        #expect(response.compatible == true)
+    }
+
+    @Test("browser download messages carry compatibility metadata")
+    func browserDownloadMessagesCarryCompatibilityMetadata() throws {
+        let message = BrowserDownloadMessage(
+            action: "download",
+            url: "https://example.com/file.zip",
+            browser: "Chrome",
+            extensionVersion: "0.2.0",
+            minimumNativeHostVersion: "0.2.0",
+            protocolVersion: BrowserIntegrationCompatibility.protocolVersion
+        )
+        let data = try encodeMessage(message)
+
+        let decoded = try #require(NativeMessageHost.decodeMessages(from: data).first)
+
+        #expect(decoded.extensionVersion == "0.2.0")
+        #expect(decoded.minimumNativeHostVersion == "0.2.0")
+        #expect(decoded.protocolVersion == BrowserIntegrationCompatibility.protocolVersion)
+    }
+
+    @Test("browser integration compatibility rejects old versions and protocol drift")
+    func browserIntegrationCompatibilityRejectsOldVersionsAndProtocolDrift() {
+        #expect(BrowserIntegrationCompatibility.isVersion("v0.2.0", atLeast: "0.2.0"))
+        #expect(BrowserIntegrationCompatibility.isVersion("0.10.0-beta", atLeast: "0.2.0"))
+        #expect(!BrowserIntegrationCompatibility.isVersion("0.1.9", atLeast: "0.2.0"))
+
+        let compatible = BrowserIntegrationCompatibility.extensionCompatibility(
+            extensionVersion: "0.2.0",
+            minimumNativeHostVersion: "0.2.0",
+            protocolVersion: BrowserIntegrationCompatibility.protocolVersion,
+            requiresExplicitVersion: true
+        )
+        #expect(compatible.compatible)
+
+        let oldExtension = BrowserIntegrationCompatibility.extensionCompatibility(
+            extensionVersion: "0.1.9",
+            minimumNativeHostVersion: "0.2.0",
+            protocolVersion: BrowserIntegrationCompatibility.protocolVersion,
+            requiresExplicitVersion: true
+        )
+        #expect(!oldExtension.compatible)
+
+        let protocolDrift = BrowserIntegrationCompatibility.extensionCompatibility(
+            extensionVersion: "0.2.0",
+            minimumNativeHostVersion: "0.2.0",
+            protocolVersion: BrowserIntegrationCompatibility.protocolVersion + 1,
+            requiresExplicitVersion: true
+        )
+        #expect(!protocolDrift.compatible)
+
+        let missingExplicitVersion = BrowserIntegrationCompatibility.extensionCompatibility(
+            extensionVersion: nil,
+            minimumNativeHostVersion: "0.2.0",
+            protocolVersion: BrowserIntegrationCompatibility.protocolVersion,
+            requiresExplicitVersion: true
+        )
+        #expect(!missingExplicitVersion.compatible)
     }
 
     @Test("builds download deep links with browser takeover metadata")
@@ -615,7 +682,7 @@ struct NativeMessageHostTests {
     @Test("parses browser setup deep links")
     func parsesBrowserSetupDeepLinks() throws {
         let url = try #require(URL(
-            string: "swiftgetx://browser-setup?browser=Chrome&extensionID=bcdefghijklmnopabcdefghijklmnopa&version=0.2.0"
+            string: "swiftgetx://browser-setup?browser=Chrome&extensionID=bcdefghijklmnopabcdefghijklmnopa&version=0.2.0&protocolVersion=1&minimumNativeHostVersion=0.2.0"
         ))
 
         let request = try #require(DeepLinkParser.browserSetupRequest(from: url))
@@ -623,6 +690,8 @@ struct NativeMessageHostTests {
         #expect(request.browser == "Chrome")
         #expect(request.extensionID == "bcdefghijklmnopabcdefghijklmnopa")
         #expect(request.version == "0.2.0")
+        #expect(request.protocolVersion == BrowserIntegrationCompatibility.protocolVersion)
+        #expect(request.minimumNativeHostVersion == "0.2.0")
     }
 
     @Test("rejects invalid browser setup extension IDs")

@@ -11,7 +11,7 @@ let homebrewPrefix = ProcessInfo.processInfo.environment["SWIFTGETX_HOMEBREW_PRE
 let libtorrentArchivePath = "\(packageDirectory)/.build/libtorrent/libtorrent-build/libtorrent-rasterbar.a"
 
 if enableNativeLibtorrent && !FileManager.default.fileExists(atPath: libtorrentArchivePath) {
-    fatalError("SwiftGetX native libtorrent builds require \(libtorrentArchivePath). Run Scripts/build-libtorrent.sh first, or unset SWIFTGETX_ENABLE_LIBTORRENT for the lightweight fallback build.")
+    fatalError("SwiftGetX native libtorrent builds require \(libtorrentArchivePath). Run Scripts/build-libtorrent.sh first, or unset SWIFTGETX_ENABLE_LIBTORRENT for the default SwiftTorrent build.")
 }
 
 var swiftGetXDependencies: [Target.Dependency] = ["SwiftGetXCore", "SwiftGetXTorrentCore"]
@@ -96,6 +96,7 @@ let package = Package(
                 .copy("Resources/SafariWebExtension"),
                 .copy("Resources/ChromeExtension"),
                 .copy("Resources/NativeMessaging"),
+                .copy("Resources/Acknowledgements.md"),
                 .copy("Resources/AppInfo.plist"),
                 .copy("Resources/Assets/AppIcon.icns"),
                 .copy("Resources/Assets/AppIcon.png"),

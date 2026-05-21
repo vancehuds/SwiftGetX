@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import SwiftGetXCore
 
-let nativeHostVersion = "0.2.0"
+let nativeHostVersion = BrowserIntegrationCompatibility.nativeHostVersion
 let nativeHandoffAckTimeout: TimeInterval = 60
 let nativeDeepLinkSourceLengthLimit = 6 * 1_024
 let nativeMaximumPublicTaskCount = 20
@@ -14,14 +14,37 @@ do {
 
     switch message.action {
     case "ping":
+        let compatibility = BrowserIntegrationCompatibility.extensionCompatibility(
+            extensionVersion: message.extensionVersion,
+            minimumNativeHostVersion: message.minimumNativeHostVersion,
+            protocolVersion: message.protocolVersion,
+            requiresExplicitVersion: false
+        )
         let response = NativeMessageResponse(
-            ok: true,
-            message: "SwiftGetX native host is running",
-            version: nativeHostVersion
+            ok: compatibility.compatible,
+            message: compatibility.compatible
+                ? "SwiftGetX native host is running"
+                : (compatibility.message ?? "SwiftGetX browser integration is incompatible"),
+            version: nativeHostVersion,
+            protocolVersion: BrowserIntegrationCompatibility.protocolVersion,
+            minimumExtensionVersion: BrowserIntegrationCompatibility.minimumChromeExtensionVersion,
+            minimumNativeHostVersion: BrowserIntegrationCompatibility.minimumNativeHostVersion,
+            compatible: compatibility.compatible,
+            compatibilityMessage: compatibility.message
         )
         FileHandle.standardOutput.write(try NativeMessageHost.encodeResponse(response))
 
     case "download":
+        let compatibility = BrowserIntegrationCompatibility.extensionCompatibility(
+            extensionVersion: message.extensionVersion,
+            minimumNativeHostVersion: message.minimumNativeHostVersion,
+            protocolVersion: message.protocolVersion,
+            requiresExplicitVersion: true
+        )
+        guard compatibility.compatible else {
+            throw NativeHostError.incompatible(compatibility.message ?? "SwiftGetX browser integration is incompatible")
+        }
+
         guard let source = message.url, !source.isEmpty else {
             throw NativeHostError.invalidDownloadSource
         }
@@ -69,7 +92,12 @@ do {
             queued: decision.queued,
             requiresUserConfirmation: decision.requiresUserConfirmation,
             rejectedReason: decision.rejectedReason,
-            requestID: ackServer.handoff.requestID
+            requestID: ackServer.handoff.requestID,
+            protocolVersion: BrowserIntegrationCompatibility.protocolVersion,
+            minimumExtensionVersion: BrowserIntegrationCompatibility.minimumChromeExtensionVersion,
+            minimumNativeHostVersion: BrowserIntegrationCompatibility.minimumNativeHostVersion,
+            compatible: true,
+            compatibilityMessage: compatibility.message
         )
         FileHandle.standardOutput.write(try NativeMessageHost.encodeResponse(response))
 
@@ -77,9 +105,16 @@ do {
         throw NativeHostError.unsupportedAction(message.action)
     }
 } catch {
+    let isCompatibilityFailure = (error as? NativeHostError)?.isCompatibilityFailure == true
     let response = NativeMessageResponse(
         ok: false,
-        message: error.localizedDescription
+        message: error.localizedDescription,
+        version: nativeHostVersion,
+        protocolVersion: BrowserIntegrationCompatibility.protocolVersion,
+        minimumExtensionVersion: BrowserIntegrationCompatibility.minimumChromeExtensionVersion,
+        minimumNativeHostVersion: BrowserIntegrationCompatibility.minimumNativeHostVersion,
+        compatible: isCompatibilityFailure ? false : true,
+        compatibilityMessage: isCompatibilityFailure ? error.localizedDescription : nil
     )
     if let data = try? NativeMessageHost.encodeResponse(response) {
         FileHandle.standardOutput.write(data)
@@ -144,6 +179,12 @@ private enum NativeHostError: LocalizedError {
     case unsupportedAction(String)
     case invalidDownloadSource
     case openFailed
+    case incompatible(String)
+
+    var isCompatibilityFailure: Bool {
+        if case .incompatible = self { return true }
+        return false
+    }
 
     var errorDescription: String? {
         switch self {
@@ -155,6 +196,8 @@ private enum NativeHostError: LocalizedError {
             return "Invalid download source"
         case .openFailed:
             return "Unable to open SwiftGetX download URL"
+        case .incompatible(let message):
+            return message
         }
     }
 }

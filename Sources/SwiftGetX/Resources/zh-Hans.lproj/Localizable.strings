@@ -35,6 +35,8 @@
 "alert_allow_chrome_pairing_title" = "允许 Chrome 插件连接 SwiftGetX？";
 "alert_browser_pairing_rejected_message" = "SwiftGetX 没有在已支持的 Chromium 浏览器配置中找到匹配的 SwiftGetX 插件，已拒绝配对。\n\n插件 ID：%@";
 "alert_browser_pairing_rejected_title" = "无法验证浏览器插件";
+"alert_browser_pairing_incompatible_message" = "当前 SwiftGetX 浏览器插件与已安装 App 或 Native Host 不兼容。请更新 SwiftGetX 并重新安装插件包。";
+"alert_browser_pairing_incompatible_title" = "浏览器插件不兼容";
 "alert_chrome_pairing_rejected_message" = "SwiftGetX 没有在 Chrome 配置中找到匹配的 SwiftGetX 插件，已拒绝配对。\n\n插件 ID：%@";
 "alert_chrome_pairing_rejected_title" = "无法验证 Chrome 插件";
 "browser_bridge_missing_url" = "浏览器消息缺少下载地址";
@@ -54,6 +56,8 @@
 "browser_diagnostics_profile_path" = "配置路径：%@";
 "browser_diagnostics_sidebar_counts" = "%d 已配置 · %d 个插件 ID";
 "browser_diagnostics_supported_summary" = "%d 已检测 · %d 已支持 · %d 已配置";
+"browser_open_extension_release" = "安装扩展";
+"browser_open_extension_release_help" = "打开包含 Chrome 扩展产物的 SwiftGetX 最新发布页。";
 "browser_extensions_ready" = "Safari + Chrome 扩展已就绪";
 "browser_generic" = "浏览器";
 "browser_integration_section" = "浏览器集成";

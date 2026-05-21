@@ -88,11 +88,47 @@
   "nativeHostHealthy": {
     "message": "Native Host is running normally"
   },
+  "nativeHostIncompatible": {
+    "message": "SwiftGetX Native Host is not compatible with this extension. Update SwiftGetX and reinstall the extension."
+  },
   "nativeHostNoResponse": {
     "message": "Native Host did not respond"
   },
+  "nativeHostProtocolIncompatible": {
+    "message": "Native Host protocol $HOST$ is not compatible with extension protocol $EXTENSION$.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      },
+      "extension": {
+        "content": "$2"
+      }
+    }
+  },
   "nativeHostReturnedError": {
     "message": "Native Host returned an error"
+  },
+  "nativeHostTooOld": {
+    "message": "Native Host $CURRENT$ is older than the required $MINIMUM$.",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
+  },
+  "extensionTooOld": {
+    "message": "Extension $CURRENT$ is older than the required $MINIMUM$. Reinstall the current SwiftGetX extension.",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
   },
   "pairingOpenedDetail": {
     "message": "SwiftGetX has been opened. Allow extension pairing in the app, then check again."

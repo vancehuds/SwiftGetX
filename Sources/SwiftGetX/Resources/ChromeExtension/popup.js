@@ -305,6 +305,8 @@ async function checkConnection(options = {}) {
     if (response?.ok) {
       const version = response.version ? `v${response.version}` : "";
       setConnectionState("ok", i18n("connectionConnected"), version ? `Native Host ${version}` : i18n("nativeHostHealthy"));
+    } else if (response?.compatible === false) {
+      setConnectionState("error", i18n("connectionFailed"), response.compatibilityMessage || response.message || i18n("nativeHostIncompatible"));
     } else if (response?.setupOpened || response?.setupThrottled) {
       setConnectionState(
         "checking",

@@ -697,6 +697,12 @@ private struct BrowserIntegrationRow: View {
     @ViewBuilder
     private var actionButtons: some View {
         HStack(spacing: layout.value(6)) {
+            Link(
+                L10n.string("browser_open_extension_release"),
+                destination: URL(string: "https://github.com/vancehuds/SwiftGetX/releases/latest")!
+            )
+            .help(L10n.string("browser_open_extension_release_help"))
+
             if diagnostics.isRepairable {
                 Button(L10n.string("action_try_repair")) {
                     diagnostics.repair()

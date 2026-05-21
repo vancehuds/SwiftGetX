@@ -210,6 +210,18 @@ struct SwiftGetXApp: App {
     @MainActor
     private func handleBrowserSetupRequest(_ request: BrowserSetupRequest) {
         guard chromeNativeHostRegistrar.isSupportedBrowserName(request.browser) else { return }
+        let compatibility = BrowserIntegrationCompatibility.extensionCompatibility(
+            extensionVersion: request.version,
+            minimumNativeHostVersion: request.minimumNativeHostVersion,
+            protocolVersion: request.protocolVersion,
+            requiresExplicitVersion: true
+        )
+        guard compatibility.compatible else {
+            showBrowserCompatibilityRejectedAlert(
+                message: compatibility.message ?? L10n.string("alert_browser_pairing_incompatible_message")
+            )
+            return
+        }
 
         if chromeNativeHostRegistrar.isPairedExtensionID(request.extensionID) {
             _ = chromeNativeHostRegistrar.register()
@@ -261,6 +273,16 @@ struct SwiftGetXApp: App {
         let alert = NSAlert()
         alert.messageText = L10n.string("alert_browser_pairing_rejected_title")
         alert.informativeText = L10n.string("alert_browser_pairing_rejected_message", extensionID)
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.string("action_ok"))
+        alert.runModal()
+    }
+
+    @MainActor
+    private func showBrowserCompatibilityRejectedAlert(message: String) {
+        let alert = NSAlert()
+        alert.messageText = L10n.string("alert_browser_pairing_incompatible_title")
+        alert.informativeText = message
         alert.alertStyle = .warning
         alert.addButton(withTitle: L10n.string("action_ok"))
         alert.runModal()
@@ -430,7 +452,9 @@ enum DeepLinkParser {
         return BrowserSetupRequest(
             browser: browser,
             extensionID: extensionID,
-            version: queryValue("version", in: components)
+            version: queryValue("version", in: components),
+            protocolVersion: queryValue("protocolVersion", in: components).flatMap(Int.init),
+            minimumNativeHostVersion: queryValue("minimumNativeHostVersion", in: components)
         )
     }
 
@@ -477,6 +501,8 @@ struct BrowserSetupRequest: Equatable {
     var browser: String
     var extensionID: String
     var version: String?
+    var protocolVersion: Int?
+    var minimumNativeHostVersion: String?
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {

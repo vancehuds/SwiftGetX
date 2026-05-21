@@ -88,11 +88,47 @@
   "nativeHostHealthy": {
     "message": "Native Host 运行正常"
   },
+  "nativeHostIncompatible": {
+    "message": "SwiftGetX Native Host 与当前扩展不兼容。请更新 SwiftGetX 并重新安装扩展。"
+  },
   "nativeHostNoResponse": {
     "message": "Native Host 未响应"
   },
+  "nativeHostProtocolIncompatible": {
+    "message": "Native Host 协议 $HOST$ 与扩展协议 $EXTENSION$ 不兼容。",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      },
+      "extension": {
+        "content": "$2"
+      }
+    }
+  },
   "nativeHostReturnedError": {
     "message": "Native Host 返回错误"
+  },
+  "nativeHostTooOld": {
+    "message": "Native Host $CURRENT$ 低于所需版本 $MINIMUM$。",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
+  },
+  "extensionTooOld": {
+    "message": "扩展 $CURRENT$ 低于所需版本 $MINIMUM$。请重新安装当前 SwiftGetX 扩展。",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
   },
   "pairingOpenedDetail": {
     "message": "已打开 SwiftGetX，请在软件中允许插件配对后再次检查。"

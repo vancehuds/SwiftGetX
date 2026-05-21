@@ -24,7 +24,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/UI-SwiftUI-FF5A09.svg?style=flat&logo=swift" alt="UI: SwiftUI">
   <img src="https://img.shields.io/badge/Database-SwiftData-E34F26.svg?style=flat" alt="Database: SwiftData">
-  <img src="https://img.shields.io/badge/Engine-HTTP%20%2F%20libtorrent-darkviolet.svg?style=flat" alt="Engine: HTTP / libtorrent">
+  <img src="https://img.shields.io/badge/Engine-HTTP%20%2F%20SwiftTorrent-darkviolet.svg?style=flat" alt="Engine: HTTP / SwiftTorrent">
   <img src="https://img.shields.io/badge/Extensions-Chrome%20%2F%20Safari-8A2BE2.svg?style=flat&logo=googlechrome" alt="Extensions: Chrome / Safari">
 </p>
 
@@ -59,7 +59,7 @@
 *   **Decoupled Design**: Features a generic `TorrentEngineAdapter` protocol, isolating BT implementation details completely from SwiftData models and SwiftUI views.
 *   **Swift-Native Torrent Module**: A built-in, lightweight pure-Swift BT/DHT engine. Implements custom KRPC UDP search lookup, routing tables, Local Service Discovery (LSD), and Peer Exchange (PEX). Features zero C++ dependencies and compiles instantly.
 *   **Pure Swift Protocol Stack**: Custom-built Peer Wire Protocol binary framing engine (enforces maximum length limits to prevent buffer overflow attacks) with full BEP 9 / BEP 10 Magnet Extension support to query metadata directly from peers. Features integrated pure-Swift HTTP/UDP Tracker announcers.
-*   **Pluggable Physical BT Engine (libtorrent)**: Vendors a pinned source of `arvidn/libtorrent` v2.0.12 via a static `CSwiftGetXLibtorrent` C++ bridge. Activated dynamically by setting `SWIFTGETX_ENABLE_LIBTORRENT=1` for robust, professional-grade downloading.
+*   **Optional Reference BT Engine (libtorrent)**: Vendors a pinned source of `arvidn/libtorrent` v2.0.12 via a static `CSwiftGetXLibtorrent` C++ bridge. The default release and daily development path use SwiftTorrent; setting `SWIFTGETX_ENABLE_LIBTORRENT=1` enables the optional libtorrent reference adapter.
 *   **Fine-Grained Runtime Control**: Toggle DHT, PEX, and LSD options individually with custom DHT bootstrap routers. Supports real-time upload/download speed limits, sequential download prioritization, concurrent connection and upload slot limits, and seeding ratio enforcement.
 *   **Deep Health Snapshot & Diagnostics**: Displays metadata fetching progress, complete Peer lists (up to 100 peers monitored in real time), interactive Tracker tables (add, remove, or force reannounce), DHT routing metrics, and resume-data dirty state tracking.
 
@@ -137,7 +137,7 @@ If you prefer to run pre-built binaries directly without compiling from source, 
 
 *   **Operating System**: macOS 14 (Sonoma) or newer.
 *   **Toolchain**: Swift 6.0 Compiler / Xcode 15+.
-*   **Native Torrent Requirements** (only needed when enabling physical libtorrent):
+*   **Optional libtorrent reference dependencies** (not needed for normal builds or releases; only needed with `SWIFTGETX_ENABLE_LIBTORRENT=1`):
     ```sh
     brew install cmake boost openssl
     ```
@@ -147,7 +147,7 @@ If you prefer to run pre-built binaries directly without compiling from source, 
 ## 🚀 Quick Start (For Developers compiling from Source)
 
 ### One-command Local Build and Test
-The repository includes a local development entrypoint. By default, it runs the lightweight build and test suite with the pure-Swift BT engine (mock and fallback setups are the default):
+The repository includes a local development entrypoint. By default, it builds and tests the pure SwiftTorrent path without Homebrew, CMake, Boost, OpenSSL, or libtorrent:
 
 ```sh
 Scripts/local-build.sh
@@ -162,10 +162,10 @@ Scripts/local-build.sh --skip-tests
 # Release build
 Scripts/local-build.sh --release
 
-# Automatically check and install Homebrew dependencies (cmake, boost, openssl)
+# Install optional native libtorrent reference dependencies (cmake, boost, openssl)
 Scripts/local-build.sh --install-deps
 
-# Build and test with Native libtorrent enabled
+# Build and test with optional Native libtorrent enabled
 Scripts/local-build.sh --native-libtorrent
 
 # Assemble SwiftGetX.app, SwiftGetX.dmg and automatically package the Chrome Extension
@@ -178,8 +178,8 @@ Scripts/local-build.sh --chrome-extension
 Scripts/local-build.sh --install-native-host <your-extension-id>
 ```
 
-### 1. Default Compilation (Swift-Only HTTP Mode)
-To build and test the codebase instantly without external dependencies:
+### 1. Default Compilation (SwiftTorrent)
+To build and test the codebase instantly without external C++ dependencies:
 
 ```sh
 # 1. Compile the app and Native Messaging bridge
@@ -192,8 +192,8 @@ swift run SwiftGetX
 swift test
 ```
 
-### 2. Complete Compilation (With Native BitTorrent Core)
-To compile the C++ libtorrent static bridge:
+### 2. Optional Native libtorrent Reference Build
+To compile the optional C++ libtorrent static bridge:
 
 ```sh
 # 1. Pull libtorrent's required submodules
@@ -205,7 +205,7 @@ Scripts/build-libtorrent.sh
 # 3. Build the app with the libtorrent feature flag enabled
 SWIFTGETX_ENABLE_LIBTORRENT=1 swift build
 
-# 4. Run native BT integration tests
+# 4. Run optional native BT integration tests
 SWIFTGETX_ENABLE_LIBTORRENT=1 swift test
 ```
 > [!TIP]
@@ -253,7 +253,7 @@ Scripts/package-dmg.sh release dist --dmg
 ### GitHub Actions Workflows
 Two automated workflows are supplied in `.github/workflows/`:
 *   `build.yml`: Compiles, tests, and builds a downloadable DMG artifact for every branch push or pull request.
-*   `release.yml`: Runs when a version tag (`v*`) is pushed. Automatically compiles the release build, signs files, builds the DMG, and drafts a GitHub Release containing the final DMG and extension distribution ZIP/CRX files.
+*   `release.yml`: Runs when a version tag (`v*`) is pushed. Automatically compiles the release build, signs files, builds the DMG, and drafts a GitHub Release containing the final DMG, extension distribution ZIP/CRX files, and `SwiftGetX-Chrome.release.json` metadata.
 
 ---
 
@@ -281,7 +281,7 @@ Before distributing your custom build of SwiftGetX, note these critical macOS pl
 
 ## 🤝 Contributing
 
-We welcome all contributions! Whether it is fixing micro-bugs, updating responsive UI widgets, or optimizing BT resume states:
+We welcome all contributions, whether it is fixing micro-bugs, updating responsive UI widgets, or improving SwiftTorrent behavior:
 
 1.  Keep indentation at **4 spaces** conforming to idiomatic Swift patterns.
 2.  Annotate persistent models or views interacting with SwiftData or observable states with `@MainActor`.

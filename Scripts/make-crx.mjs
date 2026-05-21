@@ -46,13 +46,26 @@ const header = protobufMessage([
   bytesField(2, keyProof),
   bytesField(10000, signedHeaderData)
 ]);
+const computedExtensionID = extensionID(crxID);
+const expectedExtensionID = process.env.SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID
+  || process.env.CHROME_EXTENSION_ID
+  || "";
+if (expectedExtensionID && computedExtensionID !== expectedExtensionID.trim().toLowerCase()) {
+  console.error(`CRX ID mismatch: expected ${expectedExtensionID}, got ${computedExtensionID}`);
+  process.exit(65);
+}
+
 const fileHeader = Buffer.alloc(12);
 fileHeader.write("Cr24", 0, "ascii");
 fileHeader.writeUInt32LE(3, 4);
 fileHeader.writeUInt32LE(header.length, 8);
 writeFileSync(crxPath, Buffer.concat([fileHeader, header, archive]));
 
-console.log(`CRX ID: ${extensionID(crxID)}`);
+if (process.env.SWIFTGETX_CHROME_EXTENSION_ID_FILE) {
+  writeFileSync(process.env.SWIFTGETX_CHROME_EXTENSION_ID_FILE, `${computedExtensionID}\n`);
+}
+
+console.log(`CRX ID: ${computedExtensionID}`);
 console.log(`Key: ${keySource}`);
 console.log(`Input: ${basename(zipPath)}`);
 console.log(`Output: ${basename(crxPath)}`);

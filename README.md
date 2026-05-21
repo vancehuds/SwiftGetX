@@ -24,12 +24,12 @@
 <p align="center">
   <img src="https://img.shields.io/badge/UI-SwiftUI-FF5A09.svg?style=flat&logo=swift" alt="UI: SwiftUI">
   <img src="https://img.shields.io/badge/Database-SwiftData-E34F26.svg?style=flat" alt="Database: SwiftData">
-  <img src="https://img.shields.io/badge/Engine-HTTP%20%2F%20libtorrent-darkviolet.svg?style=flat" alt="Engine: HTTP / libtorrent">
+  <img src="https://img.shields.io/badge/Engine-HTTP%20%2F%20SwiftTorrent-darkviolet.svg?style=flat" alt="Engine: HTTP / SwiftTorrent">
   <img src="https://img.shields.io/badge/Extensions-Chrome%20%2F%20Safari-8A2BE2.svg?style=flat&logo=googlechrome" alt="Extensions: Chrome / Safari">
 </p>
 
 
-**SwiftGetX** 是一个面向 macOS 14+ 的轻量原生下载管理器原型，采用 **SwiftUI**、**SwiftData** 和 **Swift Package Manager** 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及可选的 BT/libtorrent 下载能力。
+**SwiftGetX** 是一个面向 macOS 14+ 的轻量原生下载管理器原型，采用 **SwiftUI**、**SwiftData** 和 **Swift Package Manager** 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及默认纯 Swift 的 BT 下载能力。
 
 ---
 
@@ -58,7 +58,7 @@
 *   **隔离设计**：定义了高度抽象的 `TorrentEngineAdapter` 接口协议，将 BT 引擎的具体实现与主 App 彻底隔离。
 *   **Swift 原生极速 BT 模块**：内置纯 Swift 编写的极速 BT/DHT 功能。自主实现了基于 KRPC 的 UDP 磁力链接寻址、DHT 路由表管理、LSD 本地服务发现及 PEX 节点交换，零 C++ 依赖极速启动并探测 Peer。
 *   **协议栈纯 Swift 实现**：自主开发了 Peer Wire Protocol 原生二进制协议栈（具备最大数据帧长限制以防内存溢出攻击），并完美实现 BEP 9 / BEP 10 磁力链接扩展协议，支持直接与 Peer 进行 Metadata 元数据交换，实现“无种子”情况下的快速磁力解析。同时内置了纯 Swift 编写的 UDP 与 HTTP Tracker 客户端，实现主动 Tracker 公告宣告。
-*   **可插拔式物理 BT 引擎 (libtorrent)**：仓库内置了 `arvidn/libtorrent` v2.0.12 源码包，并通过 `CSwiftGetXLibtorrent` 提供 C++ 封装。默认使用轻量级 Swift 原生模块编译；设置 `SWIFTGETX_ENABLE_LIBTORRENT=1` 即可激活重量级 libtorrent 物理 BT/磁力下载引擎。
+*   **可选参考 BT 引擎 (libtorrent)**：仓库内置了 `arvidn/libtorrent` v2.0.12 源码包，并通过 `CSwiftGetXLibtorrent` 提供 C++ 封装。默认发行与日常构建使用纯 SwiftTorrent 路径；只有设置 `SWIFTGETX_ENABLE_LIBTORRENT=1` 时才会启用可选 libtorrent 参考实现。
 *   **精细化运行时控制**：支持一键开关 DHT, PEX, LSD 协议，支持自定义引导路由节点。提供每秒上传/下载限速、顺序下载模式、最大连接数/上传槽限制、种子分享率限速等运行时配置。
 *   **深度健康快照与监控**：实时呈现涵盖 Metadata 获取状态、已连接/正在连接 Peer 列表（最高支持 100 个 Peer 监视）、Tracker 详细列表（支持重新公告、手动增删）、DHT 节点数及 resume 数据脏状态的全面健康快照。
 
@@ -137,7 +137,7 @@ graph TD
 
 *   **运行系统**：macOS 14 (Sonoma) 或更高版本。
 *   **编译环境**：Swift 6.0 Toolchain / Xcode 15+。
-*   **构建 BT 引擎依赖**（仅在启用 libtorrent 时需要）：
+*   **可选 libtorrent 参考实现依赖**（普通构建/发行不需要，仅在启用 `SWIFTGETX_ENABLE_LIBTORRENT=1` 时需要）：
     ```sh
     brew install cmake boost openssl
     ```
@@ -162,7 +162,7 @@ Scripts/local-build.sh --skip-tests
 # Release 构建
 Scripts/local-build.sh --release
 
-# 一键安装编译与打包依赖（cmake boost openssl）
+# 一键安装可选 native libtorrent 参考实现依赖（cmake boost openssl）
 Scripts/local-build.sh --install-deps
 
 # 启用重量级 Native libtorrent 引擎后构建并测试
@@ -178,8 +178,8 @@ Scripts/local-build.sh --chrome-extension
 Scripts/local-build.sh --install-native-host <your-extension-id>
 ```
 
-### 1. 基础构建（极速开发模式 - 默认禁用 BT）
-为了能让任何开发者在拿到仓库的 3 秒内成功编译并跑通，SwiftGetX 默认采用**占位适配器模式**，此时**完全不需要**下载复杂的 C++ 依赖：
+### 1. 基础构建（默认 SwiftTorrent）
+SwiftGetX 默认采用纯 SwiftTorrent 引擎，此时**完全不需要**下载复杂的 C++ 依赖：
 
 ```sh
 # 1. 编译主 App 与 Native Host
@@ -192,8 +192,8 @@ swift run SwiftGetX
 swift test
 ```
 
-### 2. 进阶构建（激活 Native 物理 BT/磁力下载引擎）
-要启用真实的物理 BT 引擎，需要编译内置的 `libtorrent` C++ 封装：
+### 2. 进阶构建（启用可选 native libtorrent 参考实现）
+要启用可选的 libtorrent 对照/参考实现，需要编译内置的 `libtorrent` C++ 封装：
 
 ```sh
 # 1. 自动拉取 libtorrent 依赖的子模块
@@ -280,7 +280,7 @@ Scripts/package-dmg.sh release dist --dmg
 
 ## 🤝 参与贡献
 
-我们极其欢迎任何形式的贡献，无论是反馈 Bug、改进 UI，还是优化 libtorrent 的 Resume Data 机制！
+我们欢迎任何形式的贡献，无论是反馈 Bug、改进 UI，还是改进 SwiftTorrent 行为！
 
 1.  请确保代码保持 **4 空格缩进**，遵守 idiomatic Swift 风格。
 2.  对所有状态、SwiftData 或持久层变更，标注 `@MainActor` 以防止并发数据隔离碰撞。

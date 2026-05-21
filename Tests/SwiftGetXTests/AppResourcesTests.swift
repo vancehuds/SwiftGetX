@@ -21,6 +21,19 @@ struct AppResourcesTests {
         ))
     }
 
+    @Test("bundles acknowledgements resource with release dependencies")
+    func bundlesAcknowledgementsResourceWithReleaseDependencies() throws {
+        let acknowledgementsURL = try #require(AppResources.url(forResource: "Acknowledgements", withExtension: "md"))
+        let text = try String(contentsOf: acknowledgementsURL, encoding: .utf8)
+
+        #expect(text.contains("Sparkle"))
+        #expect(text.contains("libtorrent"))
+        #expect(text.contains("Boost"))
+        #expect(text.contains("OpenSSL"))
+        #expect(text.contains("SWIFTGETX_ENABLE_LIBTORRENT=1"))
+        #expect(text.contains("default SwiftTorrent release path"))
+    }
+
     @Test("AppInfo declares torrent files and Services input")
     func appInfoDeclaresTorrentFilesAndServicesInput() throws {
         let appInfoURL = try #require(AppResources.url(forResource: "AppInfo", withExtension: "plist"))

@@ -62,6 +62,7 @@ dGhlIHB1YmxpYyBrZXkgZ29lcyBoZXJl
 |---|---|
 | `SPARKLE_EDDSA_PRIVATE_KEY` | Sparkle EdDSA 私钥，用于在 CI 中签名更新包 |
 | `CHROME_EXTENSION_KEY_BASE64` | Chrome 扩展固定私钥，用于生成稳定 ID 的 CRX |
+| `CHROME_EXTENSION_ID` | 由固定私钥推导出的 Chrome 扩展固定 ID，CI 会校验 CRX ID 必须匹配 |
 | `APPLE_DEVELOPER_ID_CERTIFICATE_BASE64` | Developer ID Application 证书 `.p12` 的 base64 内容 |
 | `APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD` | 上述 `.p12` 证书密码 |
 | `APPLE_DEVELOPER_ID_APPLICATION_IDENTITY` | `codesign` 使用的 Developer ID Application 身份名称 |
@@ -70,7 +71,7 @@ dGhlIHB1YmxpYyBrZXkgZ29lcyBoZXJl
 | `APPLE_NOTARY_ISSUER_ID` | App Store Connect Issuer ID |
 | `APPLE_NOTARY_KEY` 或 `APPLE_NOTARY_KEY_BASE64` | Notary API `.p8` 私钥明文或 base64 内容 |
 
-`release.yml` 在运行测试和打包前会执行 `Scripts/validate-release.sh environment`。缺少以上必需 secret、Sparkle key 回退到占位值、或 feed URL 不合规时，release workflow 会明确失败。
+`release.yml` 在运行测试和打包前会执行 `Scripts/validate-release.sh environment`。缺少以上必需 secret、Sparkle key 回退到占位值、Chrome 扩展固定 ID 缺失、或 feed URL 不合规时，release workflow 会明确失败。
 
 ## 3. 更新发布流程
 
@@ -86,7 +87,9 @@ dGhlIHB1YmxpYyBrZXkgZ29lcyBoZXJl
 8. 使用 EdDSA 私钥签名 DMG
 9. 生成 `appcast.xml`（包含版本号、下载地址、签名和 release notes 链接）
 10. 将 `appcast.xml` 推送到 `gh-pages` 分支
-11. 创建 GitHub Release 并上传 DMG/Chrome 扩展
+11. 创建 GitHub Release 并上传 DMG/Chrome 扩展以及扩展 release metadata
+
+Chrome Web Store 上传路径和固定 ID 策略见 `Docs/ChromeExtensionDistribution.md`。当前 workflow 产出可上传到 Web Store 的 ZIP，但不自动调用 Web Store API，因为仓库不假设存在商店发布凭据。
 
 ### 用户端体验
 

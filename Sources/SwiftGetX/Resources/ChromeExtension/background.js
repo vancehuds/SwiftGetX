@@ -1,5 +1,7 @@
 const NATIVE_HOST_NAME = "com.swiftgetx.native";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
+const BROWSER_PROTOCOL_VERSION = 1;
+const MIN_NATIVE_HOST_VERSION = "0.2.0";
 const NATIVE_HEALTH_CHECK_ALARM = "swiftgetx-native-health-check";
 const NATIVE_HEALTH_CHECK_PERIOD_MINUTES = 30;
 const NATIVE_SETUP_RETRY_TIMEOUT_MS = 8000;
@@ -558,7 +560,10 @@ async function sendToSwiftGetX(payload, options = {}) {
     sourcePageTitle: payload.sourcePageTitle,
     sourcePageUrl: payload.sourcePageUrl,
     source: payload.source,
-    context: buildBrowserContext(payload)
+    context: buildBrowserContext(payload),
+    extensionVersion: EXTENSION_VERSION,
+    minimumNativeHostVersion: MIN_NATIVE_HOST_VERSION,
+    protocolVersion: BROWSER_PROTOCOL_VERSION
   };
 
   let result = await sendNativeMessage(message);
@@ -589,7 +594,7 @@ async function sendToSwiftGetX(payload, options = {}) {
     markSuccess();
   } else {
     markFailure(result.message || i18n("errorTaskRejected"));
-    if (allowSetup) {
+    if (allowSetup && result.compatible !== false) {
       repairNativeHost(payload.source || "download-rejected");
     }
   }
@@ -597,6 +602,8 @@ async function sendToSwiftGetX(payload, options = {}) {
   return {
     ok: result.ok,
     message: result.message || (result.ok ? i18n("sentToSwiftGetX") : i18n("sendFailed")),
+    compatible: result.compatible,
+    compatibilityMessage: result.compatibilityMessage,
     response: result.response
   };
 }
@@ -1081,6 +1088,8 @@ async function openBrowserSetup(reason = "repair", options = {}) {
   setupURL.searchParams.set("browser", "Chrome");
   setupURL.searchParams.set("extensionID", chrome.runtime.id);
   setupURL.searchParams.set("version", EXTENSION_VERSION);
+  setupURL.searchParams.set("protocolVersion", String(BROWSER_PROTOCOL_VERSION));
+  setupURL.searchParams.set("minimumNativeHostVersion", MIN_NATIVE_HOST_VERSION);
   setupURL.searchParams.set("reason", reason);
 
   return new Promise((resolve) => {
@@ -1116,16 +1125,103 @@ function sendNativeMessage(message) {
         return;
       }
 
-      const ok = response?.ok !== false;
+      const compatibility = nativeHostCompatibility(response);
+      const ok = response?.ok !== false && compatibility.compatible;
       resolve({
         ok,
         runtimeError: false,
-        message: response?.message || (ok ? i18n("connected") : i18n("nativeHostReturnedError")),
+        message: compatibility.message || response?.message || (ok ? i18n("connected") : i18n("nativeHostReturnedError")),
         version: response?.version,
+        protocolVersion: response?.protocolVersion,
+        minimumExtensionVersion: response?.minimumExtensionVersion,
+        minimumNativeHostVersion: response?.minimumNativeHostVersion,
+        compatible: compatibility.compatible,
+        compatibilityMessage: compatibility.message,
         response
       });
     });
   });
+}
+
+function nativeHostCompatibility(response) {
+  if (!response) {
+    return {
+      compatible: false,
+      message: i18n("nativeHostNoResponse")
+    };
+  }
+
+  if (response.compatible === false) {
+    return {
+      compatible: false,
+      message: response.compatibilityMessage || response.message || i18n("nativeHostIncompatible")
+    };
+  }
+
+  if (!isVersionAtLeast(response.version, MIN_NATIVE_HOST_VERSION)) {
+    return {
+      compatible: false,
+      message: i18n("nativeHostTooOld", [response.version || "unknown", MIN_NATIVE_HOST_VERSION])
+    };
+  }
+
+  if (Number(response.protocolVersion) !== BROWSER_PROTOCOL_VERSION) {
+    return {
+      compatible: false,
+      message: i18n("nativeHostProtocolIncompatible", [
+        String(response.protocolVersion ?? "missing"),
+        String(BROWSER_PROTOCOL_VERSION)
+      ])
+    };
+  }
+
+  if (response.minimumExtensionVersion
+      && !isVersionAtLeast(EXTENSION_VERSION, response.minimumExtensionVersion)) {
+    return {
+      compatible: false,
+      message: i18n("extensionTooOld", [EXTENSION_VERSION, response.minimumExtensionVersion])
+    };
+  }
+
+  return {
+    compatible: true,
+    message: response.compatibilityMessage
+  };
+}
+
+function isVersionAtLeast(version, minimumVersion) {
+  const left = versionComponents(version);
+  const right = versionComponents(minimumVersion);
+  if (!left || !right) {
+    return false;
+  }
+
+  const count = Math.max(left.length, right.length);
+  for (let index = 0; index < count; index += 1) {
+    const leftValue = left[index] || 0;
+    const rightValue = right[index] || 0;
+    if (leftValue > rightValue) {
+      return true;
+    }
+    if (leftValue < rightValue) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function versionComponents(version) {
+  const text = String(version || "").trim().replace(/^v/i, "");
+  if (!text) {
+    return undefined;
+  }
+
+  const parts = text
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((part) => Number.parseInt(part, 10));
+  return parts.length > 0 && parts.every(Number.isFinite) ? parts : undefined;
 }
 
 async function waitForNativeHost(timeoutMs) {
@@ -1150,13 +1246,19 @@ async function waitForNativeHost(timeoutMs) {
 
 async function pingSwiftGetX() {
   const result = await sendNativeMessage({
-    action: "ping"
+    action: "ping",
+    extensionVersion: EXTENSION_VERSION,
+    minimumNativeHostVersion: MIN_NATIVE_HOST_VERSION,
+    protocolVersion: BROWSER_PROTOCOL_VERSION
   });
 
   return {
     ok: result.ok,
     message: result.message,
-    version: result.version
+    version: result.version,
+    protocolVersion: result.protocolVersion,
+    compatible: result.compatible,
+    compatibilityMessage: result.compatibilityMessage
   };
 }
 

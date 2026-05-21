@@ -9,6 +9,9 @@ public struct BrowserDownloadMessage: Codable, Sendable {
     public var sourcePageUrl: String?
     public var source: String?
     public var context: BrowserDownloadContext?
+    public var extensionVersion: String?
+    public var minimumNativeHostVersion: String?
+    public var protocolVersion: Int?
 
     public init(
         action: String,
@@ -18,7 +21,10 @@ public struct BrowserDownloadMessage: Codable, Sendable {
         sourcePageTitle: String? = nil,
         sourcePageUrl: String? = nil,
         source: String? = nil,
-        context: BrowserDownloadContext? = nil
+        context: BrowserDownloadContext? = nil,
+        extensionVersion: String? = nil,
+        minimumNativeHostVersion: String? = nil,
+        protocolVersion: Int? = nil
     ) {
         self.action = action
         self.url = url
@@ -28,5 +34,8 @@ public struct BrowserDownloadMessage: Codable, Sendable {
         self.sourcePageUrl = sourcePageUrl
         self.source = source
         self.context = context
+        self.extensionVersion = extensionVersion
+        self.minimumNativeHostVersion = minimumNativeHostVersion
+        self.protocolVersion = protocolVersion
     }
 }

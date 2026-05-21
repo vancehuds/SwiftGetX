@@ -41,8 +41,8 @@ Options/选项:
                                 编译后安装 Chrome 原生消息宿主。若未指定扩展 ID 则尝试自动发现。
   --extension-id <id>           Chrome extension ID for --install-native-host.
                                 用于 --install-native-host 的 Chrome 扩展 ID。
-  --install-deps                Install Homebrew packaging dependencies (cmake boost openssl).
-                                自动安装 Homebrew 编译与打包依赖（cmake boost openssl）。
+  --install-deps                Install optional native libtorrent dependencies (cmake boost openssl).
+                                自动安装可选 native libtorrent 依赖（cmake boost openssl）。
   --clean                       Run swift package clean before building.
                                 编译前清理 SwiftPM 缓存。
   --run                         Run SwiftGetX after build/test/package steps complete.
@@ -191,7 +191,7 @@ printf 'Configuration: %s\n' "$CONFIGURATION"
 if [[ "$ENABLE_NATIVE_LIBTORRENT" == "1" ]]; then
   printf 'Torrent engine: native libtorrent\n'
 else
-  printf 'Torrent engine: lightweight fallback\n'
+  printf 'Torrent engine: SwiftTorrent\n'
 fi
 
 if [[ "$CLEAN_BUILD" == "1" ]]; then

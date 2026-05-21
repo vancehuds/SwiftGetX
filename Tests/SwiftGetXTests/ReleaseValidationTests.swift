@@ -55,6 +55,7 @@ struct ReleaseValidationTests {
         #expect(script.contains("APPLE_NOTARY_KEY_ID"))
         #expect(script.contains("SPARKLE_EDDSA_PRIVATE_KEY"))
         #expect(script.contains("CHROME_EXTENSION_KEY_BASE64"))
+        #expect(script.contains("CHROME_EXTENSION_ID"))
         #expect(script.contains("SUPublicEDKey is still the placeholder"))
         #expect(script.contains("Sparkle.framework"))
         #expect(script.contains("SwiftGetXNativeHost"))
@@ -79,6 +80,10 @@ struct ReleaseValidationTests {
         #expect(workflow.contains("Scripts/validate-release.sh dmg dist/SwiftGetX.dmg"))
         #expect(workflow.contains("SWIFTGETX_RELEASE_NOTES_URL"))
         #expect(workflow.contains("SPARKLE_EDDSA_PRIVATE_KEY"))
+        #expect(workflow.contains("SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID"))
+        #expect(workflow.contains("secrets.CHROME_EXTENSION_ID"))
+        #expect(workflow.contains("SwiftGetX-Chrome.release.json"))
+        #expect(!workflow.contains("Install native packaging dependencies"))
     }
 
     @Test("build workflow keeps local-safe Sparkle validation")
@@ -88,6 +93,8 @@ struct ReleaseValidationTests {
         #expect(workflow.contains("Validate Sparkle configuration"))
         #expect(workflow.contains("Scripts/validate-release.sh sparkle"))
         #expect(!workflow.contains("Scripts/validate-release.sh environment"))
+        #expect(!workflow.contains("Install native packaging dependencies"))
+        #expect(workflow.contains("SwiftGetX-Chrome.release.json"))
     }
 
     @Test("appcast generation wires release notes")
@@ -113,6 +120,53 @@ struct ReleaseValidationTests {
         #expect(script.contains("Scripts/validate-release.sh app"))
         #expect(script.contains("Scripts/validate-release.sh dmg"))
         #expect(script.contains("codesign --force --deep --sign -"))
+        #expect(script.contains("Acknowledgements.md"))
+        #expect(script.contains("SWIFTGETX_ENABLE_LIBTORRENT"))
+        #expect(!script.contains("if [[ \"${SWIFTGETX_DISABLE_LIBTORRENT:-}\" != \"1\" ]]; then"))
+    }
+
+    @Test("Chrome extension packaging enforces fixed release ID")
+    func chromeExtensionPackagingEnforcesFixedReleaseID() throws {
+        let packageScript = try readText("Scripts/package-chrome-extension.sh")
+        let crxScript = try readText("Scripts/make-crx.mjs")
+
+        #expect(packageScript.contains("SWIFTGETX_RELEASE_STRICT"))
+        #expect(packageScript.contains("SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID"))
+        #expect(packageScript.contains("CHROME_EXTENSION_ID"))
+        #expect(packageScript.contains("SwiftGetX-Chrome.release.json"))
+        #expect(packageScript.contains("SWIFTGETX_CHROME_EXTENSION_ID_FILE"))
+        #expect(crxScript.contains("CRX ID mismatch"))
+        #expect(crxScript.contains("SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID"))
+        let mismatchIndex = try #require(crxScript.range(of: "CRX ID mismatch")?.lowerBound)
+        let crxWriteIndex = try #require(crxScript.range(of: "writeFileSync(crxPath")?.lowerBound)
+        #expect(mismatchIndex < crxWriteIndex)
+    }
+
+    @Test("extension distribution docs cover Web Store fixed ID compatibility and acknowledgements")
+    func extensionDistributionDocsCoverReleaseRequirements() throws {
+        let distribution = try readText("Docs/ChromeExtensionDistribution.md")
+        let acknowledgements = try readText("Docs/Acknowledgements.md")
+        let browser = try readText("Docs/BrowserIntegration.md")
+        let torrent = try readText("Docs/TorrentEngine.md")
+        let readme = try readText("README.md")
+        let englishReadme = try readText("README.en.md")
+
+        #expect(distribution.contains("Chrome Web Store"))
+        #expect(distribution.contains("CHROME_EXTENSION_ID"))
+        #expect(distribution.contains("Compatibility Matrix"))
+        #expect(distribution.contains("Native Host 0.2.0"))
+        #expect(browser.contains("extensionVersion"))
+        #expect(browser.contains("minimumNativeHostVersion"))
+        #expect(acknowledgements.contains("Sparkle"))
+        #expect(acknowledgements.contains("libtorrent"))
+        #expect(acknowledgements.contains("Boost"))
+        #expect(acknowledgements.contains("OpenSSL"))
+        #expect(torrent.contains("optional development/reference path"))
+        #expect(readme.contains("HTTP%20%2F%20SwiftTorrent"))
+        #expect(readme.contains("可选 libtorrent 参考实现依赖"))
+        #expect(englishReadme.contains("HTTP%20%2F%20SwiftTorrent"))
+        #expect(englishReadme.contains("Optional libtorrent reference dependencies"))
+        #expect(englishReadme.contains("SwiftGetX-Chrome.release.json"))
     }
 
     private func readText(_ relativePath: String) throws -> String {

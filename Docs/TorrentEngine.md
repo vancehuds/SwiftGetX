@@ -1,12 +1,12 @@
 # Torrent Engine Boundary
 
-`TorrentDownloadEngine` is wired into the same coordinator and UI as HTTP tasks. The libtorrent binding is isolated behind `TorrentEngineAdapter`; default SwiftPM builds use the lightweight placeholder fallback, and `SWIFTGETX_ENABLE_LIBTORRENT=1` enables the native adapter after the static library is built.
+`TorrentDownloadEngine` is wired into the same coordinator and UI as HTTP tasks. The default release and SwiftPM build path uses the pure SwiftTorrent engine. The libtorrent binding is isolated behind `TorrentEngineAdapter` and remains an optional development/reference path enabled only with `SWIFTGETX_ENABLE_LIBTORRENT=1` after the static library is built.
 
-## Native Build
+## Optional Native Reference Build
 
 The upstream libtorrent source is fetched into `Vendor/libtorrent` from `arvidn/libtorrent` and pinned in `Vendor/libtorrent.version`.
 
-The C wrapper surface lives in `Sources/CSwiftGetXLibtorrent`. Build libtorrent and the wrapper with:
+The C wrapper surface lives in `Sources/CSwiftGetXLibtorrent`. This path is not required for normal users, ordinary CI builds, or release packaging. Build libtorrent and the wrapper only when you need the optional reference adapter:
 
 ```sh
 brew install cmake boost openssl
@@ -46,7 +46,7 @@ protocol TorrentEngineAdapter: Sendable {
 
 The adapter should translate libtorrent state into `DownloadSnapshot` so SwiftUI and SwiftData remain independent from libtorrent-specific types.
 
-## Current Native Capabilities
+## Current SwiftTorrent Capabilities
 
 - Magnet and `.torrent` input.
 - DHT, PEX, LSD, and tracker updates, with DHT/PEX/LSD applied to each torrent as runtime flags.
@@ -64,4 +64,4 @@ The adapter should translate libtorrent state into `DownloadSnapshot` so SwiftUI
 ## Remaining Torrent Hardening
 
 - Add real-world magnet and `.torrent` integration tests with controlled fixtures.
-- Package OpenSSL/libtorrent artifacts in a signed, deployment-target-aligned app bundle.
+- Keep optional libtorrent, Boost, OpenSSL, and CMake requirements out of ordinary release paths unless a release explicitly opts into the reference adapter again.

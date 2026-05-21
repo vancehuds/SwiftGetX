@@ -69,6 +69,11 @@ public struct NativeMessageResponse: Codable, Equatable, Sendable {
     public var requiresUserConfirmation: Bool?
     public var rejectedReason: String?
     public var requestID: String?
+    public var protocolVersion: Int?
+    public var minimumExtensionVersion: String?
+    public var minimumNativeHostVersion: String?
+    public var compatible: Bool?
+    public var compatibilityMessage: String?
 
     public init(
         ok: Bool,
@@ -78,7 +83,12 @@ public struct NativeMessageResponse: Codable, Equatable, Sendable {
         queued: Bool? = nil,
         requiresUserConfirmation: Bool? = nil,
         rejectedReason: String? = nil,
-        requestID: String? = nil
+        requestID: String? = nil,
+        protocolVersion: Int? = nil,
+        minimumExtensionVersion: String? = nil,
+        minimumNativeHostVersion: String? = nil,
+        compatible: Bool? = nil,
+        compatibilityMessage: String? = nil
     ) {
         self.ok = ok
         self.message = message
@@ -88,6 +98,11 @@ public struct NativeMessageResponse: Codable, Equatable, Sendable {
         self.requiresUserConfirmation = requiresUserConfirmation
         self.rejectedReason = rejectedReason
         self.requestID = requestID
+        self.protocolVersion = protocolVersion
+        self.minimumExtensionVersion = minimumExtensionVersion
+        self.minimumNativeHostVersion = minimumNativeHostVersion
+        self.compatible = compatible
+        self.compatibilityMessage = compatibilityMessage
     }
 }
 

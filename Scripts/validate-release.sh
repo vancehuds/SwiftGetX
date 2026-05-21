@@ -95,6 +95,7 @@ validate_environment() {
     require_any_env "Apple notary API key" APPLE_NOTARY_KEY_PATH APPLE_NOTARY_KEY APPLE_NOTARY_KEY_BASE64
     require_env SPARKLE_EDDSA_PRIVATE_KEY
     require_any_env "Chrome extension signing key" CHROME_EXTENSION_KEY_BASE64 SWIFTGETX_CHROME_EXTENSION_KEY_BASE64
+    require_any_env "Chrome extension fixed ID" CHROME_EXTENSION_ID SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID
 
     validate_sparkle_config
     printf 'Release environment validation passed.\n'

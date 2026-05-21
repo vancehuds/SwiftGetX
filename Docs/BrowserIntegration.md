@@ -19,7 +19,7 @@ SwiftGetX uses explicit browser handoff plus an opt-out Chrome download takeover
 - Build the app and native host with `swift build`.
 - SwiftGetX automatically installs and repairs the Chromium Native Messaging host manifest when the app starts, becomes active, or receives a browser setup deep link from the extension. Normal users do not need to copy extension IDs or run scripts.
 - The registrar scans supported Chromium profiles, including Google Chrome and ChatGPT Atlas, for installed extensions named `SwiftGetX` with the `nativeMessaging` permission. It preserves existing valid origins, removes placeholders/invalid origins, and writes the manifest to the matching browser's Native Messaging host directory.
-- If the extension cannot reach the native host during a user-initiated send, it opens `swiftgetx://browser-setup?browser=Chrome&extensionID=<id>&version=<version>`. The app only accepts the hint if the same extension ID is verified in the local Chrome profile. Download takeover failures do not open this setup deep link; Chrome continues the original download.
+- If the extension cannot reach the native host during a user-initiated send, it opens `swiftgetx://browser-setup?browser=Chrome&extensionID=<id>&version=<version>&protocolVersion=<version>&minimumNativeHostVersion=<version>`. The app only accepts the hint if the same extension ID is verified in the local Chrome profile and the extension/app/native-host compatibility checks pass. Download takeover failures do not open this setup deep link; Chrome continues the original download.
 - For development or troubleshooting, the manifest can still be installed manually with:
 
 ```sh
@@ -34,7 +34,9 @@ Scripts/install-native-host.sh .build/arm64-apple-macosx/debug/SwiftGetXNativeHo
 Scripts/package-chrome-extension.sh
 ```
 
-The CRX packager creates a temporary signing key when no key is provided, which changes the Chrome extension ID on each build. For a stable ID, set `SWIFTGETX_CHROME_EXTENSION_KEY_PATH` to a PEM key locally or set the GitHub Actions secret `CHROME_EXTENSION_KEY_BASE64` to a base64-encoded PEM private key. The printed CRX ID is still useful for debugging, but the app registrar and install script can discover installed SwiftGetX Chrome extensions automatically.
+The CRX packager creates a temporary signing key when no key is provided, which changes the Chrome extension ID on each build. For a stable ID, set `SWIFTGETX_CHROME_EXTENSION_KEY_PATH` to a PEM key locally or set the GitHub Actions secret `CHROME_EXTENSION_KEY_BASE64` to a base64-encoded PEM private key. Strict releases also require `CHROME_EXTENSION_ID`/`SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID`, and packaging fails if the computed CRX ID does not match. See `Docs/ChromeExtensionDistribution.md` for the fixed-ID and Chrome Web Store release path.
+
+The current compatibility contract is browser native-message protocol `1`, Chrome extension `0.2.0` or newer, and Native Host `0.2.0` or newer. The native host rejects incompatible download messages before opening the app, and the extension reports compatibility errors in the popup.
 
 ## Native Message Format
 
@@ -48,8 +50,11 @@ Incoming payload:
   "suggestedFilename": "file.zip",
   "sourcePageTitle": "Release notes",
   "sourcePageUrl": "https://example.com/releases",
-  "source": "popup-scan"
+  "source": "popup-scan",
+  "extensionVersion": "0.2.0",
+  "minimumNativeHostVersion": "0.2.0",
+  "protocolVersion": 1
 }
 ```
 
-The helper in `NativeMessageHost` reads and writes Chrome/Safari's 4-byte little-endian length-prefixed JSON protocol.
+Responses include `version`, `protocolVersion`, `minimumExtensionVersion`, `minimumNativeHostVersion`, `compatible`, and optional `compatibilityMessage` alongside the existing acceptance fields. The helper in `NativeMessageHost` reads and writes Chrome/Safari's 4-byte little-endian length-prefixed JSON protocol.
