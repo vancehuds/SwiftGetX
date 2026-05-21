@@ -1045,17 +1045,43 @@ Next step:
 
 ## Task 23: Drag-and-Drop and System Integration
 
-Status: [ ]
+Status: [x]
 
 Add drag-and-drop URL/text/torrent handling, Finder `.torrent` open-with plumbing where possible, Services/Share Extension plan or implementation, Dock progress/badge, and menu-bar progress refinements.
 
 Work performed:
 
+- Added `DownloadInputSourceCollector` to normalize URL/text/magnet/local `.torrent` inputs from drag/drop, Finder/Dock file-open events, and macOS Services pasteboards into public confirmation drafts.
+- Added `DownloadDropSourceLoader` and a main-window SwiftUI drop target for URL, file URL, and plain-text drops, including a lightweight targeted overlay and reuse of the existing new-task confirmation/preview sheet.
+- Routed unknown `.onOpenURL` inputs and `NSApplicationDelegate.application(_:open:)` file opens through the collector so local `.torrent` Finder Open With and Dock icon drops open the normal confirmation flow.
+- Declared `.torrent` document support and `org.bittorrent.torrent` imported type in `AppInfo.plist` for packaged app bundles.
+- Added an `NSServices` entry plus `AppDelegate` Services provider for selected text, URLs, file URLs, and Finder filenames, with localized failure text when no downloadable source is present.
+- Added aggregate active progress, compact progress text, and Dock badge calculation to `MenuBarSnapshot`.
+- Updated the menu-bar controller to show aggregate percent/speed in the status item, tooltip, and menu summary, and to render Dock tile progress plus badges for active, seeding, failed, and queued states.
+- Added `Docs/SystemIntegrationPlan.md` documenting implemented local-system entry points and the remaining signed Share Extension path.
+- Added focused tests for dropped/opened input collection, app bundle document/Services metadata, and Dock/menu aggregate progress behavior.
+- Committed Task 23 implementation as `a182e86 Add system download integrations`.
+- Committed verifier-driven local `.torrent` source normalization and plist-test fixes as `70f24d7 Normalize dropped torrent file sources`.
+
 Verification evidence:
+
+- `swift build` passed after rerunning with SwiftPM cache access.
+- `swift test --filter DownloadInputSourceCollector --filter MenuBarSnapshot --filter AppResources` passed with 18 tests across 3 suites.
+- `swift test` passed with 239 tests across 17 suites.
+- `plutil -lint Sources/SwiftGetX/Resources/AppInfo.plist Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `git diff --check` passed.
+- Static diff review confirmed the Services/Share Extension boundary is documented and that the app-bundle `NSServices` entry, `.torrent` document type, and runtime handlers are present.
 
 Remaining risk:
 
+- Finder Open With and Services registration depend on a packaged/signed app bundle and Launch Services refresh; this task verified plist structure and runtime handlers, not an end-to-end Finder/Safari/TextEdit UI run.
+- Dock tile progress is build-verified and backed by snapshot tests for its aggregate state, but the custom Dock drawing was not visually inspected in a running app.
+- A full Share Extension remains planned because SwiftPM alone does not produce a signed macOS Share Extension target; `Docs/SystemIntegrationPlan.md` records the required Xcode/signing path.
+- Drag-and-drop UI behavior was compile-verified and parser-tested, but not screenshot-tested.
+
 Next step:
+
+- Task 24: Inspector, Logs, Accessibility, and Localization.
 
 ## Task 24: Inspector, Logs, Accessibility, and Localization
 
