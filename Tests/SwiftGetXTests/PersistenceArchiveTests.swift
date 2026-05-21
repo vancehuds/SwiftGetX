@@ -291,6 +291,35 @@ struct PersistenceArchiveTests {
         #expect(snapshot.recentTasks.count == 3)
     }
 
+    @Test("active system policy summarizes large task sets")
+    func activeSystemPolicySummarizesLargeTaskSets() throws {
+        let fixture = try makeFixture()
+        for index in 0..<650 {
+            fixture.context.insert(DownloadTask(
+                name: "Complete \(index)",
+                source: "https://example.com/complete-\(index).zip",
+                kind: .http,
+                status: .completed,
+                savePath: "/tmp/complete-\(index).zip",
+                totalBytes: 100,
+                downloadedBytes: 100,
+                createdAt: Date(timeIntervalSince1970: Double(index))
+            ))
+        }
+        fixture.context.insert(DownloadTask(
+            name: "Seeding",
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789",
+            kind: .torrentMagnet,
+            status: .seeding,
+            savePath: "/tmp/seeding",
+            createdAt: Date(timeIntervalSince1970: 2_000)
+        ))
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        #expect(fixture.coordinator.hasActiveDownloadsForSystemPolicy)
+    }
+
     private func makeFixture() throws -> PersistenceFixture {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try SwiftGetXPersistence.makeModelContainer(configurations: configuration)

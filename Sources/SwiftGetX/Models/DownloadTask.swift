@@ -144,7 +144,7 @@ final class DownloadTask {
         self.selectedFileIndexes = selectedFileIndexes
         self.torrentFilesJSON = torrentFilesJSON
         self.connectionSummary = connectionSummary
-        self.browserContextJSON = Self.encode(browserContext)
+        self.browserContextJSON = Self.encodeBrowserContext(browserContext)
         self.httpResponseMetadataJSON = Self.encode(httpResponseMetadata)
         self.httpOptionsJSON = Self.encodeHTTPOptions(httpOptions)
         self.httpSegmentsJSON = Self.encode(httpSegments)
@@ -405,7 +405,7 @@ final class DownloadTask {
 
     var browserContext: BrowserDownloadContext? {
         get { Self.decode(BrowserDownloadContext.self, from: browserContextJSON) }
-        set { browserContextJSON = Self.encode(newValue) }
+        set { browserContextJSON = Self.encodeBrowserContext(newValue) }
     }
 
     var httpResponseMetadata: HTTPResponseMetadata? {
@@ -574,6 +574,11 @@ final class DownloadTask {
             return nil
         }
         return String(data: data, encoding: .utf8)
+    }
+
+    private static func encodeBrowserContext(_ context: BrowserDownloadContext?) -> String? {
+        guard let context else { return nil }
+        return encode(context.persistable)
     }
 
     private static func encodeHTTPOptions(_ options: HTTPDownloadOptions?) -> String? {

@@ -78,7 +78,7 @@ struct DownloadCoordinatorTests {
 
         let record = settings.makeRecord()
         #expect(record.torrentEngineRawValue == TorrentEngineKind.libtorrent.rawValue)
-        #expect(record.torrentDHTBootstrapNodes == settings.torrentDHTBootstrapNodes)
+        #expect(record.torrentDHTBootstrapNodes == ["127.0.0.1:6881", "dht.example:6882"])
 
         let restored = AppSettings()
         restored.apply(record)
@@ -165,6 +165,44 @@ struct DownloadCoordinatorTests {
         fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
 
         #expect(fixture.coordinator.allTasks().count == 501)
+    }
+
+    @Test("system policy active count ignores archived and terminal tasks")
+    func systemPolicyActiveCountIgnoresArchivedAndTerminalTasks() throws {
+        let fixture = try makeFixture()
+        let archivedRunning = makeTask(name: "Archived Running", status: .running, queuePosition: 1)
+        archivedRunning.archivedAt = .now
+        let queued = makeTask(name: "Queued", status: .queued, queuePosition: 2)
+        let completed = makeTask(name: "Completed", status: .completed, queuePosition: 3)
+        for task in [archivedRunning, queued, completed] {
+            fixture.context.insert(task)
+        }
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        #expect(!fixture.coordinator.hasActiveDownloadsForSystemPolicy)
+
+        let seeding = makeTask(name: "Seeding", status: .seeding, queuePosition: 4)
+        fixture.context.insert(seeding)
+        try fixture.context.save()
+
+        #expect(fixture.coordinator.hasActiveDownloadsForSystemPolicy)
+
+        seeding.archivedAt = .now
+        try fixture.context.save()
+
+        #expect(!fixture.coordinator.hasActiveDownloadsForSystemPolicy)
+
+        let verifying = makeTask(name: "Verifying", status: .verifying, queuePosition: 5)
+        fixture.context.insert(verifying)
+        try fixture.context.save()
+
+        #expect(fixture.coordinator.hasActiveDownloadsForSystemPolicy)
+
+        verifying.status = .paused
+        try fixture.context.save()
+
+        #expect(!fixture.coordinator.hasActiveDownloadsForSystemPolicy)
     }
 
     @Test("queue scheduling prefers priority then queue position")
@@ -369,6 +407,39 @@ struct DownloadCoordinatorTests {
         #expect(task.errorMessage == L10n.string("error_task_cancelled"))
         #expect(task.totalBytes == 0)
         #expect(task.eTag == nil)
+    }
+
+    @Test("failed snapshots redact persisted messages and connection text")
+    func failedSnapshotsRedactPersistedMessagesAndConnectionText() throws {
+        let fixture = try makeFixture()
+        let task = makeTask(name: "Sensitive", status: .running, queuePosition: 1)
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.apply(DownloadSnapshot(
+            taskID: task.id,
+            status: .failed,
+            totalBytes: 1024,
+            downloadedBytes: 128,
+            speedBytesPerSecond: 0,
+            etaSeconds: nil,
+            errorMessage: "Failed https://example.com/file.zip?token=secret Authorization: BearerSecret",
+            supportsResume: false,
+            eTag: nil,
+            lastModified: nil,
+            connectionSummary: "tracker=https://example.com/announce?passkey=secret"
+        ))
+
+        let persistedText = ([task.errorMessage, task.connectionSummary].compactMap(\.self) + task.logEntries)
+            .joined(separator: "\n")
+        #expect(task.status == .failed)
+        #expect(persistedText.contains("secret") == false)
+        #expect(persistedText.contains("BearerSecret") == false)
+        #expect(persistedText.contains(BrowserDownloadContext.redactedValue))
+        #expect(task.errorMessage?.contains(BrowserDownloadContext.redactedValue) == true)
+        #expect(task.connectionSummary?.contains("%3Credacted%3E") == true)
+        #expect(task.logEntries.contains { $0.contains(BrowserDownloadContext.redactedValue) })
     }
 
     @Test("snapshots update metrics segments and log export")

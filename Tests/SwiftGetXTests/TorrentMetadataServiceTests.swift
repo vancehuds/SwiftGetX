@@ -56,17 +56,13 @@ struct TorrentMetadataServiceTests {
         let service = TorrentMetadataService(magnetTimeout: .milliseconds(10))
 
         let preview = await service.preview(
-            source: "magnet:?xt=urn:btih:abcdef&dn=Demo&tr=http%3A%2F%2Ftracker.example%2Fannounce"
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Demo&tr=http%3A%2F%2Ftracker.example%2Fannounce"
         )
 
         #expect(preview.kind == .torrentMagnet)
         #expect(preview.displayName == "Demo")
         #expect(preview.trackers == ["http://tracker.example/announce"])
-        #if canImport(CSwiftGetXLibtorrent)
-        #expect(preview.metadataStatus == .fetching)
-        #else
-        #expect(preview.metadataStatus == .unavailable)
-        #endif
+        #expect(preview.metadataStatus == Self.expectedMagnetPreviewPendingStatus)
         #expect(preview.files.isEmpty)
     }
 
@@ -74,13 +70,19 @@ struct TorrentMetadataServiceTests {
     func magnetPreviewHonorsTimeoutConfiguration() async {
         let service = TorrentMetadataService(magnetTimeout: .milliseconds(1))
 
-        let preview = await service.preview(source: "magnet:?xt=urn:btih:abcdef&dn=Timeout")
+        let preview = await service.preview(
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Timeout"
+        )
 
         #expect(preview.displayName == "Timeout")
+        #expect(preview.metadataStatus == Self.expectedMagnetPreviewPendingStatus)
+    }
+
+    private static var expectedMagnetPreviewPendingStatus: TorrentMetadataStatus {
         #if canImport(CSwiftGetXLibtorrent)
-        #expect(preview.metadataStatus == .fetching)
+        return LibtorrentMetadataPreviewer() == nil ? .unavailable : .fetching
         #else
-        #expect(preview.metadataStatus == .unavailable)
+        return .unavailable
         #endif
     }
 

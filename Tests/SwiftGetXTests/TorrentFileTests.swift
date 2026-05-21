@@ -188,6 +188,17 @@ struct TorrentFileTests {
         #expect(task.browserContextJSON?.contains("Bearer secret") == false)
         #expect(task.browserContextJSON?.contains("session=secret") == false)
         #expect(task.browserContextJSON?.contains("other.zip") == false)
+
+        task.browserContext = rawContext
+
+        #expect(task.browserContext?.headers == [
+            BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
+        ])
+        #expect(task.browserContext?.finalURL == "https://cdn.example.com/file.zip?signature=%3Credacted%3E&file=1")
+        #expect(task.browserContext?.handoffSourceText == nil)
+        #expect(task.browserContextJSON?.contains("Bearer secret") == false)
+        #expect(task.browserContextJSON?.contains("session=secret") == false)
+        #expect(task.browserContextJSON?.contains("other.zip") == false)
     }
 
     @Test("task persists HTTP response metadata as json")

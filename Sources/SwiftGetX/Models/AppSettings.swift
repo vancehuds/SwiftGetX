@@ -97,7 +97,7 @@ final class AppSettings {
         torrentMaxUploadSlots = record.torrentMaxUploadSlots
         torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
         torrentEngine = TorrentEngineKind(rawValue: record.torrentEngineRawValue) ?? .swift
-        torrentDHTBootstrapNodes = record.torrentDHTBootstrapNodes
+        torrentDHTBootstrapNodes = Self.normalizedTorrentDHTBootstrapNodes(record.torrentDHTBootstrapNodes)
         language = AppLanguage.storedPreference(from: record.languageRawValue, in: userDefaults)
     }
 
@@ -139,7 +139,7 @@ final class AppSettings {
             torrentMaxUploadSlots: torrentMaxUploadSlots,
             torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue,
             torrentEngineRawValue: torrentEngine.rawValue,
-            torrentDHTBootstrapNodes: torrentDHTBootstrapNodes,
+            torrentDHTBootstrapNodes: Self.normalizedTorrentDHTBootstrapNodes(torrentDHTBootstrapNodes),
             languageRawValue: language.rawValue
         )
     }
@@ -182,7 +182,7 @@ final class AppSettings {
         record.torrentMaxUploadSlots = torrentMaxUploadSlots
         record.torrentSeedingLimitModeRawValue = torrentSeedingLimitMode.rawValue
         record.torrentEngineRawValue = torrentEngine.rawValue
-        record.torrentDHTBootstrapNodes = torrentDHTBootstrapNodes
+        record.torrentDHTBootstrapNodes = Self.normalizedTorrentDHTBootstrapNodes(torrentDHTBootstrapNodes)
         record.languageRawValue = language.rawValue
     }
 
@@ -236,6 +236,10 @@ final class AppSettings {
             return "[]"
         }
         return json
+    }
+
+    private static func normalizedTorrentDHTBootstrapNodes(_ nodes: [String]) -> [String] {
+        TorrentRuntimeOptions(dhtBootstrapNodes: nodes).dhtBootstrapNodes
     }
 }
 
@@ -420,7 +424,9 @@ final class AppSettingsRecord {
         self.torrentMaxUploadSlots = torrentMaxUploadSlots
         self.torrentSeedingLimitModeRawValue = torrentSeedingLimitModeRawValue
         self.torrentEngineRawValue = torrentEngineRawValue
-        self.torrentDHTBootstrapNodes = torrentDHTBootstrapNodes
+        self.torrentDHTBootstrapNodes = TorrentRuntimeOptions(
+            dhtBootstrapNodes: torrentDHTBootstrapNodes
+        ).dhtBootstrapNodes
         self.languageRawValue = languageRawValue
     }
 }

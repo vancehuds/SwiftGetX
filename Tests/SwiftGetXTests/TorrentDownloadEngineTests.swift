@@ -889,7 +889,7 @@ struct TorrentDownloadEngineTests {
                 await store.append(snapshot)
             }
         }
-        let snapshots = try await store.snapshots(count: 7)
+        let snapshots = try await store.snapshots(untilStatus: .completed)
         let final = try #require(snapshots.last)
 
         #expect(snapshots.map(\.status).contains(.seeding))

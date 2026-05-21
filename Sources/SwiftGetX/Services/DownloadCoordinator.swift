@@ -245,7 +245,7 @@ final class DownloadCoordinator {
     }
 
     var hasActiveDownloadsForSystemPolicy: Bool {
-        allTasks().contains { !$0.isArchived && ($0.usesActiveDownloadSlot || $0.status == .seeding) }
+        fetchActiveSystemTaskCount() > 0
     }
 
     func pauseActiveTasksForQuit() {
@@ -1644,7 +1644,7 @@ final class DownloadCoordinator {
         task.downloadedBytes = snapshot.downloadedBytes
         task.speedBytesPerSecond = snapshot.speedBytesPerSecond
         task.etaSeconds = snapshot.etaSeconds
-        task.errorMessage = snapshot.errorMessage
+        task.errorMessage = snapshot.errorMessage.map(PrivacyRedactor.redactedText)
         task.supportsResume = snapshot.supportsResume
         task.eTag = snapshot.eTag
         task.lastModified = snapshot.lastModified
@@ -1668,7 +1668,7 @@ final class DownloadCoordinator {
             }
         }
         if let connectionSummary = snapshot.connectionSummary {
-            task.connectionSummary = connectionSummary
+            task.connectionSummary = PrivacyRedactor.redactedText(connectionSummary)
         }
         if let httpResponseMetadata = snapshot.httpResponseMetadata {
             task.httpResponseMetadata = httpResponseMetadata.merged(over: task.httpResponseMetadata)
@@ -1678,7 +1678,7 @@ final class DownloadCoordinator {
         }
         if let torrentConnection = snapshot.torrentConnection {
             task.torrentConnection = torrentConnection
-            task.connectionSummary = torrentConnection.summary
+            task.connectionSummary = PrivacyRedactor.redactedText(torrentConnection.summary)
         }
         if let torrentResumeState = snapshot.torrentResumeState {
             task.torrentResumeState = torrentResumeState
@@ -1741,7 +1741,10 @@ final class DownloadCoordinator {
             runtimeHTTPOptions[task.id] = nil
         case .failed:
             task.speedBytesPerSecond = 0
-            handleFailedTask(task, message: snapshot.errorMessage ?? L10n.string("error_download_failed"))
+            handleFailedTask(
+                task,
+                message: snapshot.errorMessage.map(PrivacyRedactor.redactedText) ?? L10n.string("error_download_failed")
+            )
             scheduleQueue()
             runtimeBrowserContexts[task.id] = nil
             runtimeHTTPOptions[task.id] = nil
@@ -1823,6 +1826,24 @@ final class DownloadCoordinator {
         }
         let descriptor = FetchDescriptor<DownloadTask>(
             predicate: #Predicate { $0.archivedAt == nil }
+        )
+        return (try? modelContext.fetchCount(descriptor)) ?? 0
+    }
+
+    private func fetchActiveSystemTaskCount() -> Int {
+        guard let modelContext else { return 0 }
+        let descriptor = FetchDescriptor<DownloadTask>(
+            predicate: #Predicate {
+                $0.archivedAt == nil
+                    && (
+                        $0.statusRawValue == "running"
+                            || $0.statusRawValue == "fetchingMetadata"
+                            || $0.statusRawValue == "fetchingPeers"
+                            || $0.statusRawValue == "connectingPeers"
+                            || $0.statusRawValue == "verifying"
+                            || $0.statusRawValue == "seeding"
+                    )
+            }
         )
         return (try? modelContext.fetchCount(descriptor)) ?? 0
     }
