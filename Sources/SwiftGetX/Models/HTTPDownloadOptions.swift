@@ -10,6 +10,7 @@ struct HTTPDownloadOptions: Codable, Equatable, Sendable {
     var retryLimitOverride: Int?
     var perTaskDownloadLimitBytes: Int64?
     var filenameOverride: String?
+    var checksum: HTTPChecksum?
     var additionalHeaders: [BrowserDownloadHeader]
 
     init(
@@ -17,12 +18,14 @@ struct HTTPDownloadOptions: Codable, Equatable, Sendable {
         retryLimitOverride: Int? = nil,
         perTaskDownloadLimitBytes: Int64? = nil,
         filenameOverride: String? = nil,
+        checksum: HTTPChecksum? = nil,
         additionalHeaders: [BrowserDownloadHeader] = []
     ) {
         self.segmentCountOverride = Self.clampedSegmentCount(segmentCountOverride)
         self.retryLimitOverride = Self.clampedRetryLimit(retryLimitOverride)
         self.perTaskDownloadLimitBytes = Self.positiveLimit(perTaskDownloadLimitBytes)
         self.filenameOverride = Self.sanitizedFilename(filenameOverride)
+        self.checksum = checksum
         self.additionalHeaders = Self.sanitizedHeaders(additionalHeaders)
     }
 
@@ -32,6 +35,7 @@ struct HTTPDownloadOptions: Codable, Equatable, Sendable {
             retryLimitOverride: retryLimitOverride,
             perTaskDownloadLimitBytes: perTaskDownloadLimitBytes,
             filenameOverride: filenameOverride,
+            checksum: checksum,
             additionalHeaders: additionalHeaders.compactMap(\.persistable)
         )
     }
@@ -41,6 +45,7 @@ struct HTTPDownloadOptions: Codable, Equatable, Sendable {
             && retryLimitOverride == nil
             && perTaskDownloadLimitBytes == nil
             && filenameOverride == nil
+            && checksum == nil
             && additionalHeaders.isEmpty
     }
 
@@ -86,6 +91,7 @@ struct HTTPDownloadOptions: Codable, Equatable, Sendable {
         case retryLimitOverride
         case perTaskDownloadLimitBytes
         case filenameOverride
+        case checksum
         case additionalHeaders
     }
 
@@ -100,6 +106,7 @@ struct HTTPDownloadOptions: Codable, Equatable, Sendable {
             retryLimitOverride: try container.decodeIfPresent(Int.self, forKey: .retryLimitOverride),
             perTaskDownloadLimitBytes: try container.decodeIfPresent(Int64.self, forKey: .perTaskDownloadLimitBytes),
             filenameOverride: try container.decodeIfPresent(String.self, forKey: .filenameOverride),
+            checksum: try container.decodeIfPresent(HTTPChecksum.self, forKey: .checksum),
             additionalHeaders: decodedHeaders.compactMap(\.persistable)
         )
     }
@@ -110,6 +117,7 @@ struct HTTPDownloadOptions: Codable, Equatable, Sendable {
         try container.encodeIfPresent(retryLimitOverride, forKey: .retryLimitOverride)
         try container.encodeIfPresent(perTaskDownloadLimitBytes, forKey: .perTaskDownloadLimitBytes)
         try container.encodeIfPresent(filenameOverride, forKey: .filenameOverride)
+        try container.encodeIfPresent(checksum, forKey: .checksum)
         let persistableHeaders = additionalHeaders.compactMap(\.persistable)
         if !persistableHeaders.isEmpty {
             try container.encode(persistableHeaders, forKey: .additionalHeaders)

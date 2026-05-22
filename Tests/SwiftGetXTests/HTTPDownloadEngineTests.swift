@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 import SwiftData
 import Testing
@@ -236,6 +237,109 @@ struct HTTPDownloadEngineTests {
         let downloaded = try Data(contentsOf: destination)
         #expect(downloaded == payload)
         #expect(recorder.snapshots.contains { $0.retryCount == 1 })
+    }
+
+    @Test("verifies SHA-256 checksum on completion")
+    func verifiesSHA256ChecksumOnCompletion() async throws {
+        let payload = Self.payload()
+        let checksum = HTTPChecksum(
+            algorithm: .sha256,
+            expectedHexDigest: Self.sha256Hex(payload)
+        )
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            httpOptions: HTTPDownloadOptions(checksum: checksum)
+        ))
+
+        let completed = try #require(recorder.snapshots.last(where: { $0.status == .completed }))
+
+        #expect(try Data(contentsOf: destination) == payload)
+        #expect(completed.errorMessage == nil)
+        #expect(completed.httpResponseMetadata?.checksumStatus == .verified)
+        #expect(completed.httpResponseMetadata?.checksumActualDigest == checksum?.expectedHexDigest)
+    }
+
+    @Test("fails and keeps file when checksum mismatches")
+    func failsAndKeepsFileWhenChecksumMismatches() async throws {
+        let payload = Self.payload()
+        let checksum = HTTPChecksum(
+            algorithm: .sha256,
+            expectedHexDigest: String(repeating: "0", count: HTTPChecksumAlgorithm.sha256.hexDigitCount)
+        )
+        let server = try RangeTestServer(payload: payload)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: destination,
+            httpOptions: HTTPDownloadOptions(checksum: checksum)
+        ))
+
+        let failed = try #require(recorder.snapshots.last(where: { $0.status == .failed }))
+
+        #expect(try Data(contentsOf: destination) == payload)
+        #expect(failed.errorMessage?.contains("SHA-256") == true)
+        #expect(failed.httpResponseMetadata?.checksumStatus == .failed)
+        #expect(failed.httpResponseMetadata?.checksumActualDigest == Self.sha256Hex(payload))
+    }
+
+    @Test("recheck verifies existing HTTP file checksum")
+    func recheckVerifiesExistingHTTPFileChecksum() async throws {
+        let payload = Self.payload()
+        let checksum = try #require(HTTPChecksum(
+            algorithm: .sha256,
+            expectedHexDigest: Self.sha256Hex(payload)
+        ))
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let destination = directory.appendingPathComponent("payload.bin")
+        try payload.write(to: destination)
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+
+        await engine.recheck(Self.request(
+            source: URL(string: "http://example.com/payload.bin")!,
+            destination: destination,
+            totalBytes: Int64(payload.count),
+            downloadedBytes: Int64(payload.count),
+            supportsResume: true,
+            httpOptions: HTTPDownloadOptions(checksum: checksum)
+        ))
+
+        let completed = try #require(recorder.snapshots.last)
+        #expect(completed.status == .completed)
+        #expect(completed.httpResponseMetadata?.checksumStatus == .verified)
+        #expect(completed.httpResponseMetadata?.checksumActualDigest == checksum.expectedHexDigest)
     }
 
     @Test("fails before network request when destination parent is a file")
@@ -1315,6 +1419,10 @@ struct HTTPDownloadEngineTests {
 
     private static func largePayload() -> Data {
         Data((0..<(4 * 1024 * 1024 + 123)).map { UInt8($0 % 251) })
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        Data(SHA256.hash(data: data)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func makeTemporaryDirectory() throws -> URL {

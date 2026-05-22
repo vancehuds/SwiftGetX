@@ -14,6 +14,8 @@ struct NewTaskSheet: View {
     @State private var httpSegmentCount = 8
     @State private var httpRetryLimit = 3
     @State private var httpDownloadLimitBytes: Int64 = 0
+    @State private var httpChecksumAlgorithm: HTTPChecksumAlgorithm = .sha256
+    @State private var httpChecksumDigest = ""
     @State private var httpHeaderText = ""
     @State private var previews = [TorrentMetadataPreview]()
     @State private var previewSources = [String]()
@@ -156,6 +158,8 @@ struct NewTaskSheet: View {
                     segmentCount: $httpSegmentCount,
                     retryLimit: $httpRetryLimit,
                     speedLimitBytes: $httpDownloadLimitBytes,
+                    checksumAlgorithm: $httpChecksumAlgorithm,
+                    checksumDigest: $httpChecksumDigest,
                     headerText: $httpHeaderText
                 )
             }
@@ -258,6 +262,8 @@ struct NewTaskSheet: View {
             "\(httpSegmentCount)",
             "\(httpRetryLimit)",
             "\(httpDownloadLimitBytes)",
+            httpChecksumAlgorithm.rawValue,
+            httpChecksumDigest,
             httpHeaderText,
             draft?.browserContext?.finalURL ?? "",
             draft?.browserContext?.originalURL ?? ""
@@ -268,6 +274,8 @@ struct NewTaskSheet: View {
         sourceText = draft?.source ?? ""
         suggestedFilename = draft?.suggestedFilename
         filenameOverride = ""
+        httpChecksumAlgorithm = .sha256
+        httpChecksumDigest = ""
         didResolveNativeHandoff = false
     }
 
@@ -299,8 +307,14 @@ struct NewTaskSheet: View {
             retryLimitOverride: httpRetryLimit,
             perTaskDownloadLimitBytes: httpDownloadLimitBytes,
             filenameOverride: hasSingleHTTPSource ? effectiveFilenameOverride : nil,
+            checksum: httpChecksum,
             additionalHeaders: HTTPDownloadOptions.headers(from: httpHeaderText)
         )
+    }
+
+    private var httpChecksum: HTTPChecksum? {
+        HTTPChecksum(algorithm: httpChecksumAlgorithm, expectedHexDigest: httpChecksumDigest)
+            ?? HTTPChecksum(input: httpChecksumDigest, preferredFilename: effectiveFilenameOverride ?? suggestedFilename)
     }
 
     private func rejectExpiredNativeHandoffIfNeeded() -> Bool {
@@ -514,6 +528,8 @@ private struct HTTPDownloadOptionsEditor: View {
     @Binding var segmentCount: Int
     @Binding var retryLimit: Int
     @Binding var speedLimitBytes: Int64
+    @Binding var checksumAlgorithm: HTTPChecksumAlgorithm
+    @Binding var checksumDigest: String
     @Binding var headerText: String
 
     var body: some View {
@@ -565,6 +581,31 @@ private struct HTTPDownloadOptionsEditor: View {
                 .frame(maxWidth: layout.value(180))
             }
 
+            VStack(alignment: .leading, spacing: layout.value(6)) {
+                Text(L10n.string("http_options_checksum"))
+                    .font(layout.font(10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: layout.value(8)) {
+                    Picker("", selection: $checksumAlgorithm) {
+                        ForEach(HTTPChecksumAlgorithm.allCases, id: \.rawValue) { algorithm in
+                            Text(algorithm.title).tag(algorithm)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: layout.value(104))
+
+                    TextField(L10n.string("http_options_checksum_placeholder"), text: $checksumDigest)
+                        .textFieldStyle(.roundedBorder)
+                        .font(layout.font(11.5, design: .monospaced))
+                }
+
+                Text(checksumHelpText)
+                    .font(layout.font(10.2))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
             TextEditor(text: $headerText)
                 .font(layout.font(11, design: .monospaced))
                 .frame(minHeight: layout.value(54), maxHeight: layout.value(76))
@@ -595,6 +636,18 @@ private struct HTTPDownloadOptionsEditor: View {
     private func speedLabel(for value: Int64) -> String {
         guard value > 0 else { return L10n.string("speed_unlimited") }
         return ByteCountFormatter.downloadFormatter.string(fromByteCount: value) + "/s"
+    }
+
+    private var checksumHelpText: String {
+        if checksumDigest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return L10n.string("http_options_checksum_help")
+        }
+        if HTTPChecksum(algorithm: checksumAlgorithm, expectedHexDigest: checksumDigest) != nil
+            || HTTPChecksum(input: checksumDigest) != nil
+        {
+            return L10n.string("http_options_checksum_valid")
+        }
+        return L10n.string("http_options_checksum_invalid", checksumAlgorithm.title, checksumAlgorithm.hexDigitCount)
     }
 }
 

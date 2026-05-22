@@ -235,6 +235,12 @@ private struct OverviewPanel: View {
                 if let connectionSummary = task.connectionSummary {
                     DetailRow(title: L10n.string("detail_connection"), value: connectionSummary)
                 }
+                if task.kind == .http, let metadata = task.httpResponseMetadata {
+                    DetailRow(title: L10n.string("detail_checksum"), value: metadata.checksumStatus.title)
+                    if let checksumActualDigest = metadata.checksumActualDigest {
+                        DetailRow(title: L10n.string("detail_checksum_actual"), value: checksumActualDigest.uppercased())
+                    }
+                }
                 if let startedAt = task.startedAt {
                     DetailRow(title: L10n.string("detail_started_at"), value: Self.dateString(startedAt))
                 }

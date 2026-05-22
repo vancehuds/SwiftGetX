@@ -443,6 +443,7 @@ final class DownloadCoordinator {
                     retryLimitOverride: options.retryLimitOverride,
                     perTaskDownloadLimitBytes: downloadLimit,
                     filenameOverride: options.filenameOverride,
+                    checksum: options.checksum,
                     additionalHeaders: options.additionalHeaders
                 )
                 task.httpOptions = updated
@@ -817,6 +818,7 @@ final class DownloadCoordinator {
             retryLimitOverride: explicitOptions.retryLimitOverride ?? rule.retryLimit,
             perTaskDownloadLimitBytes: explicitOptions.perTaskDownloadLimitBytes,
             filenameOverride: explicitOptions.filenameOverride,
+            checksum: explicitOptions.checksum,
             additionalHeaders: mergedHeaders
         )
         return merged.isEmpty ? nil : merged

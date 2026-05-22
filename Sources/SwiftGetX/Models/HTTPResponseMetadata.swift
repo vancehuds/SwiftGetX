@@ -26,6 +26,8 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
     var eTag: String?
     var lastModified: String?
     var redirects: [HTTPRedirectMetadata]
+    var checksumStatus: HTTPChecksumStatus
+    var checksumActualDigest: String?
 
     init(
         originalURL: String? = nil,
@@ -39,7 +41,9 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
         contentLength: Int64? = nil,
         eTag: String? = nil,
         lastModified: String? = nil,
-        redirects: [HTTPRedirectMetadata] = []
+        redirects: [HTTPRedirectMetadata] = [],
+        checksumStatus: HTTPChecksumStatus = .notRequested,
+        checksumActualDigest: String? = nil
     ) {
         self.originalURL = Self.redactedURL(originalURL)
         self.finalURL = Self.redactedURL(finalURL)
@@ -53,6 +57,8 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
         self.eTag = Self.nonEmpty(eTag)
         self.lastModified = Self.nonEmpty(lastModified)
         self.redirects = redirects
+        self.checksumStatus = checksumStatus
+        self.checksumActualDigest = HTTPChecksum.normalizedHexDigest(checksumActualDigest)
     }
 
     var wasRedirected: Bool {
@@ -77,7 +83,9 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
             contentLength: contentLength ?? fallback.contentLength,
             eTag: eTag ?? fallback.eTag,
             lastModified: lastModified ?? fallback.lastModified,
-            redirects: redirects.isEmpty ? fallback.redirects : redirects
+            redirects: redirects.isEmpty ? fallback.redirects : redirects,
+            checksumStatus: checksumStatus == .notRequested ? fallback.checksumStatus : checksumStatus,
+            checksumActualDigest: checksumActualDigest ?? fallback.checksumActualDigest
         )
     }
 
@@ -94,7 +102,31 @@ struct HTTPResponseMetadata: Codable, Equatable, Sendable {
             contentLength: contentLength,
             eTag: eTag,
             lastModified: lastModified,
-            redirects: redirects
+            redirects: redirects,
+            checksumStatus: checksumStatus,
+            checksumActualDigest: checksumActualDigest
+        )
+    }
+
+    func replacingChecksum(
+        status: HTTPChecksumStatus,
+        actualDigest: String?
+    ) -> HTTPResponseMetadata {
+        HTTPResponseMetadata(
+            originalURL: originalURL,
+            finalURL: finalURL,
+            sourcePageURL: sourcePageURL,
+            mimeType: mimeType,
+            contentDisposition: contentDisposition,
+            suggestedFilename: suggestedFilename,
+            server: server,
+            supportsResume: supportsResume,
+            contentLength: contentLength,
+            eTag: eTag,
+            lastModified: lastModified,
+            redirects: redirects,
+            checksumStatus: status,
+            checksumActualDigest: actualDigest
         )
     }
 

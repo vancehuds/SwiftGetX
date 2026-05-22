@@ -163,7 +163,16 @@ struct PersistenceArchiveTests {
                 ],
                 finalURL: "https://cdn.example.com/file.zip?signature=secret"
             ).persistable,
+            httpResponseMetadata: HTTPResponseMetadata(
+                finalURL: "https://cdn.example.com/file.zip?signature=secret",
+                checksumStatus: .verified,
+                checksumActualDigest: "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73"
+            ),
             httpOptions: HTTPDownloadOptions(
+                checksum: HTTPChecksum(
+                    algorithm: .sha256,
+                    expectedHexDigest: "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73"
+                ),
                 additionalHeaders: [
                     BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
                     BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
@@ -200,6 +209,9 @@ struct PersistenceArchiveTests {
         #expect(importedTask.httpOptions?.additionalHeaders == [
             BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
         ])
+        #expect(importedTask.httpOptions?.checksum?.algorithm == .sha256)
+        #expect(importedTask.httpResponseMetadata?.checksumStatus == .verified)
+        #expect(importedTask.httpResponseMetadata?.checksumActualDigest == "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73")
         #expect(importedTask.logEntries.first?.contains("secret") == false)
     }
 

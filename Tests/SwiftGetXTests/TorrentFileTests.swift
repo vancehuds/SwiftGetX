@@ -261,6 +261,10 @@ struct TorrentFileTests {
             retryLimitOverride: 2,
             perTaskDownloadLimitBytes: 1_000_000,
             filenameOverride: "../safe name.zip",
+            checksum: HTTPChecksum(
+                algorithm: .sha256,
+                expectedHexDigest: "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73"
+            ),
             additionalHeaders: [
                 BrowserDownloadHeader(name: "Authorization", value: "Bearer secret", sensitive: true),
                 BrowserDownloadHeader(name: "Accept-Language", value: "en-US"),
@@ -279,6 +283,8 @@ struct TorrentFileTests {
         #expect(task.httpOptions?.retryLimitOverride == 2)
         #expect(task.httpOptions?.perTaskDownloadLimitBytes == 1_000_000)
         #expect(task.httpOptions?.filenameOverride == "safe name.zip")
+        #expect(task.httpOptions?.checksum?.algorithm == .sha256)
+        #expect(task.httpOptions?.checksum?.expectedHexDigest == "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73")
         #expect(task.httpOptions?.additionalHeaders == [
             BrowserDownloadHeader(name: "Accept-Language", value: "en-US")
         ])
@@ -293,5 +299,19 @@ struct TorrentFileTests {
             httpOptions: HTTPDownloadOptions()
         )
         #expect(emptyTask.httpOptionsJSON == nil)
+    }
+
+    @Test("HTTP checksum discovers common manifest and metadata formats")
+    func httpChecksumDiscoversCommonManifestAndMetadataFormats() {
+        let sha256 = "71c480df93d6ae2f1efad1447c66c9525e316218cf51fc8d9ed832f2daf18b73"
+        let sha1 = "7c211433f02071597741e6ff5a8ea34789abbf43"
+        let md5 = "b3a36e7aae76ff079761db38afed0a49"
+
+        #expect(HTTPChecksum(input: "\(sha256)  payload.bin", preferredFilename: "payload.bin")?.algorithm == .sha256)
+        #expect(HTTPChecksum(input: "SHA1 (\u{002a}payload.bin) = \(sha1)")?.algorithm == .sha1)
+        #expect(HTTPChecksum(input: #"{"assets":[{"name":"payload.bin","sha256":"\#(sha256)"}]}"#, preferredFilename: "payload.bin")?.expectedHexDigest == sha256)
+        #expect(HTTPChecksum(input: #"<metalink><file name="payload.bin"><hash type="md5">\#(md5)</hash></file></metalink>"#)?.algorithm == .md5)
+        #expect(HTTPChecksum(input: "\(sha256)  other.bin", preferredFilename: "payload.bin") == nil)
+        #expect(HTTPChecksum(algorithm: .sha256, expectedHexDigest: sha1) == nil)
     }
 }

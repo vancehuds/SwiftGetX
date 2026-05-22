@@ -82,7 +82,20 @@ final class HTTPDownloadEngine: DownloadEngine {
     func recheck(_ request: DownloadRequest) async {
         let fileURL = URL(fileURLWithPath: request.savePath)
         let size = HTTPPartialDataStore.localSize(at: fileURL)
-        let status: DownloadStatus = request.totalBytes > 0 && size == request.totalBytes ? .completed : .failed
+        let sizeMatches = request.totalBytes > 0 && size == request.totalBytes
+        let checksumResult = httpChecksumResult(for: request, finalURL: fileURL)
+        let checksumStatus = checksumResult.status
+        let status: DownloadStatus = sizeMatches && checksumStatus != .failed && checksumStatus != .unavailable
+            ? .completed
+            : .failed
+        let errorMessage: String?
+        if status == .failed, !sizeMatches {
+            errorMessage = L10n.string("error_file_size_mismatch")
+        } else if status == .failed {
+            errorMessage = checksumResult.errorMessage
+        } else {
+            errorMessage = nil
+        }
         emit(
             DownloadSnapshot(
                 taskID: request.id,
@@ -91,14 +104,23 @@ final class HTTPDownloadEngine: DownloadEngine {
                 downloadedBytes: size,
                 speedBytesPerSecond: 0,
                 etaSeconds: nil,
-                errorMessage: status == .failed ? L10n.string("error_file_size_mismatch") : nil,
+                errorMessage: errorMessage,
                 supportsResume: request.supportsResume,
                 eTag: request.eTag,
                 lastModified: request.lastModified,
                 connectionSummary: request.supportsResume
                     ? L10n.string("http_connection_resume_only")
                     : L10n.string("http_connection_no_resume_only"),
-                httpResponseMetadata: request.httpResponseMetadata
+                httpResponseMetadata: httpChecksumMetadata(
+                    request.httpResponseMetadata ?? HTTPResponseMetadata(
+                        supportsResume: request.supportsResume,
+                        contentLength: request.totalBytes > 0 ? request.totalBytes : nil,
+                        eTag: request.eTag,
+                        lastModified: request.lastModified
+                    ),
+                    status: checksumStatus,
+                    actualDigest: checksumResult.actualDigest
+                )
             )
         )
     }
@@ -123,6 +145,43 @@ final class HTTPDownloadEngine: DownloadEngine {
 }
 
 private let segmentScanLimit = HTTPPartialDataStore.maxSegmentCount
+
+private func httpChecksumResult(
+    for request: DownloadRequest,
+    finalURL: URL
+) -> (status: HTTPChecksumStatus, actualDigest: String?, errorMessage: String?) {
+    guard let checksum = request.httpOptions?.checksum else {
+        return (.notRequested, nil, nil)
+    }
+
+    do {
+        let verification = try checksum.verification(forFileAt: finalURL)
+        guard verification.matches else {
+            return (
+                .failed,
+                verification.actualHexDigest,
+                L10n.string(
+                    "error_checksum_mismatch",
+                    verification.expected.algorithm.title,
+                    verification.expected.expectedHexDigestUppercased,
+                    verification.actualHexDigest.uppercased()
+                )
+            )
+        }
+        return (.verified, verification.actualHexDigest, nil)
+    } catch {
+        return (.unavailable, nil, L10n.string("error_checksum_unavailable"))
+    }
+}
+
+private func httpChecksumMetadata(
+    _ metadata: HTTPResponseMetadata?,
+    status: HTTPChecksumStatus,
+    actualDigest: String?
+) -> HTTPResponseMetadata {
+    metadata?.replacingChecksum(status: status, actualDigest: actualDigest)
+        ?? HTTPResponseMetadata(checksumStatus: status, checksumActualDigest: actualDigest)
+}
 
 private actor HTTPDownloadRunState {
     private var activeTaskIDs = Set<UUID>()
@@ -917,26 +976,18 @@ private struct HTTPDownloadWorker: Sendable {
         layout.setFileHidden(at: finalURL, hidden: false)
         layout.removeTemporaryFiles(maxSegments: segmentScanLimit)
 
-        emit(
-            DownloadSnapshot(
-                taskID: request.id,
-                status: .completed,
-                savePath: finalURL.path,
+        emitFinalSnapshot(
+            request: request,
+            finalURL: finalURL,
+            metadata: metadata,
+            totalBytes: max(metadata.contentLength, downloadedBytes),
+            downloadedBytes: downloadedBytes,
+            supportsResume: metadata.supportsResume,
+            connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
+            httpSegments: singleStreamSegments(
                 totalBytes: max(metadata.contentLength, downloadedBytes),
                 downloadedBytes: downloadedBytes,
-                speedBytesPerSecond: 0,
-                etaSeconds: 0,
-                errorMessage: nil,
-                supportsResume: metadata.supportsResume,
-                eTag: metadata.eTag,
-                lastModified: metadata.lastModified,
-                connectionSummary: connectionSummary(segmentCount: 1, supportsResume: metadata.supportsResume),
-                httpResponseMetadata: metadata.responseMetadata,
-                httpSegments: singleStreamSegments(
-                    totalBytes: max(metadata.contentLength, downloadedBytes),
-                    downloadedBytes: downloadedBytes,
-                    speedBytesPerSecond: 0
-                )
+                speedBytesPerSecond: 0
             )
         )
     }
@@ -1064,22 +1115,49 @@ private struct HTTPDownloadWorker: Sendable {
 
         layout.removeTemporaryFiles(maxSegments: segmentScanLimit)
 
+        emitFinalSnapshot(
+            request: request,
+            finalURL: finalURL,
+            metadata: metadata,
+            totalBytes: manifest.totalBytes,
+            downloadedBytes: manifest.totalBytes,
+            supportsResume: true,
+            connectionSummary: summary,
+            httpSegments: await progress.currentSegments()
+        )
+    }
+
+    private func emitFinalSnapshot(
+        request: DownloadRequest,
+        finalURL: URL,
+        metadata: HTTPMetadata,
+        totalBytes: Int64,
+        downloadedBytes: Int64,
+        supportsResume: Bool,
+        connectionSummary: String,
+        httpSegments: [HTTPSegmentInfo]?
+    ) {
+        let checksumResult = httpChecksumResult(for: request, finalURL: finalURL)
         emit(
             DownloadSnapshot(
                 taskID: request.id,
-                status: .completed,
+                status: checksumResult.status == .failed || checksumResult.status == .unavailable ? .failed : .completed,
                 savePath: finalURL.path,
-                totalBytes: manifest.totalBytes,
-                downloadedBytes: manifest.totalBytes,
+                totalBytes: totalBytes,
+                downloadedBytes: downloadedBytes,
                 speedBytesPerSecond: 0,
                 etaSeconds: 0,
-                errorMessage: nil,
-                supportsResume: true,
+                errorMessage: checksumResult.errorMessage,
+                supportsResume: supportsResume,
                 eTag: metadata.eTag,
                 lastModified: metadata.lastModified,
-                connectionSummary: summary,
-                httpResponseMetadata: metadata.responseMetadata,
-                httpSegments: await progress.currentSegments()
+                connectionSummary: connectionSummary,
+                httpResponseMetadata: httpChecksumMetadata(
+                    metadata.responseMetadata,
+                    status: checksumResult.status,
+                    actualDigest: checksumResult.actualDigest
+                ),
+                httpSegments: httpSegments
             )
         )
     }

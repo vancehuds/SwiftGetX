@@ -652,7 +652,9 @@ final class DownloadTask {
             lastModified: metadata.lastModified,
             redirects: metadata.redirects.map {
                 HTTPRedirectMetadata(statusCode: $0.statusCode, fromURL: $0.fromURL, toURL: $0.toURL)
-            }
+            },
+            checksumStatus: metadata.checksumStatus,
+            checksumActualDigest: metadata.checksumActualDigest
         )
     }
 
