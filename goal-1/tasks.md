@@ -1465,17 +1465,51 @@ Next step:
 
 ## Large Check 10: Release and Quality
 
-Status: [ ]
+Status: [x]
 
 Review Tasks 28-30 for release trust, diagnostics privacy, CI feasibility, docs, and complete test status.
 
 Work performed:
 
+- Audited Tasks 28-30 against `Docs/FunctionalImprovementOpportunities.md` release/update/install and diagnostics/testing sections, covering strict release gates, Sparkle key validation, signing/notarization checks, Chrome extension fixed-ID packaging, compatibility metadata, license acknowledgements, diagnostic export privacy, crash-log guidance, and fixture coverage.
+- Confirmed strict release mode requires Apple Developer ID, notary, Sparkle private key, and Chrome fixed-ID secrets, while local/default builds remain usable through ad-hoc app signing and temporary Chrome extension signing.
+- Confirmed `AppInfo.plist` carries a non-placeholder Sparkle Ed25519 public key and release validation rejects placeholder or wrong-length keys.
+- Confirmed appcast generation includes HTTPS release notes, a description, a positive enclosure length, and a non-empty Sparkle EdDSA signature.
+- Confirmed Chrome extension packaging writes ZIP/CRX/release metadata locally, and strict release packaging refuses to proceed without a signing key and expected fixed extension ID.
+- Confirmed support diagnostics redact task sources, paths, errors, connection summaries, and logs through `PrivacyRedactor`; verbose debug logs are opt-in through persisted diagnostic log level; diagnostics docs warn that filenames, local paths, host names, and extension IDs can still be operationally sensitive.
+- Fixed documentation drift so README and browser-integration docs describe the currently supported Chromium-family browsers instead of only Chrome/Atlas.
+- Fixed README release wording so official tag releases are described as Developer ID signed, notarized, and stapled, while local/fork/debug artifacts are the Gatekeeper-risk path.
+- Fixed torrent status/localization wording so the default Swift torrent runtime is described as active and libtorrent is described as an optional reference bridge rather than the normal/native runtime.
+
 Verification evidence:
+
+- `bash -n Scripts/validate-release.sh Scripts/package-dmg.sh Scripts/package-chrome-extension.sh Scripts/generate-appcast.sh Scripts/local-build.sh` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/popup.js` passed.
+- `node --check Scripts/make-crx.mjs` passed.
+- Node JSON parsing passed for the Chrome extension manifest/locales and Task 30 fixture JSON files.
+- `plutil -lint Sources/SwiftGetX/Resources/AppInfo.plist Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `Scripts/validate-release.sh sparkle` passed.
+- `Scripts/package-chrome-extension.sh Sources/SwiftGetX/Resources/ChromeExtension /private/tmp/swiftgetx-large-check-10-chrome` passed and wrote ZIP, CRX, ID, and `SwiftGetX-Chrome.release.json`.
+- `SWIFTGETX_RELEASE_STRICT=1 SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Scripts/package-chrome-extension.sh ...` failed early before packaging because no strict signing key was provided, confirming the strict secret gate.
+- `swift test --filter ReleaseValidation --filter SupportDiagnostics --filter AppResources --filter NativeMessageHost --filter HTTPDownloadEngine` passed with 101 tests across 5 suites after rerunning with approved SwiftPM cache access.
+- `swift build` passed.
+- `swift test` passed with 286 tests across 22 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed; existing Homebrew OpenSSL deployment-target linker warnings were still present.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 289 tests across 23 suites; the same existing Homebrew OpenSSL deployment-target linker warnings were still present.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Actual Developer ID signing, Apple notarization, stapling, Gatekeeper assessment, and GitHub release publication were not exercised locally because this workspace does not have Apple or GitHub release credentials; scripts and workflow gates are statically verified and tested.
+- The Sparkle public key is valid and non-placeholder, but this workspace cannot prove it matches the private `SPARKLE_EDDSA_PRIVATE_KEY` secret without access to that secret.
+- Chrome Web Store publication and installed-browser/native-host end-to-end automation were not exercised because Web Store credentials and a controlled browser profile are not available; packaging artifacts, fixed-ID gates, compatibility tests, and browser E2E-friendly fixtures are present.
+- Diagnostic bundles remain redacted but can include operationally sensitive filenames, local paths, browser names, host names, and extension IDs; docs instruct users to review bundles before sharing.
+- Optional libtorrent verification still depends on the local native archive and Homebrew OpenSSL libraries, which continue to emit deployment-target linker warnings during optional builds.
+
 Next step:
+
+- Final Review: Full Plan Completion Audit.
 
 ## Final Review: Full Plan Completion Audit
 
