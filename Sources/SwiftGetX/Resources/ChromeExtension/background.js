@@ -545,7 +545,10 @@ async function sendToSwiftGetX(payload, options = {}) {
   const allowSetup = options.allowSetup !== false;
   const url = (payload?.url || "").trim();
   if (!isSupportedSource(url)) {
-    markFailure(i18n("errorNoDownloadAddress"));
+    markFailure(i18n("errorNoDownloadAddress"), {
+      action: "validate-source",
+      source: payload?.source || "unknown"
+    });
     return {
       ok: false,
       message: i18n("errorNoDownloadAddress")
@@ -568,7 +571,7 @@ async function sendToSwiftGetX(payload, options = {}) {
 
   let result = await sendNativeMessage(message);
   if (result.runtimeError && allowSetup) {
-    markFailure(result.message);
+    markFailure(result.message, result.errorDetail);
     const repairResult = await repairNativeHost(payload.source || "download", {
       forceOpen: Boolean(options.forceSetupOpen)
     });
@@ -583,17 +586,18 @@ async function sendToSwiftGetX(payload, options = {}) {
   }
 
   if (result.runtimeError) {
-    markFailure(result.message);
+    markFailure(result.message, result.errorDetail);
     return {
       ok: false,
-      message: result.message
+      message: result.message,
+      errorDetail: result.errorDetail
     };
   }
 
   if (result.ok) {
     markSuccess();
   } else {
-    markFailure(result.message || i18n("errorTaskRejected"));
+    markFailure(result.message || i18n("errorTaskRejected"), result.errorDetail);
     if (allowSetup && result.compatible !== false) {
       repairNativeHost(payload.source || "download-rejected");
     }
@@ -604,6 +608,7 @@ async function sendToSwiftGetX(payload, options = {}) {
     message: result.message || (result.ok ? i18n("sentToSwiftGetX") : i18n("sendFailed")),
     compatible: result.compatible,
     compatibilityMessage: result.compatibilityMessage,
+    errorDetail: result.errorDetail,
     response: result.response
   };
 }
@@ -1117,30 +1122,70 @@ function sendNativeMessage(message) {
     chrome.runtime.sendNativeMessage(NATIVE_HOST_NAME, message, (response) => {
       const runtimeError = chrome.runtime.lastError;
       if (runtimeError) {
+        const errorDetail = nativeMessageErrorDetail(message, {
+          runtimeError: runtimeError.message
+        });
         resolve({
           ok: false,
           runtimeError: true,
-          message: runtimeError.message
+          message: runtimeError.message,
+          errorDetail
         });
         return;
       }
 
       const compatibility = nativeHostCompatibility(response);
       const ok = response?.ok !== false && compatibility.compatible;
+      const resultMessage = compatibility.message || response?.message || (ok ? i18n("connected") : i18n("nativeHostReturnedError"));
       resolve({
         ok,
         runtimeError: false,
-        message: compatibility.message || response?.message || (ok ? i18n("connected") : i18n("nativeHostReturnedError")),
+        message: resultMessage,
         version: response?.version,
         protocolVersion: response?.protocolVersion,
         minimumExtensionVersion: response?.minimumExtensionVersion,
         minimumNativeHostVersion: response?.minimumNativeHostVersion,
         compatible: compatibility.compatible,
         compatibilityMessage: compatibility.message,
+        errorDetail: nativeMessageErrorDetail(message, {
+          message: resultMessage,
+          response,
+          compatible: compatibility.compatible,
+          compatibilityMessage: compatibility.message
+        }),
         response
       });
     });
   });
+}
+
+function nativeMessageErrorDetail(message, result = {}) {
+  const response = result.response || {};
+  return compactObject({
+    action: message?.action || "unknown",
+    hostName: NATIVE_HOST_NAME,
+    runtimeError: result.runtimeError,
+    message: result.message,
+    version: response.version,
+    protocolVersion: response.protocolVersion,
+    compatible: result.compatible ?? response.compatible,
+    compatibilityMessage: result.compatibilityMessage || response.compatibilityMessage,
+    minimumExtensionVersion: response.minimumExtensionVersion,
+    minimumNativeHostVersion: response.minimumNativeHostVersion,
+    rejectedReason: response.rejectedReason,
+    requestID: response.requestID
+  });
+}
+
+function compactObject(value) {
+  const output = {};
+  for (const [key, rawValue] of Object.entries(value || {})) {
+    if (rawValue === undefined || rawValue === null || rawValue === "") {
+      continue;
+    }
+    output[key] = typeof rawValue === "string" ? rawValue.slice(0, 500) : rawValue;
+  }
+  return output;
 }
 
 function nativeHostCompatibility(response) {
@@ -1338,11 +1383,12 @@ function markSuccess() {
   setBadge("OK", "#1f8f4d");
 }
 
-function markFailure(message) {
+function markFailure(message, detail = {}) {
   console.warn(`SwiftGetX: ${message}`);
   setLocalStorage({
     [LAST_ERROR_KEY]: {
       message: String(message || i18n("sendFailed")),
+      detail: compactObject(detail),
       at: Date.now()
     }
   });

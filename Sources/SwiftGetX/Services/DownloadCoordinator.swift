@@ -1044,6 +1044,67 @@ final class DownloadCoordinator {
         save()
     }
 
+    func appendDebugLog(_ message: String, to task: DownloadTask) {
+        guard settings?.diagnosticLogLevel.includesDebugEntries == true else { return }
+        task.appendLog("[debug] \(message)")
+        save()
+    }
+
+    func supportDiagnosticsBundle(
+        nativeHostDiagnostics: NativeHostDiagnostics? = nil
+    ) -> SupportDiagnosticsBundle {
+        SupportDiagnosticsBuilder.makeBundle(
+            settings: settings,
+            tasks: allTasks(),
+            nativeHostDiagnostics: nativeHostDiagnostics
+        )
+    }
+
+    func supportDiagnosticsText(
+        nativeHostDiagnostics: NativeHostDiagnostics? = nil
+    ) -> String {
+        SupportDiagnosticsBuilder.text(
+            for: supportDiagnosticsBundle(nativeHostDiagnostics: nativeHostDiagnostics)
+        )
+    }
+
+    func copyDiagnostics(nativeHostDiagnostics: NativeHostDiagnostics? = nil) {
+        let text = supportDiagnosticsText(nativeHostDiagnostics: nativeHostDiagnostics)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        statusMessage = L10n.string("support_diagnostics_copied")
+    }
+
+    @discardableResult
+    func exportDiagnostics(
+        to directory: URL? = nil,
+        nativeHostDiagnostics: NativeHostDiagnostics? = nil
+    ) -> URL? {
+        let bundle = supportDiagnosticsBundle(nativeHostDiagnostics: nativeHostDiagnostics)
+        let exportDirectory = directory
+            ?? settings?.defaultDownloadDirectory
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let destination = FileManager.default.uniqueFileURL(
+            for: exportDirectory.appendingPathComponent("SwiftGetX-Diagnostics.json")
+        )
+
+        do {
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try SupportDiagnosticsBuilder
+                .jsonData(for: bundle)
+                .write(to: destination, options: [.atomic])
+            statusMessage = L10n.string("support_diagnostics_exported", destination.path)
+            return destination
+        } catch {
+            statusMessage = PrivacyRedactor.redactedText(error.localizedDescription)
+            return nil
+        }
+    }
+
     func renameAndContinue(_ task: DownloadTask) {
         guard task.kind == .http,
               task.status == .failed || task.status == .cancelled || task.status == .paused

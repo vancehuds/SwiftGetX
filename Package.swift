@@ -114,7 +114,10 @@ let package = Package(
         ),
         .testTarget(
             name: "SwiftGetXTests",
-            dependencies: swiftGetXTestDependencies
+            dependencies: swiftGetXTestDependencies,
+            resources: [
+                .copy("Fixtures")
+            ]
         )
     ]
 )

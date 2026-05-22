@@ -331,6 +331,31 @@ struct HTTPDownloadEngineTests {
         #expect(HTTPDownloadError.serverStatus(418).errorDescription == L10n.string("error_server_status", 418))
     }
 
+    @Test("reports local connection interruption as failed network exception")
+    func reportsLocalConnectionInterruptionAsFailedNetworkException() async throws {
+        let server = try RangeTestServer(payload: Self.payload(), behavior: .dropGETConnection)
+        try await server.start()
+        defer { server.stop() }
+
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let recorder = SnapshotRecorder()
+        let engine = HTTPDownloadEngine()
+        engine.onSnapshot = { snapshot in
+            recorder.append(snapshot)
+        }
+        engine.configure(segmentCount: 1, retryLimit: 0)
+        await engine.start(Self.request(
+            source: server.url,
+            destination: directory.appendingPathComponent("interrupted.bin")
+        ))
+
+        let failed = try #require(recorder.snapshots.last(where: { $0.status == .failed }))
+        #expect(failed.errorMessage?.isEmpty == false)
+        #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("interrupted.bin").path))
+    }
+
     @Test("honors per-task segment override")
     func honorsPerTaskSegmentOverride() async throws {
         let payload = Self.largePayload()
@@ -1362,6 +1387,7 @@ private final class RangeTestServer: @unchecked Sendable {
         case headWithoutContentLength
         case rejectRangeRequests
         case rejectMetadataProbe
+        case dropGETConnection
     }
 
     private let payload: Data
@@ -1411,7 +1437,10 @@ private final class RangeTestServer: @unchecked Sendable {
             listener.newConnectionHandler = { connection in
                 connection.start(queue: self.queue)
                 Self.receiveRequest(on: connection) { request in
-                    let response = self.response(for: request)
+                    guard let response = self.response(for: request) else {
+                        connection.cancel()
+                        return
+                    }
                     connection.send(content: response, completion: .contentProcessed { _ in
                         connection.cancel()
                     })
@@ -1431,7 +1460,7 @@ private final class RangeTestServer: @unchecked Sendable {
         }
     }
 
-    private func response(for request: String) -> Data {
+    private func response(for request: String) -> Data? {
         lock.lock()
         capturedRequests.append(request)
         lock.unlock()
@@ -1490,6 +1519,10 @@ private final class RangeTestServer: @unchecked Sendable {
         getCount += 1
         let currentGETCount = getCount
         lock.unlock()
+
+        if behavior == .dropGETConnection {
+            return nil
+        }
 
         if case .failFirstGET(let status) = behavior, currentGETCount == 1 {
             return Self.httpResponse(

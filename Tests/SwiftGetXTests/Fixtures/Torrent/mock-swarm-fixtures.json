@@ -1,0 +1,46 @@
+{
+  "trackers": [
+    {
+      "url": "https://tracker.example.com/announce",
+      "tier": 0,
+      "peers": 2,
+      "seeds": 4
+    },
+    {
+      "url": "udp://tracker.example.com:6969/announce",
+      "tier": 1,
+      "peers": 1,
+      "seeds": 2
+    }
+  ],
+  "peers": [
+    {
+      "ip": "192.0.2.10",
+      "port": 51413,
+      "source": "tracker",
+      "pieces": [0, 1, 2]
+    },
+    {
+      "ip": "192.0.2.11",
+      "port": 51414,
+      "source": "pex",
+      "pieces": [1, 3]
+    },
+    {
+      "ip": "192.0.2.12",
+      "port": 51415,
+      "source": "dht",
+      "pieces": [2, 4]
+    }
+  ],
+  "dhtNodes": [
+    {
+      "host": "198.51.100.20",
+      "port": 6881
+    },
+    {
+      "host": "198.51.100.21",
+      "port": 6881
+    }
+  ]
+}

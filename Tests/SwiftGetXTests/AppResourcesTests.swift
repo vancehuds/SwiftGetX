@@ -34,6 +34,33 @@ struct AppResourcesTests {
         #expect(text.contains("default SwiftTorrent release path"))
     }
 
+    @Test("Chrome extension stores detailed native-message errors for popup diagnostics")
+    func chromeExtensionStoresDetailedNativeMessageErrors() throws {
+        let extensionDirectory = try #require(AppResources.url(forResource: "ChromeExtension"))
+        let background = try String(
+            contentsOf: extensionDirectory.appendingPathComponent("background.js"),
+            encoding: .utf8
+        )
+        let popup = try String(
+            contentsOf: extensionDirectory.appendingPathComponent("popup.js"),
+            encoding: .utf8
+        )
+        let popupHTML = try String(
+            contentsOf: extensionDirectory.appendingPathComponent("popup.html"),
+            encoding: .utf8
+        )
+
+        #expect(background.contains("nativeMessageErrorDetail"))
+        #expect(background.contains("LAST_ERROR_KEY"))
+        #expect(background.contains("detail: compactObject(detail)"))
+        #expect(background.contains("rejectedReason"))
+        #expect(background.contains("requestID"))
+        #expect(popup.contains("swiftgetx-last-error"))
+        #expect(popup.contains("showError(response.error.message, response.error.detail)"))
+        #expect(popup.contains("formatErrorDetail"))
+        #expect(popupHTML.contains("error-panel"))
+    }
+
     @Test("AppInfo declares torrent files and Services input")
     func appInfoDeclaresTorrentFilesAndServicesInput() throws {
         let appInfoURL = try #require(AppResources.url(forResource: "AppInfo", withExtension: "plist"))

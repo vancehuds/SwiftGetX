@@ -49,6 +49,7 @@ final class AppSettings {
     var torrentSeedingLimitMode: TorrentSeedingLimitMode = .stopAtRatio
     var torrentEngine: TorrentEngineKind = .swift
     var torrentDHTBootstrapNodes: [String] = TorrentRuntimeOptions.defaultDHTBootstrapNodes
+    var diagnosticLogLevel: DiagnosticLogLevel = .normal
     var language: AppLanguage = .system {
         didSet {
             userDefaults.set(language.rawValue, forKey: Self.languageUserDefaultsKey)
@@ -98,6 +99,7 @@ final class AppSettings {
         torrentSeedingLimitMode = TorrentSeedingLimitMode(rawValue: record.torrentSeedingLimitModeRawValue) ?? .stopAtRatio
         torrentEngine = TorrentEngineKind(rawValue: record.torrentEngineRawValue) ?? .swift
         torrentDHTBootstrapNodes = Self.normalizedTorrentDHTBootstrapNodes(record.torrentDHTBootstrapNodes)
+        diagnosticLogLevel = DiagnosticLogLevel(rawValue: record.diagnosticLogLevelRawValue) ?? .normal
         language = AppLanguage.storedPreference(from: record.languageRawValue, in: userDefaults)
     }
 
@@ -140,6 +142,7 @@ final class AppSettings {
             torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue,
             torrentEngineRawValue: torrentEngine.rawValue,
             torrentDHTBootstrapNodes: Self.normalizedTorrentDHTBootstrapNodes(torrentDHTBootstrapNodes),
+            diagnosticLogLevelRawValue: diagnosticLogLevel.rawValue,
             languageRawValue: language.rawValue
         )
     }
@@ -183,6 +186,7 @@ final class AppSettings {
         record.torrentSeedingLimitModeRawValue = torrentSeedingLimitMode.rawValue
         record.torrentEngineRawValue = torrentEngine.rawValue
         record.torrentDHTBootstrapNodes = Self.normalizedTorrentDHTBootstrapNodes(torrentDHTBootstrapNodes)
+        record.diagnosticLogLevelRawValue = diagnosticLogLevel.rawValue
         record.languageRawValue = language.rawValue
     }
 
@@ -341,6 +345,7 @@ final class AppSettingsRecord {
     var torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue
     var torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue
     var torrentDHTBootstrapNodes: [String] = TorrentRuntimeOptions.defaultDHTBootstrapNodes
+    var diagnosticLogLevelRawValue: String = DiagnosticLogLevel.normal.rawValue
     var languageRawValue: String = AppLanguage.system.rawValue
 
 
@@ -384,6 +389,7 @@ final class AppSettingsRecord {
         torrentSeedingLimitModeRawValue: String = TorrentSeedingLimitMode.stopAtRatio.rawValue,
         torrentEngineRawValue: String = TorrentEngineKind.swift.rawValue,
         torrentDHTBootstrapNodes: [String] = TorrentRuntimeOptions.defaultDHTBootstrapNodes,
+        diagnosticLogLevelRawValue: String = DiagnosticLogLevel.normal.rawValue,
         languageRawValue: String = AppLanguage.system.rawValue
     ) {
         self.id = id
@@ -427,6 +433,8 @@ final class AppSettingsRecord {
         self.torrentDHTBootstrapNodes = TorrentRuntimeOptions(
             dhtBootstrapNodes: torrentDHTBootstrapNodes
         ).dhtBootstrapNodes
+        self.diagnosticLogLevelRawValue = DiagnosticLogLevel(rawValue: diagnosticLogLevelRawValue)?.rawValue
+            ?? DiagnosticLogLevel.normal.rawValue
         self.languageRawValue = languageRawValue
     }
 }

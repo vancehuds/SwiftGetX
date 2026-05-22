@@ -275,7 +275,7 @@ li:first-child {
   max-width: none;
   margin: 4px 0 0;
   color: inherit;
-  white-space: normal;
+  white-space: pre-wrap;
 }
 
 @media (prefers-color-scheme: dark) {

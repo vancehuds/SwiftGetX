@@ -1,0 +1,30 @@
+[
+  {
+    "name": "Accepted browser download",
+    "source": "popup-current-page",
+    "url": "https://example.com/assets/release.zip",
+    "expectedNativeHostState": "accepted",
+    "expectedMessage": "task queued"
+  },
+  {
+    "name": "Blocked host falls back to browser download",
+    "source": "context-menu-link",
+    "url": "https://blocked.example.com/app.dmg",
+    "expectedNativeHostState": "blocked",
+    "expectedMessage": "blocked-site"
+  },
+  {
+    "name": "Native host incompatibility is surfaced in the popup",
+    "source": "popup-selection",
+    "url": "https://example.com/setup.pkg",
+    "expectedNativeHostState": "incompatible",
+    "expectedMessage": "nativeHostIncompatible"
+  },
+  {
+    "name": "SwiftGetX repair request opens the browser setup page",
+    "source": "scan-page",
+    "url": "https://example.com/metadata.m3u8",
+    "expectedNativeHostState": "repair-requested",
+    "expectedMessage": "setupPairingOpened"
+  }
+]

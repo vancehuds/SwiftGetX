@@ -153,6 +153,7 @@ private struct SettingsSnapshot: Equatable {
     let torrentSeedingLimitMode: TorrentSeedingLimitMode
     let torrentEngine: TorrentEngineKind
     let torrentDHTBootstrapNodes: [String]
+    let diagnosticLogLevel: DiagnosticLogLevel
     let language: AppLanguage
 
     @MainActor
@@ -194,6 +195,7 @@ private struct SettingsSnapshot: Equatable {
         torrentSeedingLimitMode = settings.torrentSeedingLimitMode
         torrentEngine = settings.torrentEngine
         torrentDHTBootstrapNodes = settings.torrentDHTBootstrapNodes
+        diagnosticLogLevel = settings.diagnosticLogLevel
         language = settings.language
     }
 }
@@ -449,6 +451,13 @@ private struct SystemSettingsTab: View {
                         Text(language.title).tag(language)
                     }
                 }
+
+                Picker(L10n.string("diagnostic_log_level"), selection: $settings.diagnosticLogLevel) {
+                    ForEach(DiagnosticLogLevel.allCases) { level in
+                        Text(level.title).tag(level)
+                    }
+                }
+                .help(L10n.string("diagnostic_log_level_help"))
                 
                 Toggle(L10n.string("completion_notifications"), isOn: $settings.completionNotificationsEnabled)
                 Toggle(L10n.string("clipboard_link_detection"), isOn: $settings.clipboardDetectionEnabled)
@@ -629,6 +638,7 @@ private struct SpeedLimitSettingsRow: View {
 }
 
 private struct BrowserIntegrationRow: View {
+    @Environment(DownloadCoordinator.self) private var coordinator
     @Bindable var diagnostics: NativeHostDiagnostics
     let layout: ResponsiveLayout
 
@@ -722,6 +732,24 @@ private struct BrowserIntegrationRow: View {
             }
             .buttonStyle(.borderless)
             .help(L10n.string("help_reveal_manifest"))
+
+            Button {
+                coordinator.copyDiagnostics(nativeHostDiagnostics: diagnostics)
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            .help(L10n.string("support_diagnostics_copy_help"))
+            .accessibilityLabel(L10n.string("support_diagnostics_copy"))
+
+            Button {
+                coordinator.exportDiagnostics(nativeHostDiagnostics: diagnostics)
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .help(L10n.string("support_diagnostics_export_help"))
+            .accessibilityLabel(L10n.string("support_diagnostics_export"))
         }
     }
 

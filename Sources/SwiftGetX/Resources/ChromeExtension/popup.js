@@ -179,7 +179,7 @@ async function sendDownload(payload) {
     hideError();
   } else {
     setStatus(i18n("statusFailed"), "error");
-    showError(response?.message || i18n("sendFailed"));
+    showError(response?.message || i18n("sendFailed"), response?.errorDetail);
     await loadLastError();
   }
 }
@@ -327,15 +327,18 @@ async function loadLastError() {
       type: "swiftgetx-last-error"
     });
     if (response?.ok && response.error?.message) {
-      showError(response.error.message);
+      showError(response.error.message, response.error.detail);
     }
   } catch {
     // The visible connection status covers native-host communication failures.
   }
 }
 
-function showError(message) {
-  errorDetail.textContent = message;
+function showError(message, detail = {}) {
+  const detailText = formatErrorDetail(detail);
+  errorDetail.textContent = detailText
+    ? `${message}\n${detailText}`
+    : message;
   errorPanel.hidden = false;
 }
 
@@ -357,6 +360,18 @@ function setConnectionState(state, label, detail) {
   connectionIndicator.className = `connection-indicator ${state}`;
   connectionLabel.textContent = label;
   connectionDetail.textContent = detail;
+}
+
+function formatErrorDetail(detail) {
+  const entries = Object.entries(detail || {})
+    .filter(([, value]) => value !== undefined && value !== null && value !== "");
+  if (entries.length === 0) {
+    return "";
+  }
+
+  return entries
+    .map(([key, value]) => `${key}: ${String(value)}`)
+    .join("\n");
 }
 
 function filenameFromURL(value) {

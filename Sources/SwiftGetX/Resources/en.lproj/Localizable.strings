@@ -137,6 +137,10 @@
 "detail_started_at" = "Started";
 "detail_total_size" = "Total File Size";
 "diagnostics_checking" = "Checking...";
+"diagnostic_log_level" = "Diagnostic Log Level";
+"diagnostic_log_level_help" = "Verbose mode records additional redacted debug entries for support diagnostics.";
+"diagnostic_log_level_normal" = "Normal";
+"diagnostic_log_level_verbose" = "Verbose";
 "diagnostics_repairing" = "Repairing...";
 "diagnostics_unchecked" = "Not checked";
 "download_kind_badge" = "%@ Download";
@@ -512,6 +516,12 @@
 "settings_system_language" = "Language";
 "language_system" = "System Default";
 "torrent_swift_engine_runtime_pending" = "Swift torrent engine is metadata-only until tracker, peer, and storage tasks are implemented.";
+"support_diagnostics_copied" = "Diagnostics copied.";
+"support_diagnostics_copy" = "Copy Diagnostics";
+"support_diagnostics_copy_help" = "Copy a redacted diagnostics report for support.";
+"support_diagnostics_export" = "Export Diagnostics";
+"support_diagnostics_export_help" = "Export a redacted diagnostics bundle to the download folder.";
+"support_diagnostics_exported" = "Diagnostics exported to %@";
 "unknown" = "Unknown";
 "upload_speed_limit" = "Upload Speed Limit";
 "updates_automatic_checks" = "Automatically check for updates";

@@ -131,6 +131,7 @@ struct AppSettingsArchive: Codable, Equatable {
     var torrentSeedingLimitMode: TorrentSeedingLimitMode
     var torrentEngine: TorrentEngineKind
     var torrentDHTBootstrapNodes: [String]
+    var diagnosticLogLevel: DiagnosticLogLevel?
     var language: AppLanguage
 
     init(record: AppSettingsRecord) {
@@ -174,6 +175,7 @@ struct AppSettingsArchive: Codable, Equatable {
         torrentDHTBootstrapNodes = TorrentRuntimeOptions(
             dhtBootstrapNodes: record.torrentDHTBootstrapNodes
         ).dhtBootstrapNodes
+        diagnosticLogLevel = DiagnosticLogLevel(rawValue: record.diagnosticLogLevelRawValue) ?? .normal
         language = AppLanguage(rawValue: record.languageRawValue) ?? .system
     }
 
@@ -218,6 +220,7 @@ struct AppSettingsArchive: Codable, Equatable {
             torrentSeedingLimitModeRawValue: torrentSeedingLimitMode.rawValue,
             torrentEngineRawValue: torrentEngine.rawValue,
             torrentDHTBootstrapNodes: torrentDHTBootstrapNodes,
+            diagnosticLogLevelRawValue: diagnosticLogLevel?.rawValue ?? DiagnosticLogLevel.normal.rawValue,
             languageRawValue: language.rawValue
         )
     }

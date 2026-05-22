@@ -1423,17 +1423,45 @@ Next step:
 
 ## Task 30: Test, Diagnostics, and Support Tooling
 
-Status: [ ]
+Status: [x]
 
 Add browser E2E-friendly fixtures, torrent mock tracker/peer/DHT fixtures, network/file exception tests, UI/accessibility test coverage where feasible, diagnostic bundle export, redacted debug logs, crash-log guidance, extension popup native-message error details, and copy-diagnostics action.
 
 Work performed:
 
+- Added `DiagnosticLogLevel` with Normal/Verbose support and persisted it through `AppSettings`, `AppSettingsRecord`, `AppSettingsArchive`, Settings UI, and localization.
+- Added `SupportDiagnosticsBuilder` with structured/text/JSON diagnostics bundles covering app/native-host/browser compatibility metadata, settings snapshots, native-host browser diagnostics, bounded task snapshots, recent redacted errors, and crash-log guidance.
+- Added coordinator support actions for redacted diagnostics text, copy-to-pasteboard, JSON export, and verbose-only redacted debug log entries.
+- Added Settings Browser Integration actions for Copy Diagnostics and Export Diagnostics, plus System settings for diagnostic log level.
+- Extended the Chrome extension native-message error handling so popup diagnostics include structured details such as action, host name, runtime error, compatibility fields, rejected reason, and request ID, while preserving multiline display in the popup error panel.
+- Added browser E2E-friendly Native Host scenario fixtures and torrent mock swarm fixtures under `Tests/SwiftGetXTests/Fixtures`, and copied test fixtures as SwiftPM test resources.
+- Added `Docs/DiagnosticsAndSupport.md` documenting diagnostic bundle contents, redaction guarantees, verbose logging, extension error details, crash-log collection, and local fixture strategy.
+- Added support diagnostics tests for redaction, normal-vs-verbose log handling, JSON stability, copy/export actions, settings/archive persistence, native-host snapshots, bundled fixture schemas, and extension popup error detail exposure.
+- Added a local HTTP network exception regression where the test server drops the GET connection and the engine reports a failed network exception without writing a final file.
+
 Verification evidence:
+
+- `swift build` passed after rerunning with approved SwiftPM cache access.
+- `swift test --filter SupportDiagnostics --filter HTTPDownloadEngine` passed with 47 tests across 2 suites.
+- `swift test --filter SupportDiagnostics --filter AppResources` passed with 15 tests across 2 suites.
+- `swift test` passed with 286 tests across 22 suites.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/popup.js` passed.
+- Node JSON parsing passed for the Chrome extension manifest/locales and the new browser/torrent fixture JSON files.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings Sources/SwiftGetX/Resources/AppInfo.plist` passed.
+- `bash -n Scripts/package-dmg.sh Scripts/package-chrome-extension.sh Scripts/validate-release.sh Scripts/local-build.sh` passed.
+- `git diff --check` passed.
 
 Remaining risk:
 
+- Browser E2E fixtures are bundled and schema-validated, but a real installed Chrome extension/native-host/browser profile automation run was not performed in this session.
+- Diagnostic redaction covers URL tokens, sensitive headers, bearer tokens, and sensitive assignments, but support bundles can still include operationally sensitive file names, local paths, host names, and extension IDs; `Docs/DiagnosticsAndSupport.md` documents that users should review bundles before sharing.
+- Verbose diagnostic logging is intentionally coordinator-gated and redacted, but only code paths that call `appendDebugLog` produce extra debug entries; deeper subsystem-specific debug instrumentation can be expanded as new support cases arise.
+- The added network exception regression covers local connection interruption; broader real DNS/TLS/offline failures remain best covered by future external-environment or UI automation harnesses.
+
 Next step:
+
+- Large Check 10: Release and Quality.
 
 ## Large Check 10: Release and Quality
 
