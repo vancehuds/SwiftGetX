@@ -1,3 +1,4 @@
+import Foundation
 import SwiftData
 
 enum SwiftGetXSchemaV2: VersionedSchema {
@@ -15,6 +16,23 @@ enum SwiftGetXPersistence {
 
     static var currentSchema: Schema {
         Schema(versionedSchema: SwiftGetXSchemaV2.self)
+    }
+
+    static var defaultStoreURL: URL {
+        defaultModelConfiguration().url
+    }
+
+    static func defaultModelConfiguration() -> ModelConfiguration {
+        ModelConfiguration(schema: currentSchema)
+    }
+
+    static func makeTemporaryModelContainer() throws -> ModelContainer {
+        try makeModelContainer(
+            configurations: ModelConfiguration(
+                schema: currentSchema,
+                isStoredInMemoryOnly: true
+            )
+        )
     }
 
     static func makeModelContainer(

@@ -42,6 +42,106 @@ struct PersistenceArchiveTests {
         #expect(tasks.map(\.name) == ["legacy"])
     }
 
+    @Test("startup recovery reports container failures without crashing")
+    func startupRecoveryReportsContainerFailuresWithoutCrashing() throws {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let state = StartupRecoveryService.openPersistentContainer(now: now) {
+            throw StartupRecoveryTestError.failed(
+                "Unable to open https://example.com/db?token=secret Authorization: BearerSecret"
+            )
+        }
+
+        guard case .failed(let issue) = state else {
+            Issue.record("Expected recoverable startup failure")
+            return
+        }
+
+        let diagnostics = StartupRecoveryService.diagnosticsText(for: issue)
+
+        #expect(issue.occurredAt == now)
+        #expect(issue.schemaVersion == SwiftGetXPersistence.currentSchemaVersion)
+        #expect(issue.canRebuildPersistentStore)
+        #expect(!issue.errorDescription.contains("secret"))
+        #expect(!issue.errorDescription.contains("BearerSecret"))
+        #expect(diagnostics.contains("SwiftGetX Startup Recovery"))
+        #expect(diagnostics.contains("Schema Version"))
+        #expect(!diagnostics.contains("secret"))
+        #expect(!diagnostics.contains("BearerSecret"))
+    }
+
+    @Test("startup recovery can continue with a temporary empty store")
+    func startupRecoveryCanContinueWithTemporaryEmptyStore() throws {
+        let container = try StartupRecoveryService.makeTemporaryContainer()
+        container.mainContext.insert(DownloadTask(
+            name: "temporary",
+            source: "https://example.com/temp.zip",
+            kind: .http,
+            savePath: "/tmp/temp.zip"
+        ))
+        try container.mainContext.save()
+
+        let tasks = try container.mainContext.fetch(FetchDescriptor<DownloadTask>())
+
+        #expect(tasks.map(\.name) == ["temporary"])
+    }
+
+    @Test("startup recovery backs up only persistent store files")
+    func startupRecoveryBacksUpOnlyPersistentStoreFiles() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appendingPathComponent("SwiftGetX.store")
+        let sidecarURLs = [
+            storeURL,
+            URL(fileURLWithPath: "\(storeURL.path)-wal"),
+            URL(fileURLWithPath: "\(storeURL.path)-shm")
+        ]
+        let unrelatedURL = directory.appendingPathComponent("download.zip")
+
+        for url in sidecarURLs {
+            try Data(url.lastPathComponent.utf8).write(to: url)
+        }
+        try Data("keep".utf8).write(to: unrelatedURL)
+
+        let backup = try StartupRecoveryService.backupAndResetPersistentStore(
+            storeURL: storeURL,
+            backupParentDirectory: directory,
+            now: Date(timeIntervalSince1970: 2_000)
+        )
+
+        #expect(backup.originalStoreURL == storeURL.standardizedFileURL)
+        #expect(backup.backupDirectoryURL.lastPathComponent == "SwiftGetX-Recovered-Store-2000")
+        #expect(backup.movedURLs.map(\.lastPathComponent).sorted() == sidecarURLs.map(\.lastPathComponent).sorted())
+        for url in sidecarURLs {
+            #expect(!FileManager.default.fileExists(atPath: url.path))
+            #expect(FileManager.default.fileExists(
+                atPath: backup.backupDirectoryURL.appendingPathComponent(url.lastPathComponent).path
+            ))
+        }
+        #expect(FileManager.default.fileExists(atPath: unrelatedURL.path))
+    }
+
+    @Test("startup recovery refuses unsafe or missing store backups")
+    func startupRecoveryRefusesUnsafeOrMissingStoreBackups() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let missingStoreURL = directory.appendingPathComponent("missing.store")
+
+        #expect(throws: StartupRecoveryError.noPersistentStoreFiles(missingStoreURL.standardizedFileURL.path)) {
+            try StartupRecoveryService.backupAndResetPersistentStore(
+                storeURL: missingStoreURL,
+                backupParentDirectory: directory
+            )
+        }
+
+        let emptyPathStoreURL = URL(fileURLWithPath: "")
+        #expect(throws: StartupRecoveryError.unsafeStoreURL(emptyPathStoreURL.standardizedFileURL.path)) {
+            try StartupRecoveryService.backupAndResetPersistentStore(
+                storeURL: emptyPathStoreURL,
+                backupParentDirectory: directory
+            )
+        }
+    }
+
     @Test("repairs invalid optional JSON fields and settings schema")
     func repairsInvalidOptionalJSONFieldsAndSettingsSchema() throws {
         let fixture = try makeFixture()
@@ -356,4 +456,15 @@ private struct PersistenceFixture {
     let context: ModelContext
     let settings: AppSettings
     let coordinator: DownloadCoordinator
+}
+
+private enum StartupRecoveryTestError: LocalizedError {
+    case failed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .failed(let message):
+            message
+        }
+    }
 }

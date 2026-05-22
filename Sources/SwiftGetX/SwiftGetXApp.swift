@@ -9,19 +9,16 @@ struct SwiftGetXApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var softwareUpdater = SoftwareUpdater()
 
-    private let modelContainer: ModelContainer
     private let chromeNativeHostRegistrar = ChromeNativeHostRegistrar()
+    @State private var startupState: StartupModelContainerState
     @State private var coordinator = DownloadCoordinator()
     @State private var browserBridge = BrowserBridge()
     @State private var clipboardMonitor = ClipboardMonitor()
     @State private var appSettings = AppSettings()
+    @State private var configuredModelContainerID: ObjectIdentifier?
 
     init() {
-        do {
-            modelContainer = try SwiftGetXPersistence.makeModelContainer()
-        } catch {
-            fatalError("Unable to create SwiftData container: \(error)")
-        }
+        _startupState = State(initialValue: StartupRecoveryService.openPersistentContainer())
 
         NotificationManager.requestAuthorization()
         WindowConfigurator.configureDefaultAppearance()
@@ -29,37 +26,7 @@ struct SwiftGetXApp: App {
 
     var body: some Scene {
         Window("SwiftGetX", id: "main") {
-            ContentView()
-                .environment(coordinator)
-                .environment(browserBridge)
-                .environment(clipboardMonitor)
-                .environment(appSettings)
-                .modelContainer(modelContainer)
-                .task {
-                    loadSettings()
-                    coordinator.attach(modelContext: modelContainer.mainContext, settings: appSettings)
-                    appDelegate.attachMenuBar(coordinator: coordinator, settings: appSettings)
-                    browserBridge.attach(coordinator: coordinator)
-                    clipboardMonitor.attach(coordinator: coordinator, settings: appSettings)
-                    coordinator.restoreIncompleteTasks()
-                    registerChromeNativeHost()
-                }
-                .onOpenURL { url in
-                    NSApp.activate(ignoringOtherApps: true)
-                    if let draft = DeepLinkParser.downloadDraft(from: url) {
-                        handleDownloadDraft(draft)
-                    } else if DeepLinkParser.isDownloadURL(url) {
-                        return
-                    } else if let setupRequest = DeepLinkParser.browserSetupRequest(from: url) {
-                        handleBrowserSetupRequest(setupRequest)
-                    } else if DeepLinkParser.isBrowserSetupURL(url) {
-                        return
-                    } else if let draft = DownloadInputSourceCollector.draft(urls: [url]) {
-                        handleDownloadDraft(draft)
-                    } else {
-                        coordinator.add(source: url.absoluteString)
-                    }
-                }
+            mainWindowContent
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -71,13 +38,131 @@ struct SwiftGetXApp: App {
         }
 
         Settings {
+            settingsContent
+        }
+    }
+
+    @MainActor
+    @ViewBuilder
+    private var mainWindowContent: some View {
+        switch startupState {
+        case .ready(let modelContainer):
+            ContentView()
+                .environment(coordinator)
+                .environment(browserBridge)
+                .environment(clipboardMonitor)
+                .environment(appSettings)
+                .modelContainer(modelContainer)
+                .task {
+                    configureApp(with: modelContainer)
+                }
+                .onOpenURL { url in
+                    handleOpenURL(url)
+                }
+        case .failed(let issue):
+            StartupRecoveryView(
+                issue: issue,
+                onRetry: retryStartup,
+                onUseTemporaryStore: useTemporaryStore,
+                onBackupAndReset: backupAndResetPersistentStore
+            )
+            .onOpenURL { url in
+                handleOpenURLWhenPersistenceUnavailable(url)
+            }
+        }
+    }
+
+    @MainActor
+    @ViewBuilder
+    private var settingsContent: some View {
+        switch startupState {
+        case .ready(let modelContainer):
             SettingsView(updater: softwareUpdater)
                 .environment(appSettings)
                 .environment(coordinator)
                 .modelContainer(modelContainer)
                 .frame(minWidth: 420, idealWidth: 520, minHeight: 390, idealHeight: 480)
                 .id(appSettings.language)
+        case .failed(let issue):
+            StartupRecoveryView(
+                issue: issue,
+                onRetry: retryStartup,
+                onUseTemporaryStore: useTemporaryStore,
+                onBackupAndReset: backupAndResetPersistentStore
+            )
+            .frame(minWidth: 420, idealWidth: 520, minHeight: 390, idealHeight: 480)
         }
+    }
+
+    @MainActor
+    private func configureApp(with modelContainer: ModelContainer) {
+        let modelContainerID = ObjectIdentifier(modelContainer)
+        guard configuredModelContainerID != modelContainerID else { return }
+        configuredModelContainerID = modelContainerID
+
+        loadSettings(modelContainer: modelContainer)
+        coordinator.attach(modelContext: modelContainer.mainContext, settings: appSettings)
+        appDelegate.attachMenuBar(coordinator: coordinator, settings: appSettings)
+        browserBridge.attach(coordinator: coordinator)
+        clipboardMonitor.attach(coordinator: coordinator, settings: appSettings)
+        coordinator.restoreIncompleteTasks()
+        registerChromeNativeHost()
+    }
+
+    @MainActor
+    private func retryStartup() {
+        startupState = StartupRecoveryService.openPersistentContainer()
+    }
+
+    @MainActor
+    private func useTemporaryStore() {
+        do {
+            startupState = .ready(try StartupRecoveryService.makeTemporaryContainer())
+        } catch {
+            startupState = .failed(StartupRecoveryService.issue(for: error))
+        }
+    }
+
+    @MainActor
+    private func backupAndResetPersistentStore() {
+        do {
+            _ = try StartupRecoveryService.backupAndResetPersistentStore()
+            retryStartup()
+        } catch {
+            startupState = .failed(StartupRecoveryService.issue(for: error))
+        }
+    }
+
+    @MainActor
+    private func handleOpenURL(_ url: URL) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let draft = DeepLinkParser.downloadDraft(from: url) {
+            handleDownloadDraft(draft)
+        } else if DeepLinkParser.isDownloadURL(url) {
+            return
+        } else if let setupRequest = DeepLinkParser.browserSetupRequest(from: url) {
+            handleBrowserSetupRequest(setupRequest)
+        } else if DeepLinkParser.isBrowserSetupURL(url) {
+            return
+        } else if let draft = DownloadInputSourceCollector.draft(urls: [url]) {
+            handleDownloadDraft(draft)
+        } else {
+            coordinator.add(source: url.absoluteString)
+        }
+    }
+
+    @MainActor
+    private func handleOpenURLWhenPersistenceUnavailable(_ url: URL) {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let draft = DeepLinkParser.downloadDraft(from: url) else { return }
+        acknowledgeNativeHandoff(
+            draft,
+            decision: .rejected(
+                reason: "persistenceUnavailable",
+                requiresUserConfirmation: draft.requiresUserConfirmation || draft.isBrowserTakeover,
+                message: "SwiftGetX could not open its download database"
+            )
+        )
     }
 
     @MainActor
@@ -243,7 +328,7 @@ struct SwiftGetXApp: App {
     }
 
     @MainActor
-    private func loadSettings() {
+    private func loadSettings(modelContainer: ModelContainer) {
         let context = modelContainer.mainContext
         let descriptor = FetchDescriptor<AppSettingsRecord>(
             predicate: #Predicate { $0.id == "default" }
