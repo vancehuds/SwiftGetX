@@ -1483,16 +1483,17 @@ Work performed:
 
 Verification evidence:
 
-- `bash -n Scripts/validate-release.sh Scripts/package-dmg.sh Scripts/package-chrome-extension.sh Scripts/generate-appcast.sh Scripts/local-build.sh` passed.
+- `bash -n` passed individually for `Scripts/validate-release.sh`, `Scripts/package-dmg.sh`, `Scripts/package-chrome-extension.sh`, `Scripts/generate-appcast.sh`, and `Scripts/local-build.sh`.
 - `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
 - `node --check Sources/SwiftGetX/Resources/ChromeExtension/popup.js` passed.
 - `node --check Scripts/make-crx.mjs` passed.
 - Node JSON parsing passed for the Chrome extension manifest/locales and Task 30 fixture JSON files.
 - `plutil -lint Sources/SwiftGetX/Resources/AppInfo.plist Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
 - `Scripts/validate-release.sh sparkle` passed.
-- `Scripts/package-chrome-extension.sh Sources/SwiftGetX/Resources/ChromeExtension /private/tmp/swiftgetx-large-check-10-chrome` passed and wrote ZIP, CRX, ID, and `SwiftGetX-Chrome.release.json`.
-- `SWIFTGETX_RELEASE_STRICT=1 SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Scripts/package-chrome-extension.sh ...` failed early before packaging because no strict signing key was provided, confirming the strict secret gate.
-- `swift test --filter ReleaseValidation --filter SupportDiagnostics --filter AppResources --filter NativeMessageHost --filter HTTPDownloadEngine` passed with 101 tests across 5 suites after rerunning with approved SwiftPM cache access.
+- A temporary synthetic appcast passed `Scripts/validate-release.sh appcast <temp-appcast>`.
+- `Scripts/package-chrome-extension.sh Sources/SwiftGetX/Resources/ChromeExtension <temp-dir>` passed and wrote ZIP, CRX, ID, and `SwiftGetX-Chrome.release.json`.
+- Strict Chrome extension packaging with a temporary signing key and `SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` failed with a CRX ID mismatch before writing the mismatched CRX.
+- `swift test --filter ReleaseValidation --filter AppResources --filter SupportDiagnostics` passed with 25 tests across 3 suites after rerunning with approved SwiftPM cache access.
 - `swift build` passed.
 - `swift test` passed with 286 tests across 22 suites.
 - `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed; existing Homebrew OpenSSL deployment-target linker warnings were still present.
