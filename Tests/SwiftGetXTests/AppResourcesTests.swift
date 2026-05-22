@@ -61,6 +61,53 @@ struct AppResourcesTests {
         #expect(popupHTML.contains("error-panel"))
     }
 
+    @Test("Safari extension mirrors Chrome browser handoff surface")
+    func safariExtensionMirrorsChromeBrowserHandoffSurface() throws {
+        let extensionDirectory = try #require(AppResources.url(forResource: "SafariWebExtension"))
+        let manifestData = try Data(contentsOf: extensionDirectory.appendingPathComponent("manifest.json"))
+        let manifest = try #require(JSONSerialization.jsonObject(with: manifestData) as? [String: Any])
+        let permissions = try #require(manifest["permissions"] as? [String])
+        let hostPermissions = try #require(manifest["host_permissions"] as? [String])
+        let action = try #require(manifest["action"] as? [String: Any])
+
+        #expect(Set(permissions).isSuperset(of: [
+            "activeTab",
+            "alarms",
+            "contextMenus",
+            "downloads",
+            "nativeMessaging",
+            "scripting",
+            "storage",
+            "webRequest"
+        ]))
+        #expect(hostPermissions.contains("<all_urls>"))
+        #expect(action["default_popup"] as? String == "popup.html")
+
+        let background = try String(
+            contentsOf: extensionDirectory.appendingPathComponent("background.js"),
+            encoding: .utf8
+        )
+        let popup = try String(
+            contentsOf: extensionDirectory.appendingPathComponent("popup.js"),
+            encoding: .utf8
+        )
+        let popupHTML = try String(
+            contentsOf: extensionDirectory.appendingPathComponent("popup.html"),
+            encoding: .utf8
+        )
+        let apiCompatURL = extensionDirectory.appendingPathComponent("api-compat.js")
+
+        #expect(FileManager.default.fileExists(atPath: apiCompatURL.path))
+        #expect(background.contains("browser: \"Safari\""))
+        #expect(background.contains("openDownloadDeepLink"))
+        #expect(background.contains("download-takeover"))
+        #expect(background.contains("nativeMessageErrorDetail"))
+        #expect(popup.contains("swiftgetx-download"))
+        #expect(popup.contains("swiftgetx-enrich-candidates"))
+        #expect(popupHTML.contains("takeoverSafariDownloads"))
+        #expect(popupHTML.contains("api-compat.js"))
+    }
+
     @Test("AppInfo declares torrent files and Services input")
     func appInfoDeclaresTorrentFilesAndServicesInput() throws {
         let appInfoURL = try #require(AppResources.url(forResource: "AppInfo", withExtension: "plist"))

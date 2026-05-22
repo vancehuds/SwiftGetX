@@ -53,7 +53,7 @@
 *   **Chrome Takeover (Manifest V3)**: Built-in Chrome extension. When a supported HTTP, HTTPS, magnet, or `.torrent` download is triggered in Chrome, the extension intercept-transports it via Native Messaging to SwiftGetX, cancelling the Chrome item after SwiftGetX accepts. If IPC fails, Chrome resumes the original download instantly.
 *   **Multi-Chromium Discovery**: Main App automatically scans local directory trees on startup or focus, auto-detecting extension installations in Chrome, Chrome Canary, Edge, Brave, Vivaldi, Arc, Chromium, and Atlas. Generates or repairs Native Messaging manifests (`com.swiftgetx.native.json`) instantly with zero manual ID copy-pasting.
 *   **Rich Handoff Context**: Securely passes download origins (source page URL, page title, and proposed filename) via deep links (`swiftgetx://download` and `swiftgetx://browser-setup`) with an integrated diagnostic status panel.
-*   **Safari Web Extension Template**: Clean Safari Web Extension bundle placeholder, ready for easy Xcode App Extension Target integration with Apple Developer certificate signing.
+*   **Safari Feature-Parity Extension**: Bundled Safari Web Extension assets cover context menus, popup sends, selection sends, page download-link scanning, connection diagnostics, and the download takeover toggle. Signed distribution still requires an Xcode Safari App Extension target and Apple Developer signing.
 
 ### 🧬 Dual-Engine BitTorrent Architecture
 *   **Decoupled Design**: Features a generic `TorrentEngineAdapter` protocol, isolating BT implementation details completely from SwiftData models and SwiftUI views.
@@ -234,6 +234,8 @@ SwiftGetX is built with a smart auto-discovery framework that configures Chrome 
 
 ### Safari Integration
 *   Safari Extension assets are located at `Sources/SwiftGetX/Resources/SafariWebExtension`.
+*   The Safari extension mirrors the Chrome extension: send the current page, links, media URLs, or selected text from context menus or the popup, scan pages for candidate download links, and take over Safari downloads when Native Messaging is available.
+*   Explicit sends use Native Messaging first. If the native host is unavailable, the extension falls back to a validated `swiftgetx://download` deep link so the user-initiated handoff still reaches SwiftGetX. Download takeover only cancels the browser item after SwiftGetX confirms acceptance.
 *   For signed distribution, you must build and compile a Safari Web Extension target in Xcode, embedding the extension inside the signed macOS App bundle's `Contents/PlugIns` folder.
 
 ---

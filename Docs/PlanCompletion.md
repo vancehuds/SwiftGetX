@@ -9,7 +9,7 @@
 - Fetchable `arvidn/libtorrent` v2.0.12 source at `Vendor/libtorrent`, pinned in `Vendor/libtorrent.version`.
 - `CSwiftGetXLibtorrent` C wrapper and CMake build project for libtorrent integration.
 - Native `LibtorrentAdapter` isolated behind `canImport(CSwiftGetXLibtorrent)` and enabled with `SWIFTGETX_ENABLE_LIBTORRENT=1` as an optional development/reference path. Default builds and releases use SwiftTorrent and do not require libtorrent, Boost, OpenSSL, CMake, or Homebrew.
-- Safari and Chrome extension resource placeholders for explicit handoff.
+- Chrome and Safari Web Extension resources for explicit handoff, popup scanning, native-host diagnostics, and browser download takeover.
 - `SwiftGetXNativeHost` executable for Chrome Native Messaging that opens `swiftgetx://download?url=...`.
 - URL scheme Info.plist template, Native Messaging install script, and DMG/signing/notarization packaging checklist.
 - Unit and integration tests, including a local HTTP Range server that validates segmented download output.

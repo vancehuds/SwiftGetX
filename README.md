@@ -52,7 +52,7 @@
 *   **Chrome 下载接管**：内置 Chrome 扩展（Manifest V3），默认开启“下载接管”。当在 Chrome 中触发符合规则的下载任务时，扩展将任务透明接管，并通过 Native Messaging 协议派发给 SwiftGetX，随后自动取消 Chrome 原生下载任务。如果交接失败，Chrome 将无缝继续下载。
 *   **多 Chromium 浏览器发现**：App 内置智能宿主扫描器，会在启动或激活时**自动发现**本地 Chrome、Chrome Canary、Edge、Brave、Vivaldi、Arc、Chromium 以及 Atlas 的 Extension 配置文件，自动探测 Extension ID 并一键修复本地 Native Messaging 宿主清单（`com.swiftgetx.native.json`），用户无需任何手动配置。
 *   **完整上下文传递**：交接时智能捕获并携带浏览器下载上下文（包括来源页面 URL、标题、建议的文件名等），并通过安全的自定义协议 `swiftgetx://download` 与 `swiftgetx://browser-setup` 进行派发，同时支持在偏好设置中一键开启诊断面板。
-*   **Safari 扩展占位**：提供 Safari Web Extension 资源模板，方便后续在 Xcode 中配置 App Extension Target 实施苹果签名链集成。
+*   **Safari 功能等效扩展**：内置 Safari Web Extension 资源，覆盖右键菜单、弹窗发送、选区发送、页面下载链接扫描、连接诊断和下载接管开关；正式分发时仍需在 Xcode 中配置 Safari App Extension Target 并走苹果签名链。
 
 ### 🧬 双引擎 BitTorrent 下载架构
 *   **隔离设计**：定义了高度抽象的 `TorrentEngineAdapter` 接口协议，将 BT 引擎的具体实现与主 App 彻底隔离。
@@ -234,6 +234,8 @@ SwiftGetX 设计了一套精妙的**主动发现与自动自我修复机制**。
 
 ### Safari 浏览器集成
 *   Safari 扩展资源位于 `Sources/SwiftGetX/Resources/SafariWebExtension`。
+*   Safari 扩展功能与 Chrome 扩展保持一致：可通过右键菜单或弹窗发送当前页面、链接、媒体、选中文本，也可扫描页面候选下载链接，并在 Native Messaging 可用时接管 Safari 下载。
+*   显式发送优先走 Native Messaging；如果宿主不可用，扩展会退回到 `swiftgetx://download` 深度链接，确保用户发起的交接仍可进入 SwiftGetX。下载接管路径只有在 SwiftGetX 确认接收后才取消浏览器原生下载。
 *   在正式发行版中，需由开发者在 Xcode 内将此目录配置为 Safari Extension Target，签名后打包嵌入主 `.app` 的 `Contents/PlugIns` 目录中。
 
 ---

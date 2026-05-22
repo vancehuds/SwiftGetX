@@ -2,10 +2,256 @@
   "appName": {
     "message": "SwiftGetX"
   },
+  "appDescription": {
+    "message": "发送链接、页面、媒体和检测到的下载到 SwiftGetX。"
+  },
+  "safariDescription": {
+    "message": "发送链接、页面、媒体、检测到的下载和 Safari 下载到 SwiftGetX。"
+  },
+  "checkPair": {
+    "message": "检查"
+  },
+  "connected": {
+    "message": "已连接"
+  },
+  "connectionChecking": {
+    "message": "检查中…"
+  },
+  "connectionConnected": {
+    "message": "已连接"
+  },
+  "connectionFailed": {
+    "message": "连接失败"
+  },
+  "connectionUnchecked": {
+    "message": "未检查"
+  },
+  "connectionWaitingPairing": {
+    "message": "等待配对"
+  },
+  "contextDownloadInBrowser": {
+    "message": "在浏览器中下载链接"
+  },
+  "contextScanPage": {
+    "message": "扫描页面下载链接到 SwiftGetX"
+  },
   "contextSendLink": {
     "message": "使用 SwiftGetX 下载链接"
   },
-  "safariDescription": {
-    "message": "将选中的下载发送到 SwiftGetX。"
+  "contextSendMedia": {
+    "message": "使用 SwiftGetX 下载媒体"
+  },
+  "contextSendPage": {
+    "message": "使用 SwiftGetX 下载当前页面"
+  },
+  "contextSendSelection": {
+    "message": "使用 SwiftGetX 下载选中文本"
+  },
+  "currentTab": {
+    "message": "当前标签页"
+  },
+  "downloadCurrentPage": {
+    "message": "下载当前页面"
+  },
+  "downloadLink": {
+    "message": "下载链接"
+  },
+  "downloadSelection": {
+    "message": "下载选中文本"
+  },
+  "errorNoDownloadAddress": {
+    "message": "没有可发送的下载地址"
+  },
+  "errorNoDownloadLinksOnPage": {
+    "message": "当前页面没有发现下载链接"
+  },
+  "errorNoScannableTab": {
+    "message": "没有可扫描的标签页"
+  },
+  "errorTaskRejected": {
+    "message": "SwiftGetX 未接受该任务"
+  },
+  "lastError": {
+    "message": "最近错误"
+  },
+  "linkCount": {
+    "message": "$COUNT$ 个链接",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "nativeHostCannotCommunicate": {
+    "message": "无法与 Native Host 通信"
+  },
+  "nativeHostHealthy": {
+    "message": "Native Host 运行正常"
+  },
+  "nativeHostIncompatible": {
+    "message": "SwiftGetX Native Host 与当前扩展不兼容。请更新 SwiftGetX 并重新安装扩展。"
+  },
+  "nativeHostNoResponse": {
+    "message": "Native Host 未响应"
+  },
+  "nativeHostProtocolIncompatible": {
+    "message": "Native Host 协议 $HOST$ 与扩展协议 $EXTENSION$ 不兼容。",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      },
+      "extension": {
+        "content": "$2"
+      }
+    }
+  },
+  "nativeHostReturnedError": {
+    "message": "Native Host 返回错误"
+  },
+  "nativeHostTooOld": {
+    "message": "Native Host $CURRENT$ 低于所需版本 $MINIMUM$。",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
+  },
+  "extensionTooOld": {
+    "message": "扩展 $CURRENT$ 低于所需版本 $MINIMUM$。请重新安装当前 SwiftGetX 扩展。",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
+  },
+  "pairingOpenedDetail": {
+    "message": "已打开 SwiftGetX，请在软件中允许插件配对后再次检查。"
+  },
+  "scanDownloadLinks": {
+    "message": "扫描下载链接"
+  },
+  "safariPairingUnavailable": {
+    "message": "Safari Native Messaging 由已签名的 Safari App Extension Target 配置。如果持续检查失败，请重新构建或安装 Safari 扩展。"
+  },
+  "candidateReason_content_disposition": {
+    "message": "附件"
+  },
+  "candidateReason_content_type": {
+    "message": "媒体类型"
+  },
+  "candidateReason_download_attribute": {
+    "message": "下载属性"
+  },
+  "candidateReason_download_hint": {
+    "message": "下载线索"
+  },
+  "candidateReason_extension": {
+    "message": "扩展名"
+  },
+  "candidateReason_link": {
+    "message": "链接"
+  },
+  "candidateReason_magnet": {
+    "message": "磁力链接"
+  },
+  "candidateReason_media_manifest": {
+    "message": "媒体清单"
+  },
+  "candidateReason_media_source": {
+    "message": "媒体源"
+  },
+  "metadataLimited": {
+    "message": "元数据有限"
+  },
+  "metadataPending": {
+    "message": "等待元数据"
+  },
+  "selectAll": {
+    "message": "全选"
+  },
+  "selectedCount": {
+    "message": "已选择 $SELECTED$/$TOTAL$",
+    "placeholders": {
+      "selected": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "selectNone": {
+    "message": "取消全选"
+  },
+  "sendAll": {
+    "message": "全部发送"
+  },
+  "sendSelected": {
+    "message": "发送选中项"
+  },
+  "sendFailed": {
+    "message": "发送失败"
+  },
+  "sentToSwiftGetX": {
+    "message": "已发送到 SwiftGetX"
+  },
+  "setupPairingOpened": {
+    "message": "已打开 SwiftGetX 配对请求，请在软件中点击“允许配对”后重新检查。"
+  },
+  "setupPairingRequested": {
+    "message": "已请求 SwiftGetX 配对，请在软件中允许配对后重新检查。"
+  },
+  "statusCannotScan": {
+    "message": "无法扫描"
+  },
+  "statusCount": {
+    "message": "$COUNT$ 个",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusFailed": {
+    "message": "失败"
+  },
+  "statusNoLinks": {
+    "message": "无链接"
+  },
+  "statusNoPage": {
+    "message": "无页面"
+  },
+  "statusNoPermission": {
+    "message": "无权限"
+  },
+  "statusNoSelection": {
+    "message": "无选区"
+  },
+  "statusNoSelectedLinks": {
+    "message": "未选择链接"
+  },
+  "statusNotFound": {
+    "message": "未发现"
+  },
+  "statusReady": {
+    "message": "就绪"
+  },
+  "statusScanning": {
+    "message": "扫描中"
+  },
+  "statusSending": {
+    "message": "发送中"
+  },
+  "statusSent": {
+    "message": "已发送"
+  },
+  "takeoverSafariDownloads": {
+    "message": "接管 Safari 下载"
   }
 }

@@ -25,7 +25,7 @@ SwiftGetX 目前已经具备这些主干能力：
 | P1 | HTTP 任务完整性与高级配置 | 需要 checksum、Content-Disposition 文件名、每任务限速/线程数/重试、代理、磁盘空间预检等日用能力。 |
 | P1 | BT 日用体验与协议覆盖 | 需要 seeding 独立状态、按任务做种策略、启动后自动恢复、端口/加密、DHT、PEX、Tracker 批量管理。 |
 | P1 | 首次启动和诊断引导 | Sidebar 当前静态显示浏览器已就绪，实际状态在设置页；需要把 native host、扩展、BT 引擎、更新配置做成首屏可见诊断。 |
-| P2 | 更多浏览器与协议 | Safari 仍是资源模板，Firefox/Edge/Brave/Vivaldi/Arc 等未覆盖；FTP/SFTP、Metalink、HLS 等协议未支持。 |
+| P2 | 更多浏览器与协议 | Safari 资源已补齐到 Chrome 功能面，但正式 Xcode App Extension 打包、Firefox 支持、以及 FTP/SFTP、Metalink、HLS 等协议仍未闭环。 |
 | P2 | 可观测性、测试和安全加固 | 需要扩展端 E2E、自研 BT 协议 E2E、崩溃日志、隐私保护、深度链接安全和 torrent 路径穿越测试。 |
 
 ## 1. 浏览器接管与扩展集成
@@ -62,11 +62,10 @@ SwiftGetX 目前已经具备这些主干能力：
 
 ### 1.3 支持更多 Chromium 变体和浏览器
 
-当前自动发现覆盖 Google Chrome 和 Atlas，Safari 是资源模板。
+当前自动发现覆盖 Chromium 族浏览器；Safari Web Extension 资源已具备同等交互面，但正式发行仍需要 Xcode App Extension target 与签名打包链路。
 
 建议：
 
-- 增加 Edge、Brave、Vivaldi、Arc、Chromium、Chrome Canary 的 profile 和 NativeMessagingHosts 目录。
 - 设置页展示每个浏览器的安装状态、扩展 ID、manifest path、native host path。
 - Safari 建立正式 App Extension target、签名、entitlements、打包到 `.app/Contents/PlugIns`。
 - Firefox 支持可作为后续里程碑，Native Messaging manifest 目录和 manifest 字段不同，需要独立 registrar。

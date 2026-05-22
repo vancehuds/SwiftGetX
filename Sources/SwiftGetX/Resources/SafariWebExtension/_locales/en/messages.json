@@ -2,10 +2,256 @@
   "appName": {
     "message": "SwiftGetX"
   },
+  "appDescription": {
+    "message": "Send links, pages, media, and detected downloads to SwiftGetX."
+  },
+  "safariDescription": {
+    "message": "Send links, pages, media, detected downloads, and Safari downloads to SwiftGetX."
+  },
+  "checkPair": {
+    "message": "Check"
+  },
+  "connected": {
+    "message": "connected"
+  },
+  "connectionChecking": {
+    "message": "Checking..."
+  },
+  "connectionConnected": {
+    "message": "Connected"
+  },
+  "connectionFailed": {
+    "message": "Connection failed"
+  },
+  "connectionUnchecked": {
+    "message": "Not checked"
+  },
+  "connectionWaitingPairing": {
+    "message": "Waiting for pairing"
+  },
+  "contextDownloadInBrowser": {
+    "message": "Download link in browser"
+  },
+  "contextScanPage": {
+    "message": "Scan page download links to SwiftGetX"
+  },
   "contextSendLink": {
     "message": "Download link with SwiftGetX"
   },
-  "safariDescription": {
-    "message": "Send selected downloads to SwiftGetX."
+  "contextSendMedia": {
+    "message": "Download media with SwiftGetX"
+  },
+  "contextSendPage": {
+    "message": "Download current page with SwiftGetX"
+  },
+  "contextSendSelection": {
+    "message": "Download selected text with SwiftGetX"
+  },
+  "currentTab": {
+    "message": "Current tab"
+  },
+  "downloadCurrentPage": {
+    "message": "Download current page"
+  },
+  "downloadLink": {
+    "message": "Download link"
+  },
+  "downloadSelection": {
+    "message": "Download selection"
+  },
+  "errorNoDownloadAddress": {
+    "message": "No download address to send"
+  },
+  "errorNoDownloadLinksOnPage": {
+    "message": "No download links found on the current page"
+  },
+  "errorNoScannableTab": {
+    "message": "No tab available to scan"
+  },
+  "errorTaskRejected": {
+    "message": "SwiftGetX did not accept the task"
+  },
+  "lastError": {
+    "message": "Last error"
+  },
+  "linkCount": {
+    "message": "$COUNT$ links",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "nativeHostCannotCommunicate": {
+    "message": "Unable to communicate with Native Host"
+  },
+  "nativeHostHealthy": {
+    "message": "Native Host is running normally"
+  },
+  "nativeHostIncompatible": {
+    "message": "SwiftGetX Native Host is not compatible with this extension. Update SwiftGetX and reinstall the extension."
+  },
+  "nativeHostNoResponse": {
+    "message": "Native Host did not respond"
+  },
+  "nativeHostProtocolIncompatible": {
+    "message": "Native Host protocol $HOST$ is not compatible with extension protocol $EXTENSION$.",
+    "placeholders": {
+      "host": {
+        "content": "$1"
+      },
+      "extension": {
+        "content": "$2"
+      }
+    }
+  },
+  "nativeHostReturnedError": {
+    "message": "Native Host returned an error"
+  },
+  "nativeHostTooOld": {
+    "message": "Native Host $CURRENT$ is older than the required $MINIMUM$.",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
+  },
+  "extensionTooOld": {
+    "message": "Extension $CURRENT$ is older than the required $MINIMUM$. Reinstall the current SwiftGetX extension.",
+    "placeholders": {
+      "current": {
+        "content": "$1"
+      },
+      "minimum": {
+        "content": "$2"
+      }
+    }
+  },
+  "pairingOpenedDetail": {
+    "message": "SwiftGetX has been opened. Allow extension pairing in the app, then check again."
+  },
+  "scanDownloadLinks": {
+    "message": "Scan download links"
+  },
+  "safariPairingUnavailable": {
+    "message": "Safari Native Messaging is configured by the signed Safari App Extension target. Rebuild or reinstall the Safari extension if this check keeps failing."
+  },
+  "candidateReason_content_disposition": {
+    "message": "attachment"
+  },
+  "candidateReason_content_type": {
+    "message": "media type"
+  },
+  "candidateReason_download_attribute": {
+    "message": "download"
+  },
+  "candidateReason_download_hint": {
+    "message": "hint"
+  },
+  "candidateReason_extension": {
+    "message": "extension"
+  },
+  "candidateReason_link": {
+    "message": "link"
+  },
+  "candidateReason_magnet": {
+    "message": "magnet"
+  },
+  "candidateReason_media_manifest": {
+    "message": "manifest"
+  },
+  "candidateReason_media_source": {
+    "message": "media"
+  },
+  "metadataLimited": {
+    "message": "metadata limited"
+  },
+  "metadataPending": {
+    "message": "metadata pending"
+  },
+  "selectAll": {
+    "message": "Select all"
+  },
+  "selectedCount": {
+    "message": "$SELECTED$/$TOTAL$ selected",
+    "placeholders": {
+      "selected": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "selectNone": {
+    "message": "Select none"
+  },
+  "sendAll": {
+    "message": "Send all"
+  },
+  "sendSelected": {
+    "message": "Send selected"
+  },
+  "sendFailed": {
+    "message": "Send failed"
+  },
+  "sentToSwiftGetX": {
+    "message": "Sent to SwiftGetX"
+  },
+  "setupPairingOpened": {
+    "message": "SwiftGetX pairing request was opened. Click \"Allow Pairing\" in the app, then check again."
+  },
+  "setupPairingRequested": {
+    "message": "SwiftGetX pairing was requested. Allow pairing in the app, then check again."
+  },
+  "statusCannotScan": {
+    "message": "Cannot scan"
+  },
+  "statusCount": {
+    "message": "$COUNT$ found",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "statusFailed": {
+    "message": "Failed"
+  },
+  "statusNoLinks": {
+    "message": "No links"
+  },
+  "statusNoPage": {
+    "message": "No page"
+  },
+  "statusNoPermission": {
+    "message": "No permission"
+  },
+  "statusNoSelection": {
+    "message": "No selection"
+  },
+  "statusNoSelectedLinks": {
+    "message": "No selected links"
+  },
+  "statusNotFound": {
+    "message": "Not found"
+  },
+  "statusReady": {
+    "message": "Ready"
+  },
+  "statusScanning": {
+    "message": "Scanning"
+  },
+  "statusSending": {
+    "message": "Sending"
+  },
+  "statusSent": {
+    "message": "Sent"
+  },
+  "takeoverSafariDownloads": {
+    "message": "Take over Safari downloads"
   }
 }

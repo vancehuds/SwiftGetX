@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SwiftGetX</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>SwiftGetX</h1>
+      <p id="active-tab" data-i18n="currentTab">Current tab</p>
+    </div>
+    <span id="status" class="status" data-i18n="statusReady">Ready</span>
+  </header>
+
+  <main>
+    <div class="actions">
+      <button id="send-current" type="button" data-i18n="downloadCurrentPage">Download current page</button>
+      <button id="send-selection" type="button" data-i18n="downloadSelection">Download selection</button>
+      <button id="scan-links" type="button" data-i18n="scanDownloadLinks">Scan download links</button>
+    </div>
+
+    <label class="toggle">
+      <input id="takeover-downloads" type="checkbox">
+      <span data-i18n="takeoverSafariDownloads">Take over Safari downloads</span>
+    </label>
+
+    <section id="connection-section" class="connection-section">
+      <div class="connection-header">
+        <span id="connection-indicator" class="connection-indicator"></span>
+        <span id="connection-label" data-i18n="connectionUnchecked">Not checked</span>
+        <button id="check-connection" class="text-button" type="button" data-i18n="checkPair">Check / Pair</button>
+      </div>
+      <p id="connection-detail" class="connection-detail"></p>
+    </section>
+
+    <section id="candidate-panel" class="candidate-panel" hidden>
+      <div class="candidate-header">
+        <strong id="candidate-count">0 links</strong>
+        <button id="select-all-candidates" class="text-button" type="button" data-i18n="selectAll">Select all</button>
+        <button id="send-candidates" class="text-button" type="button" data-i18n="sendSelected">Send selected</button>
+      </div>
+      <ul id="candidate-list"></ul>
+    </section>
+
+    <section id="error-panel" class="error-panel" hidden>
+      <strong data-i18n="lastError">Last error</strong>
+      <p id="error-detail" class="error-detail"></p>
+    </section>
+  </main>
+
+  <script src="api-compat.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
