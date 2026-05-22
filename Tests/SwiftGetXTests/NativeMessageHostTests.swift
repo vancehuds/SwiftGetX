@@ -297,6 +297,28 @@ struct NativeMessageHostTests {
         }
     }
 
+    @Test("trusted torrent deep links still require confirmation")
+    func trustedTorrentDeepLinksStillRequireConfirmation() throws {
+        let handoffAck = NativeHandoffAck(
+            requestID: "request-1",
+            token: "secret-token",
+            port: 49152,
+            expiresAt: Date(timeIntervalSince1970: 1_850_000_100)
+        )
+        let url = try #require(DeepLinkBuilder.downloadURL(
+            for: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Demo",
+            browser: "Chrome",
+            handoffSource: "download-takeover",
+            handoffAck: handoffAck
+        ))
+
+        let draft = try #require(DeepLinkParser.downloadDraft(from: url))
+
+        #expect(draft.isTrustedNativeHandoff)
+        #expect(draft.containsTorrentSource)
+        #expect(draft.requiresUserConfirmation)
+    }
+
     @Test("download deep links reject oversized payloads")
     func downloadDeepLinksRejectOversizedPayloads() throws {
         let source = "https://example.com/" + String(

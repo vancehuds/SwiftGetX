@@ -241,7 +241,7 @@ struct NewTaskSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(SourceParser.extractSources(from: sourceText).isEmpty || isLoadingPreviews)
+                .disabled(!canAddTask)
             }
         }
     }
@@ -281,6 +281,23 @@ struct NewTaskSheet: View {
 
     private var currentSources: [String] {
         SourceParser.extractSources(from: sourceText)
+    }
+
+    private var canAddTask: Bool {
+        let sources = currentSources
+        guard !sources.isEmpty, !isLoadingPreviews else { return false }
+        guard hasCompletePreviews(for: sources) else { return true }
+
+        return previews.allSatisfy { preview in
+            guard preview.kind == .torrentMagnet || preview.kind == .torrentFile,
+                  preview.metadataStatus == .available,
+                  !preview.files.isEmpty
+            else {
+                return true
+            }
+            let selected = selectedFileIndexesBySource[preview.source] ?? Set(preview.selectedFileIndexes)
+            return !selected.isEmpty
+        }
     }
 
     private var hasHTTPSources: Bool {
@@ -682,8 +699,9 @@ private struct SourcePreviewView: View {
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: layout.value(6)) {
-                        ForEach(sources.prefix(4), id: \.self) { source in
-                            if let preview = previews.first(where: { $0.source == source }) {
+                        ForEach(Array(sources.enumerated()), id: \.offset) { index, source in
+                            if index < previews.count, previews[index].source == source {
+                                let preview = previews[index]
                                 TorrentPreviewRow(
                                     preview: preview.plannedForSaveDirectory(saveDirectory),
                                     selectedFileIndexes: selectionBinding(for: preview),
@@ -707,16 +725,9 @@ private struct SourcePreviewView: View {
                                 .background(ContentSurfaceBackground(cornerRadius: 6))
                             }
                         }
-                        
-                        if sources.count > 4 {
-                            Text(L10n.string("source_preview_more_tasks", sources.count - 4))
-                                .font(layout.font(10, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, layout.value(8))
-                        }
                     }
                 }
-                .frame(maxHeight: layout.value(180))
+                .frame(maxHeight: layout.value(300))
             }
         }
         .padding(layout.value(12))
@@ -818,42 +829,40 @@ private struct TorrentPreviewRow: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ForEach(preview.files.prefix(8)) { file in
-                    HStack(spacing: layout.value(8)) {
-                        Button {
-                            toggle(file)
-                        } label: {
-                            Image(systemName: selectedFileIndexes.contains(file.index) ? "checkmark.circle.fill" : "circle")
-                                .font(layout.font(12, weight: .semibold))
-                                .foregroundStyle(selectedFileIndexes.contains(file.index) ? .green : .secondary)
-                        }
-                        .buttonStyle(.plain)
-
-                        Text(file.path)
-                            .font(layout.font(10.8))
-                            .lineLimit(1)
-                            .foregroundStyle(Color.primary)
-
-                        Spacer()
-
-                        Picker("", selection: priorityBinding(for: file)) {
-                            ForEach(TorrentFilePriority.allCases) { priority in
-                                Text(priority.title).tag(priority)
+                VStack(alignment: .leading, spacing: layout.value(4)) {
+                    ForEach(preview.files) { file in
+                        HStack(spacing: layout.value(8)) {
+                            Button {
+                                toggle(file)
+                            } label: {
+                                Image(systemName: selectedFileIndexes.contains(file.index) ? "checkmark.circle.fill" : "circle")
+                                    .font(layout.font(12, weight: .semibold))
+                                    .foregroundStyle(selectedFileIndexes.contains(file.index) ? .green : .secondary)
                             }
+                            .buttonStyle(.plain)
+
+                            Text(file.path)
+                                .font(layout.font(10.8))
+                                .lineLimit(1)
+                                .foregroundStyle(Color.primary)
+                                .help(file.path)
+
+                            Spacer()
+
+                            Picker("", selection: priorityBinding(for: file)) {
+                                ForEach(TorrentFilePriority.allCases) { priority in
+                                    Text(priority.title).tag(priority)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: layout.value(100))
+
+                            Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
+                                .font(layout.font(10.5, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: layout.value(78), alignment: .trailing)
                         }
-                        .labelsHidden()
-                        .frame(width: layout.value(100))
-
-                        Text(ByteCountFormatter.downloadFormatter.string(fromByteCount: file.size))
-                            .font(layout.font(10.5, design: .monospaced))
-                            .foregroundStyle(.secondary)
                     }
-                }
-
-                if preview.files.count > 8 {
-                    Text(L10n.string("torrent_preview_more_files", preview.files.count - 8))
-                        .font(layout.font(10.5))
-                        .foregroundStyle(.secondary)
                 }
             }
 

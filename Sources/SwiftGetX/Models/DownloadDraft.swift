@@ -19,6 +19,12 @@ struct DownloadDraft: Equatable, Sendable {
     var sourceCount: Int = 1
     var requiresNativePayloadSource = false
 
+    var containsTorrentSource: Bool {
+        SourceParser.extractSources(from: source).contains {
+            SourceParser.kind(for: $0) == .torrentMagnet || SourceParser.kind(for: $0) == .torrentFile
+        }
+    }
+
     var isBrowserTakeover: Bool {
         handoffSource == "download-takeover"
     }
@@ -28,7 +34,7 @@ struct DownloadDraft: Equatable, Sendable {
     }
 
     var requiresUserConfirmation: Bool {
-        !isTrustedNativeHandoff || sourceCount > 1
+        !isTrustedNativeHandoff || sourceCount > 1 || containsTorrentSource
     }
 
     var canAcknowledgeNativeHandoff: Bool {

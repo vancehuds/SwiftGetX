@@ -23,11 +23,24 @@ final class BrowserBridge {
             return
         }
 
-        coordinator?.add(
+        let context = BrowserDownloadContext.context(from: message)
+        let draft = DownloadDraft(
             source: url,
             suggestedFilename: message.suggestedFilename,
-            browserContext: BrowserDownloadContext.context(from: message)
+            browser: message.browser,
+            browserContext: context,
+            linkTrust: .publicLink,
+            sourceCount: SourceParser.extractSources(from: url).count
         )
+        if draft.containsTorrentSource {
+            NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
+        } else {
+            coordinator?.add(
+                source: url,
+                suggestedFilename: message.suggestedFilename,
+                browserContext: context
+            )
+        }
         lastMessage = L10n.string(
             "browser_bridge_received_task",
             message.browser ?? L10n.string("browser_generic")

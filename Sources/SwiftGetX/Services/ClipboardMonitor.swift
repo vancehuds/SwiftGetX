@@ -35,7 +35,16 @@ final class ClipboardMonitor {
 
     func acceptSuggestion() {
         guard let suggestedSource else { return }
-        coordinator?.add(source: suggestedSource)
+        let draft = DownloadDraft(
+            source: suggestedSource,
+            linkTrust: .publicLink,
+            sourceCount: SourceParser.extractSources(from: suggestedSource).count
+        )
+        if draft.containsTorrentSource {
+            NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
+        } else {
+            coordinator?.add(source: suggestedSource)
+        }
         lastSuggestedSource = suggestedSource
         self.suggestedSource = nil
     }

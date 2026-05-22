@@ -51,39 +51,50 @@ struct TorrentMetadataServiceTests {
         ])
     }
 
-    @Test("magnet preview degrades when native engine is unavailable")
-    func magnetPreviewDegradesWithoutNativeEngine() async {
-        let service = TorrentMetadataService(magnetTimeout: .milliseconds(10))
+    @Test("magnet preview exposes files before download")
+    func magnetPreviewExposesFilesBeforeDownload() async {
+        let service = TorrentMetadataService(magnetPreview: { _ in
+            TorrentMagnetPreviewResult(
+                displayName: "Demo",
+                files: [
+                    TorrentFile(index: 0, path: "Demo/movie.mkv", size: 100),
+                    TorrentFile(index: 1, path: "Demo/readme.txt", size: 20)
+                ],
+                trackers: ["udp://tracker.example:80/announce"]
+            )
+        })
 
         let preview = await service.preview(
-            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Demo&tr=http%3A%2F%2Ftracker.example%2Fannounce"
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Fallback&tr=http%3A%2F%2Ftracker.example%2Fannounce"
         )
 
         #expect(preview.kind == .torrentMagnet)
         #expect(preview.displayName == "Demo")
-        #expect(preview.trackers == ["http://tracker.example/announce"])
-        #expect(preview.metadataStatus == Self.expectedMagnetPreviewPendingStatus)
-        #expect(preview.files.isEmpty)
+        #expect(preview.metadataStatus == .available)
+        #expect(preview.totalBytes == 120)
+        #expect(preview.trackers == ["udp://tracker.example:80/announce"])
+        #expect(preview.selectedFileIndexes == [0, 1])
+        #expect(preview.files.map(\.path) == ["Demo/movie.mkv", "Demo/readme.txt"])
     }
 
     @Test("magnet preview honors timeout configuration")
     func magnetPreviewHonorsTimeoutConfiguration() async {
-        let service = TorrentMetadataService(magnetTimeout: .milliseconds(1))
+        let service = TorrentMetadataService(
+            magnetTimeout: .milliseconds(1),
+            magnetPreview: { _ in
+                try await Task.sleep(for: .seconds(60))
+                return TorrentMagnetPreviewResult(files: [])
+            }
+        )
 
         let preview = await service.preview(
-            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Timeout"
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Timeout&xl=42"
         )
 
         #expect(preview.displayName == "Timeout")
-        #expect(preview.metadataStatus == Self.expectedMagnetPreviewPendingStatus)
-    }
-
-    private static var expectedMagnetPreviewPendingStatus: TorrentMetadataStatus {
-        #if canImport(CSwiftGetXLibtorrent)
-        return LibtorrentMetadataPreviewer() == nil ? .unavailable : .fetching
-        #else
-        return .unavailable
-        #endif
+        #expect(preview.metadataStatus == .fetching)
+        #expect(preview.totalBytes == 42)
+        #expect(preview.files.isEmpty)
     }
 
     private static func singleFileTorrentData(
