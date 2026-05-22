@@ -179,7 +179,7 @@
 "error_invalid_torrent_file" = "种子文件无效";
 "error_invalid_torrent_source" = "种子来源无效";
 "error_invalid_url" = "链接格式无效";
-"error_libtorrent_unavailable" = "BT 引擎桥接已预留，需接入 libtorrent 后启用真实磁力/种子下载";
+"error_libtorrent_unavailable" = "此构建未启用可选 libtorrent 参考桥接。请使用 Swift 引擎，或用 SWIFTGETX_ENABLE_LIBTORRENT=1 重新构建。";
 "error_missing_content_range" = "缺少 Content-Range";
 "error_missing_segment_total_size" = "缺少分片任务的总大小，无法安全恢复";
 "error_range_not_supported" = "服务器不支持断点续传";
@@ -442,7 +442,7 @@
 "torrent_engine_status_metadata_only" = "仅 metadata";
 "torrent_engine_status_unavailable" = "不可用";
 "torrent_engine_swift" = "Swift";
-"torrent_engine_swift_status" = "纯 Swift 种子 metadata、布局和恢复状态支持已启用。Tracker、Peer 和存储传输会在后续 BT 任务中补齐。";
+"torrent_engine_swift_status" = "纯 Swift 种子运行时已启用，包含 metadata、Tracker、Peer 传输、存储、DHT、PEX、LSD 和做种策略支持。";
 "torrent_add_trackers" = "添加 Tracker";
 "torrent_apply_extension_filter" = "应用扩展名筛选";
 "torrent_extension_filter" = "扩展名，例如 mkv,srt";
@@ -464,7 +464,7 @@
 "torrent_metadata_status" = "Metadata";
 "torrent_metadata_unavailable" = "Metadata 不可用";
 "torrent_metadata_unknown" = "Metadata 未知";
-"torrent_native_engine_unavailable" = "原生 BT 引擎未启用";
+"torrent_native_engine_unavailable" = "未启用可选原生 libtorrent metadata 预览";
 "torrent_peers" = "Peer 节点";
 "torrent_peers_empty" = "暂未收到 Peer 信息。";
 "torrent_peer_count" = "Peer 数";

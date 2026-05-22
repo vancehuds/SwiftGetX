@@ -50,7 +50,7 @@
 
 ### 🧩 零配置浏览器深度集成
 *   **Chrome 下载接管**：内置 Chrome 扩展（Manifest V3），默认开启“下载接管”。当在 Chrome 中触发符合规则的下载任务时，扩展将任务透明接管，并通过 Native Messaging 协议派发给 SwiftGetX，随后自动取消 Chrome 原生下载任务。如果交接失败，Chrome 将无缝继续下载。
-*   **多 Chromium 浏览器发现**：App 内置智能宿主扫描器，会在启动或激活时**自动发现**本地 Google Chrome 以及 OpenAI ChatGPT Atlas 浏览器的 Extension 配置文件，自动探测 Extension ID 并一键修复本地 Native Messaging 宿主清单（`com.swiftgetx.native.json`），用户无需任何手动配置。
+*   **多 Chromium 浏览器发现**：App 内置智能宿主扫描器，会在启动或激活时**自动发现**本地 Chrome、Chrome Canary、Edge、Brave、Vivaldi、Arc、Chromium 以及 Atlas 的 Extension 配置文件，自动探测 Extension ID 并一键修复本地 Native Messaging 宿主清单（`com.swiftgetx.native.json`），用户无需任何手动配置。
 *   **完整上下文传递**：交接时智能捕获并携带浏览器下载上下文（包括来源页面 URL、标题、建议的文件名等），并通过安全的自定义协议 `swiftgetx://download` 与 `swiftgetx://browser-setup` 进行派发，同时支持在偏好设置中一键开启诊断面板。
 *   **Safari 扩展占位**：提供 Safari Web Extension 资源模板，方便后续在 Xcode 中配置 App Extension Target 实施苹果签名链集成。
 
@@ -76,7 +76,7 @@ graph TD
     classDef core fill:#EDE7F6,stroke:#651FFF,stroke-width:2px;
     classDef engine fill:#FFF3E0,stroke:#FF8F00,stroke-width:2px;
     
-    Chrome["Chrome/Atlas 浏览器扩展 (Manifest V3)"]:::browser
+    Chrome["Chromium 浏览器扩展 (Manifest V3)"]:::browser
     NativeHost["SwiftGetXNativeHost (轻量 C 交接程序)"]:::browser
     MainApp["SwiftGetX 主程序 (SwiftUI 界面)"]:::main
     Models["SwiftData 数据持久化模型"]:::main
@@ -84,6 +84,7 @@ graph TD
     Adapter["DownloadEngineAdapter 统一接口"]:::core
     HTTPEngine["HTTPDownloadEngine 多线程引擎"]:::engine
     TorrentAdapter["TorrentEngineAdapter BT适配接口"]:::core
+    SwiftTorrent["SwiftGetXTorrentCore + SwiftTorrentEngineAdapter"]:::engine
     LibtorrentWrapper["CSwiftGetXLibtorrent (C++ Wrapper)"]:::engine
     Libtorrent["arvidn/libtorrent 核心库"]:::engine
 
@@ -94,6 +95,7 @@ graph TD
     Coordinator --> Adapter
     Adapter --> HTTPEngine
     Adapter --> TorrentAdapter
+    TorrentAdapter -->|"默认 SwiftTorrent"| SwiftTorrent
     TorrentAdapter -->|"SWIFTGETX_ENABLE_LIBTORRENT=1"| LibtorrentWrapper
     LibtorrentWrapper --> Libtorrent
 ```
@@ -118,8 +120,8 @@ graph TD
 ### 第一步：安装主程序
 1. 前往本仓库的 [Releases](https://github.com/vancehuds/SwiftGetX/releases) 页面下载最新版的 `SwiftGetX.dmg`。
 2. 双击打开 `.dmg` 挂载卷，将 **SwiftGetX** 拖入您的 **Applications (应用程序)** 文件夹中。
-3. **⚠️ 首次启动安全提示 (Gatekeeper 绕过)**：
-   * 由于本应用是未公证的 Ad-hoc 签名开源原型，首次启动双击运行时，macOS 系统可能会拦截并提示：*“无法打开，因为 Apple 无法检查其是否包含恶意软件”* 或 *“来自未验证的开发者”*。
+3. **首次启动安全提示**：
+   * 官方 tag release workflow 会强制 Developer ID 签名、公证和 stapling 校验；如果你下载的是本地构建、fork 产物，或 release secrets 未配置的调试产物，macOS 仍可能提示：*“无法打开，因为 Apple 无法检查其是否包含恶意软件”* 或 *“来自未验证的开发者”*。
    * **解决方法**：请打开 macOS 的 **系统设置 -> 隐私与安全**，拉到页面最下方找到“安全性”一栏，点击 **“仍要打开” (Open Anyway)**，并输入您的 Mac 开机密码进行授权，之后即可正常启动应用。
 
 ### 第二步：安装并绑定 Chrome 浏览器扩展
@@ -221,7 +223,7 @@ SwiftGetX 设计了一套精妙的**主动发现与自动自我修复机制**。
 ### Chrome / Chromium 浏览器设置
 1.  **加载扩展**：打开 Chrome，访问 `chrome://extensions`，开启右上角的 **开发者模式**。点击 **加载已解压的扩展程序**，选择目录：
     `Sources/SwiftGetX/Resources/ChromeExtension`
-2.  **自动绑定**：运行并激活一次 SwiftGetX 主 App。主 App 将会自动扫描你正在使用的 Chrome/Atlas 浏览器的 Extension 目录，识别到 SwiftGetX 扩展的本地 Extension ID 后，会自动在 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts` 写入正确的清单配置文件。
+2.  **自动绑定**：运行并激活一次 SwiftGetX 主 App。主 App 将会自动扫描已支持的 Chromium 浏览器配置（Chrome、Chrome Canary、Edge、Brave、Vivaldi、Arc、Chromium、Atlas），识别到 SwiftGetX 扩展的本地 Extension ID 后，会自动写入对应浏览器的 `NativeMessagingHosts/com.swiftgetx.native.json` 清单配置文件。
 3.  **开始接管**：在 Chrome 浏览器中随意右击一个下载链接，即可在右键菜单中看到 `使用 SwiftGetX 下载`；或者直接点击下载常规文件，扩展便会自动拦截，派送至 SwiftGetX 进行多线程极速下载！
 
 > [!NOTE]

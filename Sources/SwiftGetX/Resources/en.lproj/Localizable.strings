@@ -179,7 +179,7 @@
 "error_invalid_torrent_file" = "Invalid torrent file";
 "error_invalid_torrent_source" = "Invalid torrent source";
 "error_invalid_url" = "Invalid link format";
-"error_libtorrent_unavailable" = "The BT engine bridge is reserved. Connect libtorrent to enable real magnet/torrent downloads.";
+"error_libtorrent_unavailable" = "The optional libtorrent reference bridge is not available in this build. Use the Swift engine or rebuild with SWIFTGETX_ENABLE_LIBTORRENT=1.";
 "error_missing_content_range" = "Missing Content-Range";
 "error_missing_segment_total_size" = "Missing total size for segmented task; cannot resume safely";
 "error_range_not_supported" = "Server does not support resume";
@@ -441,7 +441,7 @@
 "torrent_engine_status_metadata_only" = "Metadata only";
 "torrent_engine_status_unavailable" = "Unavailable";
 "torrent_engine_swift" = "Swift";
-"torrent_engine_swift_status" = "Pure Swift torrent metadata, layout, and resume-state support is active. Peer transfer is added in later torrent tasks.";
+"torrent_engine_swift_status" = "Pure Swift torrent runtime is active, including metadata, trackers, peer transfer, storage, DHT, PEX, LSD, and seeding policy support.";
 "torrent_add_trackers" = "Add Trackers";
 "torrent_apply_extension_filter" = "Apply extension filter";
 "torrent_extension_filter" = "Extensions, e.g. mkv,srt";
@@ -463,7 +463,7 @@
 "torrent_metadata_status" = "Metadata";
 "torrent_metadata_unavailable" = "Metadata unavailable";
 "torrent_metadata_unknown" = "Metadata unknown";
-"torrent_native_engine_unavailable" = "Native BT engine is not enabled";
+"torrent_native_engine_unavailable" = "Optional native libtorrent metadata preview is not enabled";
 "torrent_peer_sources" = "Peer Sources";
 "torrent_peers" = "Peers";
 "torrent_peers_empty" = "No peers reported yet.";

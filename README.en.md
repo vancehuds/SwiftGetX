@@ -51,7 +51,7 @@
 
 ### 🧩 Zero-Configuration Browser Integration
 *   **Chrome Takeover (Manifest V3)**: Built-in Chrome extension. When a supported HTTP, HTTPS, magnet, or `.torrent` download is triggered in Chrome, the extension intercept-transports it via Native Messaging to SwiftGetX, cancelling the Chrome item after SwiftGetX accepts. If IPC fails, Chrome resumes the original download instantly.
-*   **Multi-Chromium Discovery**: Main App automatically scans local directory trees on startup or focus, auto-detecting extension installations in Google Chrome and OpenAI ChatGPT Atlas. Generates or repairs Native Messaging manifests (`com.swiftgetx.native.json`) instantly with zero manual ID copy-pasting.
+*   **Multi-Chromium Discovery**: Main App automatically scans local directory trees on startup or focus, auto-detecting extension installations in Chrome, Chrome Canary, Edge, Brave, Vivaldi, Arc, Chromium, and Atlas. Generates or repairs Native Messaging manifests (`com.swiftgetx.native.json`) instantly with zero manual ID copy-pasting.
 *   **Rich Handoff Context**: Securely passes download origins (source page URL, page title, and proposed filename) via deep links (`swiftgetx://download` and `swiftgetx://browser-setup`) with an integrated diagnostic status panel.
 *   **Safari Web Extension Template**: Clean Safari Web Extension bundle placeholder, ready for easy Xcode App Extension Target integration with Apple Developer certificate signing.
 
@@ -76,7 +76,7 @@ graph TD
     classDef core fill:#EDE7F6,stroke:#651FFF,stroke-width:2px;
     classDef engine fill:#FFF3E0,stroke:#FF8F00,stroke-width:2px;
     
-    Chrome["Chrome/Atlas Extension (Manifest V3)"]:::browser
+    Chrome["Chromium Extension (Manifest V3)"]:::browser
     NativeHost["SwiftGetXNativeHost (Lightweight C Bridge)"]:::browser
     MainApp["SwiftGetX Main App (SwiftUI View)"]:::main
     Models["SwiftData Persistent Models"]:::main
@@ -84,6 +84,7 @@ graph TD
     Adapter["DownloadEngineAdapter Interface"]:::core
     HTTPEngine["HTTPDownloadEngine (Multi-segmented)"]:::engine
     TorrentAdapter["TorrentEngineAdapter BT Interface"]:::core
+    SwiftTorrent["SwiftGetXTorrentCore + SwiftTorrentEngineAdapter"]:::engine
     LibtorrentWrapper["CSwiftGetXLibtorrent (C++ Wrapper)"]:::engine
     Libtorrent["arvidn/libtorrent Pinned Core"]:::engine
 
@@ -94,6 +95,7 @@ graph TD
     Coordinator --> Adapter
     Adapter --> HTTPEngine
     Adapter --> TorrentAdapter
+    TorrentAdapter -->|"Default SwiftTorrent"| SwiftTorrent
     TorrentAdapter -->|"SWIFTGETX_ENABLE_LIBTORRENT=1"| LibtorrentWrapper
     LibtorrentWrapper --> Libtorrent
 ```
@@ -118,8 +120,8 @@ If you prefer to run pre-built binaries directly without compiling from source, 
 ### Step 1: Install the Main Application
 1. Head over to the repository's [Releases](https://github.com/vancehuds/SwiftGetX/releases) page and download the latest `SwiftGetX.dmg`.
 2. Double-click the downloaded `.dmg` file to mount it, and drag **SwiftGetX** into your **Applications** directory.
-3. **⚠️ First-Time Launch Warning (Gatekeeper Bypass)**:
-   * Since this is an unnotarized ad-hoc signed open-source prototype app, macOS might block launch on double-click, displaying: *"Cannot be opened because Apple cannot check it for malicious software"* or *"Unverified Developer"*.
+3. **First-Time Launch Warning**:
+   * The official tag release workflow enforces Developer ID signing, notarization, and stapling validation. If you install a local build, fork artifact, or debug artifact built without release secrets, macOS may still block launch on double-click, displaying: *"Cannot be opened because Apple cannot check it for malicious software"* or *"Unverified Developer"*.
    * **Solution**: Open macOS **System Settings -> Privacy & Security**. Scroll to the bottom to find the "Security" section, click **"Open Anyway"**, and enter your Mac passcode to authorize execution.
 
 ### Step 2: Install and Bind the Chrome Browser Extension
@@ -221,8 +223,7 @@ SwiftGetX is built with a smart auto-discovery framework that configures Chrome 
 ### Chrome / Chromium Setup
 1.  **Load the Extension**: Open Chrome, go to `chrome://extensions`, toggle **Developer Mode** on. Click **Load Unpacked**, and select the folder:
     `Sources/SwiftGetX/Resources/ChromeExtension`
-2.  **Launch SwiftGetX**: Start or focus the SwiftGetX App. The app automatically scans local Chrome/Atlas preference stores, extracts the unpacked extension ID, and writes a correctly configured native host manifest file to:
-    `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.swiftgetx.native.json`
+2.  **Launch SwiftGetX**: Start or focus the SwiftGetX App. The app automatically scans supported Chromium profiles (Chrome, Chrome Canary, Edge, Brave, Vivaldi, Arc, Chromium, and Atlas), extracts the unpacked extension ID, and writes a correctly configured `NativeMessagingHosts/com.swiftgetx.native.json` manifest for the matching browser.
 3.  **Takeover Downloads**: Right-click any downloadable link in Chrome and click `Download with SwiftGetX`, or trigger a regular download. The extension will automatically capture it and pipe it directly to SwiftGetX.
 
 > [!NOTE]
