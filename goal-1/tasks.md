@@ -1514,14 +1514,42 @@ Next step:
 
 ## Final Review: Full Plan Completion Audit
 
-Status: [ ]
+Status: [x]
 
 Perform a requirement-by-requirement audit against `Docs/FunctionalImprovementOpportunities.md`. Verify source, tests, docs, release scripts, and runtime behavior where possible. Fix all unresolved issues, run final tests, record evidence, and only then mark the built-in goal complete.
 
 Work performed:
 
+- Audited every heading in `Docs/FunctionalImprovementOpportunities.md` from browser takeover through support tooling against the completed task evidence, current source, tests, docs, scripts, and release gates.
+- Found that the HTTP integrity requirement was already implemented through the `HTTPChecksum` model, `HTTPDownloadOptions.checksum`, persisted `HTTPResponseMetadata.checksumStatus/checksumActualDigest`, `HTTPDownloadEngine` completion verification, the HTTP recheck action, new-task checksum input, inspector checksum display, and checksum/archive tests.
+- Removed an accidental parallel `HTTPIntegrity` model path from the final-review work-in-progress and kept the canonical `HTTPChecksum` path as the only HTTP checksum implementation.
+- Fixed final-review checksum build regressions: shared checksum verification between completed downloads and HTTP recheck, corrected optional regex capture handling, added BSD-style checksum manifest parsing such as `SHA1 (*file) = ...`, and preserved checksum status/actual digest when sanitizing persisted HTTP response metadata.
+- Re-ran release, localization, browser-extension, fixture, default build/test, and optional libtorrent build/test checks after the fixes.
+- Confirmed the remaining non-local requirements are credential/runtime-environment bound and documented: actual Apple Developer ID signing/notarization/Gatekeeper assessment, Sparkle private-key matching, Chrome Web Store publication, and installed-browser/native-host end-to-end automation.
+
 Verification evidence:
+
+- `rg -n "HTTPIntegrity|httpIntegrity|httpIntegrityJSON" Sources Tests` returned no matches after cleanup.
+- Focused checksum/archive verification passed: `swift test --filter HTTPDownloadEngine --filter TorrentFileTests --filter PersistenceArchive` with 63 tests across 3 suites.
+- `git diff --check` passed.
+- `plutil -lint Sources/SwiftGetX/Resources/AppInfo.plist Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/popup.js` passed.
+- `bash -n` passed for `Scripts/validate-release.sh`, `Scripts/package-dmg.sh`, `Scripts/package-chrome-extension.sh`, and `Scripts/generate-appcast.sh`.
+- `Scripts/validate-release.sh sparkle` passed.
+- Node JSON parsing passed for the Chrome extension manifest/locales plus `Tests/SwiftGetXTests/Fixtures/BrowserE2E/native-host-scenarios.json` and `Tests/SwiftGetXTests/Fixtures/Torrent/mock-swarm-fixtures.json`.
+- `swift build` passed.
+- `swift test` passed with 290 tests across 22 suites.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift build` passed; existing Homebrew OpenSSL deployment-target linker warnings were still present.
+- `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` passed with 293 tests across 23 suites; the same existing Homebrew OpenSSL deployment-target linker warnings were still present.
 
 Remaining risk:
 
+- Actual Developer ID signing, Apple notarization, stapling, Gatekeeper assessment, GitHub release publication, and Chrome Web Store publication were not exercised locally because the workspace does not contain those external credentials or service access. The repo now has strict gates, docs, and tests for those paths.
+- Installed-browser/native-host end-to-end automation was not performed against a real browser profile; the implementation is covered by native-host, deep-link, compatibility, extension syntax, packaging, and fixture tests.
+- Sensitive browser/per-task HTTP headers remain runtime-only rather than Keychain-backed by design. Authenticated restart remains dependent on a fresh browser context or user re-entry.
+- Optional libtorrent verification still depends on the local native archive and Homebrew OpenSSL libraries, which emit deployment-target linker warnings in this environment.
+
 Next step:
+
+- Goal complete.
