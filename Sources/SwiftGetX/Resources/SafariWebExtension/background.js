@@ -829,9 +829,17 @@ function captureRequestBasics(details) {
   if (!isHTTPURL(details.url)) {
     return;
   }
+  if (String(details.method || "").toUpperCase() === "HEAD") {
+    return;
+  }
 
   const context = lookupRecentRequestContext(details.url) || {};
-  context.method = details.method || context.method || "GET";
+  const method = details.method || "GET";
+  if (context.bodyMetadata || String(context.method || "").toUpperCase() !== "GET") {
+    context.method = context.method || method;
+  } else {
+    context.method = method;
+  }
   context.originalURL = context.originalURL || details.url;
 
   const bodyMetadata = bodyMetadataFromRequest(details);
@@ -846,9 +854,17 @@ function captureRequestHeaders(details) {
   if (!isHTTPURL(details.url)) {
     return;
   }
+  if (String(details.method || "").toUpperCase() === "HEAD") {
+    return;
+  }
 
   const context = lookupRecentRequestContext(details.url) || {};
-  context.method = details.method || context.method || "GET";
+  const method = details.method || "GET";
+  if (context.bodyMetadata || String(context.method || "").toUpperCase() !== "GET") {
+    context.method = context.method || method;
+  } else {
+    context.method = method;
+  }
   context.originalURL = context.originalURL || details.url;
 
   const headers = [];

@@ -162,6 +162,7 @@ private enum InspectorTab: String, CaseIterable, Identifiable {
 }
 
 private struct OverviewPanel: View {
+    @Environment(DownloadCoordinator.self) private var coordinator
     @Environment(\.responsiveLayout) private var layout
     let task: DownloadTask
 
@@ -231,6 +232,12 @@ private struct OverviewPanel: View {
                     DetailRow(title: L10n.string("torrent_output_name"), value: task.effectiveTorrentOutputName)
                 }
                 DetailRow(title: L10n.string("detail_source"), value: task.displaySource)
+                if let browserRecoveryRequirement = BrowserDownloadRecoveryPolicy.persistedRequirement(for: task) {
+                    BrowserRecoveryRequirementCard(
+                        reason: browserRecoveryRequirement,
+                        isBlocked: coordinator.browserRecoveryBlockReason(for: task) != nil
+                    )
+                }
                 DetailRow(title: L10n.string("detail_resume"), value: task.supportsResume ? L10n.string("supported") : L10n.string("not_supported_or_unknown"))
                 if let connectionSummary = task.connectionSummary {
                     DetailRow(title: L10n.string("detail_connection"), value: connectionSummary)
@@ -343,7 +350,8 @@ private struct ErrorActionCard: View {
                     Label(L10n.string("action_copy_error"), systemImage: "doc.on.doc")
                 }
 
-                if task.status == .failed || task.status == .cancelled || task.status == .paused {
+                if (task.status == .failed || task.status == .cancelled || task.status == .paused)
+                    && coordinator.browserRecoveryBlockReason(for: task) == nil {
                     Button {
                         coordinator.retry(task)
                     } label: {
@@ -364,6 +372,34 @@ private struct ErrorActionCard: View {
         }
         .padding(layout.value(12))
         .background(ContentSurfaceBackground(tint: .red, cornerRadius: 8))
+    }
+}
+
+private struct BrowserRecoveryRequirementCard: View {
+    @Environment(\.responsiveLayout) private var layout
+    let reason: BrowserDownloadRecoveryBlockReason
+    let isBlocked: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            Label(reason.title, systemImage: "person.crop.circle.badge.exclamationmark")
+                .font(layout.font(10, weight: .semibold))
+                .foregroundStyle(Color.orange)
+
+            Text(reason.message)
+                .font(layout.font(12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(isBlocked
+                ? L10n.string("browser_recovery_retry_from_browser")
+                : L10n.string("browser_recovery_runtime_available"))
+                .font(layout.font(11, weight: .semibold))
+                .foregroundStyle(Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(layout.value(12))
+        .background(ContentSurfaceBackground(tint: .orange, cornerRadius: 8))
     }
 }
 

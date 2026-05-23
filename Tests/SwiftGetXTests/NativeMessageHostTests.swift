@@ -618,6 +618,28 @@ struct NativeMessageHostTests {
         #expect(decision.requiresUserConfirmation == true)
     }
 
+    @Test("native handoff rejects browser POST and body replay")
+    func nativeHandoffRejectsBrowserPOSTAndBodyReplay() throws {
+        let draft = DownloadDraft(
+            source: "https://example.com/export",
+            handoffSource: "download-takeover",
+            handoffAck: NativeHandoffAck(requestID: "request-1", token: "token", port: 49152),
+            browserContext: BrowserDownloadContext(
+                method: "POST",
+                bodyMetadata: BrowserDownloadBodyMetadata(byteCount: 128, description: "form fields: 2")
+            ),
+            linkTrust: .trustedNativeHandoff
+        )
+
+        let decision = try #require(BrowserDownloadRecoveryPolicy.nativeHandoffRejection(for: draft))
+
+        #expect(decision.accepted == false)
+        #expect(decision.queued == false)
+        #expect(decision.requiresUserConfirmation == true)
+        #expect(decision.rejectedReason == "unsupportedRequestReplay")
+        #expect(decision.message?.contains("POST") == true)
+    }
+
     @Test("pending native handoff is rejected when expired")
     func pendingNativeHandoffIsRejectedWhenExpired() throws {
         let expiry = Date(timeIntervalSince1970: 1_850_000_000)

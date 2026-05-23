@@ -70,6 +70,16 @@
 "browser_takeover_policy_section" = "Takeover Host Policy";
 "browser_takeover_prefilled_filename" = "%@ has been filled in. You can adjust the link or save directory before adding.";
 "browser_takeover_prefilled_link" = "The download link has been filled in. You can adjust the link or save directory before adding.";
+"browser_recovery_credentials_generic" = "browser session credentials";
+"browser_recovery_request_body_suffix" = " with a request body";
+"browser_recovery_request_replay_message" = "SwiftGetX does not replay %@ browser requests%@. The browser keeps the original download when takeover is rejected.";
+"browser_recovery_request_replay_short" = "Use browser download for this request";
+"browser_recovery_request_replay_title" = "Browser Request Replay Not Supported";
+"browser_recovery_retry_from_browser" = "Retry from the browser extension or start the download again in the signed-in browser session.";
+"browser_recovery_runtime_available" = "The current app session still has the browser credentials needed for Retry.";
+"browser_recovery_session_required_message" = "This download uses runtime-only browser credentials (%@). SwiftGetX does not save those values, so restart or session-expiry recovery must come from the browser.";
+"browser_recovery_session_required_short" = "Retry from browser session";
+"browser_recovery_session_required_title" = "Browser Session Required";
 "batch_archive_completed" = "Archive Completed";
 "batch_archive_failed" = "Archive Failed";
 "batch_cleanup_completed_failed" = "Clear Completed and Failed";

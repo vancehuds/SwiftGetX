@@ -70,6 +70,16 @@
 "browser_takeover_policy_section" = "接管主机策略";
 "browser_takeover_prefilled_filename" = "已预填 %@，可在添加前调整链接或保存目录。";
 "browser_takeover_prefilled_link" = "已预填下载链接，可在添加前调整链接或保存目录。";
+"browser_recovery_credentials_generic" = "浏览器会话凭证";
+"browser_recovery_request_body_suffix" = "（包含请求体）";
+"browser_recovery_request_replay_message" = "SwiftGetX 不会重放浏览器的 %@ 请求%@。接管被拒绝时，浏览器会保留原始下载。";
+"browser_recovery_request_replay_short" = "请使用浏览器下载此请求";
+"browser_recovery_request_replay_title" = "不支持重放浏览器请求";
+"browser_recovery_retry_from_browser" = "请从浏览器扩展重试，或在已登录的浏览器会话中重新开始下载。";
+"browser_recovery_runtime_available" = "当前 App 会话仍保留本次重试所需的浏览器凭证。";
+"browser_recovery_session_required_message" = "此下载使用仅存在于运行期的浏览器凭证（%@）。SwiftGetX 不会保存这些值，因此重启或会话过期后的恢复必须从浏览器重新发起。";
+"browser_recovery_session_required_short" = "请从浏览器会话重试";
+"browser_recovery_session_required_title" = "需要浏览器会话";
 "batch_archive_completed" = "归档已完成";
 "batch_archive_failed" = "归档失败任务";
 "batch_cleanup_completed_failed" = "清理已完成和失败任务";

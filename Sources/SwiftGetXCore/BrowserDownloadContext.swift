@@ -87,6 +87,7 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
     public var sourcePageURL: String?
     public var handoffSource: String?
     public var handoffSourceText: String?
+    public var runtimeCredentialNames: [String]?
 
     public init(
         referrer: String? = nil,
@@ -100,7 +101,8 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         sourcePageTitle: String? = nil,
         sourcePageURL: String? = nil,
         handoffSource: String? = nil,
-        handoffSourceText: String? = nil
+        handoffSourceText: String? = nil,
+        runtimeCredentialNames: [String]? = nil
     ) {
         self.referrer = Self.nonEmpty(referrer)
         self.userAgent = Self.nonEmpty(userAgent)
@@ -114,6 +116,7 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         self.sourcePageURL = Self.nonEmpty(sourcePageURL)
         self.handoffSource = Self.nonEmpty(handoffSource)
         self.handoffSourceText = Self.nonEmpty(handoffSourceText)
+        self.runtimeCredentialNames = Self.normalizedRuntimeCredentialNames(runtimeCredentialNames)
     }
 
     public var redacted: BrowserDownloadContext {
@@ -129,7 +132,8 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             sourcePageTitle: sourcePageTitle,
             sourcePageURL: Self.redactedURLString(sourcePageURL),
             handoffSource: handoffSource,
-            handoffSourceText: Self.redactedSourceText(handoffSourceText)
+            handoffSourceText: Self.redactedSourceText(handoffSourceText),
+            runtimeCredentialNames: runtimeCredentialNames
         )
     }
 
@@ -145,6 +149,14 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
         headers.contains(where: \.isSensitive)
     }
 
+    public var hasRuntimeOnlyCredentials: Bool {
+        runtimeCredentialNames?.isEmpty == false
+    }
+
+    public var hasUnsupportedRequestReplay: Bool {
+        normalizedMethod != "GET" || bodyMetadata != nil
+    }
+
     public var persistable: BrowserDownloadContext {
         BrowserDownloadContext(
             referrer: Self.redactedURLString(referrer),
@@ -158,7 +170,11 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             sourcePageTitle: sourcePageTitle,
             sourcePageURL: Self.redactedURLString(sourcePageURL),
             handoffSource: handoffSource,
-            handoffSourceText: nil
+            handoffSourceText: nil,
+            runtimeCredentialNames: Self.runtimeCredentialNames(
+                existing: runtimeCredentialNames,
+                headers: headers
+            )
         )
     }
 
@@ -207,7 +223,8 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             sourcePageTitle: base.sourcePageTitle ?? message.sourcePageTitle,
             sourcePageURL: base.sourcePageURL ?? message.sourcePageUrl,
             handoffSource: base.handoffSource ?? message.source,
-            handoffSourceText: base.handoffSourceText ?? messageSourceText
+            handoffSourceText: base.handoffSourceText ?? messageSourceText,
+            runtimeCredentialNames: base.runtimeCredentialNames
         )
     }
 
@@ -250,6 +267,51 @@ public struct BrowserDownloadContext: Codable, Equatable, Sendable {
             return nil
         }
         return value
+    }
+
+    private static func runtimeCredentialNames(
+        existing: [String]?,
+        headers: [BrowserDownloadHeader]
+    ) -> [String]? {
+        normalizedRuntimeCredentialNames(
+            (existing ?? []) + headers
+                .filter(\.isSensitive)
+                .map { runtimeCredentialName(for: $0.name) }
+        )
+    }
+
+    private static func normalizedRuntimeCredentialNames(_ names: [String]?) -> [String]? {
+        var output = [String]()
+        var seen = Set<String>()
+        for name in names ?? [] {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = trimmed.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            output.append(trimmed)
+        }
+        return output.isEmpty ? nil : output
+    }
+
+    private static func runtimeCredentialName(for headerName: String) -> String {
+        switch headerName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "authorization":
+            return "Authorization"
+        case "cookie":
+            return "Cookie"
+        case "proxy-authorization":
+            return "Proxy-Authorization"
+        case "x-api-key":
+            return "X-API-Key"
+        case "x-auth-token":
+            return "X-Auth-Token"
+        case "x-csrf-token":
+            return "X-CSRF-Token"
+        case "x-xsrf-token":
+            return "X-XSRF-Token"
+        default:
+            return headerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 
     private static func isSensitiveQueryName(_ name: String) -> Bool {

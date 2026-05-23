@@ -378,6 +378,81 @@ struct DownloadCoordinatorTests {
         }
     }
 
+    @Test("same-session browser credential tasks can retry with runtime context")
+    func sameSessionBrowserCredentialTasksCanRetryWithRuntimeContext() throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 0
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+        let context = BrowserDownloadContext(
+            method: "GET",
+            headers: [
+                BrowserDownloadHeader(name: "Authorization", value: "Bearer session-secret", sensitive: true)
+            ],
+            finalURL: "https://example.com/protected.zip"
+        )
+
+        let task = try #require(fixture.coordinator.add(
+            source: "https://example.com/protected.zip",
+            browserContext: context
+        ).first)
+        task.status = .failed
+        task.errorMessage = "HTTP 401"
+
+        fixture.coordinator.retry(task)
+
+        #expect(task.status == .queued)
+        #expect(task.errorMessage == nil)
+        #expect(fixture.coordinator.browserRecoveryBlockReason(for: task) == nil)
+        #expect(task.browserContext?.runtimeCredentialNames == ["Authorization"])
+        #expect(task.browserContextJSON?.contains("session-secret") == false)
+    }
+
+    @Test("browser credential tasks stop after restart and do not block later queue items")
+    func browserCredentialTasksStopAfterRestartAndDoNotBlockQueue() throws {
+        let fixture = try makeFixture()
+        fixture.settings.concurrentTaskLimit = 1
+        let protected = makeTask(name: "Protected", queuePosition: 1)
+        protected.browserContext = BrowserDownloadContext(
+            method: "GET",
+            finalURL: "https://example.com/protected.zip",
+            runtimeCredentialNames: ["Authorization", "Cookie"]
+        )
+        let next = makeTask(name: "Next", queuePosition: 2)
+        fixture.context.insert(protected)
+        fixture.context.insert(next)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.scheduleQueue()
+
+        #expect(protected.status == .failed)
+        #expect(protected.errorMessage?.contains("Authorization") == true)
+        #expect(protected.errorMessage?.contains("Cookie") == true)
+        #expect(protected.nextQueueRetryAt == nil)
+        #expect(next.status == .running)
+    }
+
+    @Test("restore stops active browser credential tasks after app restart")
+    func restoreStopsActiveBrowserCredentialTasksAfterRestart() throws {
+        let fixture = try makeFixture()
+        fixture.settings.downloadRestartPolicy = .autoResume
+        let task = makeTask(name: "Protected", status: .running, queuePosition: 1)
+        task.browserContext = BrowserDownloadContext(
+            method: "GET",
+            finalURL: "https://example.com/protected.zip",
+            runtimeCredentialNames: ["Authorization"]
+        )
+        fixture.context.insert(task)
+        try fixture.context.save()
+        fixture.coordinator.attach(modelContext: fixture.context, settings: fixture.settings)
+
+        fixture.coordinator.restoreIncompleteTasks()
+
+        #expect(task.status == .failed)
+        #expect(task.errorMessage?.contains("Authorization") == true)
+        #expect(task.logEntries.contains { $0.contains(L10n.string("browser_recovery_session_required_short")) || $0.contains("Authorization") })
+    }
+
     @Test("cancelled tasks ignore stale engine snapshots")
     func cancelledTasksIgnoreStaleEngineSnapshots() throws {
         let fixture = try makeFixture()

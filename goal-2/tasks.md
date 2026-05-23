@@ -38,25 +38,43 @@ Next step:
 
 ## Task 2: Authenticated Download Recovery UX and POST Policy
 
-Status: [ ]
+Status: [~]
 
 Make runtime-only browser credentials visible as a task/session constraint, prevent misleading post-restart retries, and add a safe POST/body policy that falls back to the browser unless replay is explicitly supported.
 
 Work performed:
 
-- Pending.
+- Added `BrowserDownloadRecoveryPolicy` to centralize runtime-only credential blocking, unsupported request replay blocking, persisted recovery requirements, and trusted native handoff rejection messages.
+- Updated browser download context persistence so sensitive header values are stripped while non-secret credential names such as `Authorization` and `Cookie` are retained for user-facing recovery messages.
+- Prevented misleading restart/resume/retry behavior for persisted browser tasks that require missing runtime credentials, while keeping same-session retry available when the runtime context still exists.
+- Updated queue scheduling so blocked browser-session tasks fail with a clear recovery message without consuming the queue slot for later eligible tasks.
+- Rejected unsupported POST/body native handoffs before task creation in both app and legacy bridge paths, letting the browser keep the original download.
+- Updated Chrome and Safari extension request capture to ignore HEAD probes and preserve earlier POST/body context when later GET/Range probes are observed.
+- Added Inspector recovery messaging and hid Retry only when the current app session cannot replay the browser credential context.
+- Added English and Simplified Chinese localization for browser session/replay recovery states.
+- Added tests for same-session credential retry, restart blocking, queue skip behavior, restore blocking, POST/body native handoff rejection, extension static assertions, and credential-name-only persistence.
 
 Verification evidence:
 
-- Pending.
+- `git diff --check` passed.
+- `plutil -lint Sources/SwiftGetX/Resources/en.lproj/Localizable.strings Sources/SwiftGetX/Resources/zh-Hans.lproj/Localizable.strings` passed.
+- `node --check Sources/SwiftGetX/Resources/ChromeExtension/background.js` passed.
+- `node --check Sources/SwiftGetX/Resources/SafariWebExtension/background.js` passed.
+- `CLANG_MODULE_CACHE_PATH=/private/tmp/swiftgetx-clang-module-cache swift test --disable-sandbox --scratch-path /private/tmp/swiftgetx-task2-scratch --skip-update --filter DownloadCoordinator` passed: 40 tests in 1 suite.
+- `CLANG_MODULE_CACHE_PATH=/private/tmp/swiftgetx-clang-module-cache swift test --disable-sandbox --scratch-path /private/tmp/swiftgetx-task2-scratch --skip-update --filter nativeHandoffRejectsBrowserPOSTAndBodyReplay` passed: 1 test in 1 suite.
+- `CLANG_MODULE_CACHE_PATH=/private/tmp/swiftgetx-clang-module-cache swift test --disable-sandbox --scratch-path /private/tmp/swiftgetx-task2-scratch --skip-update --filter AppResources` passed: 10 tests in 1 suite.
+- `CLANG_MODULE_CACHE_PATH=/private/tmp/swiftgetx-clang-module-cache swift test --disable-sandbox --scratch-path /private/tmp/swiftgetx-task2-scratch --skip-update --filter persistsOnlySafeBrowserContext` passed: 1 test in 1 suite.
+- Earlier Task 2 verification before this continuation also ran the full `swift test` suite successfully: 300 tests in 22 suites.
 
 Remaining risk:
 
-- Pending.
+- Current continuation attempted a fresh full `swift test`; the build completed, but the Codex sandbox produced unrelated pasteboard/local-ack-server `Operation not permitted` failures and the default `.build` SwiftPM process remained locked. Current-session passing evidence is therefore focused on Task 2 slices plus static checks.
+- Commit is still pending: sandboxed `git add` cannot create `.git/index.lock`, and the required escalation request has now returned a temporary auto-review 503 across three consecutive goal continuations. Do not start Task 3 until Task 2 is staged and committed.
+- UI was verified by tests and static inspection, not by manual extension-to-app browser QA. That broader browser end-to-end exercise is the next task.
 
 Next step:
 
-- Task 3: Browser End-to-End Validation Harness.
+- Stage and commit Task 2 once Git metadata writes are available, then proceed to Task 3: Browser End-to-End Validation Harness.
 
 ## Task 3: Browser End-to-End Validation Harness
 

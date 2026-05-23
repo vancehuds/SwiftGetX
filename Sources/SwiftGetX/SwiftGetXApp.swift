@@ -224,6 +224,11 @@ struct SwiftGetXApp: App {
             return
         }
 
+        if let decision = BrowserDownloadRecoveryPolicy.nativeHandoffRejection(for: draft) {
+            acknowledgeNativeHandoff(draft, decision: decision)
+            return
+        }
+
         if draft.requiresUserConfirmation
             || (draft.isTrustedNativeHandoff && draft.isBrowserTakeover && appSettings.confirmBrowserTakeoverDownloads)
         {

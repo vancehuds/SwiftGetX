@@ -124,8 +124,14 @@ final class DownloadCoordinator {
         guard let tasks = try? modelContext.fetch(descriptor) else { return }
         for task in tasks where task.usesActiveDownloadSlot || task.status == .seeding {
             task.speedBytesPerSecond = 0
-            task.errorMessage = nil
             task.nextQueueRetryAt = nil
+            if let blockReason = BrowserDownloadRecoveryPolicy.persistedRequirement(for: task) {
+                task.status = .failed
+                task.errorMessage = blockReason.message
+                task.appendLog(blockReason.message)
+                continue
+            }
+            task.errorMessage = nil
             switch settings?.downloadRestartPolicy ?? .restorePaused {
             case .restorePaused:
                 task.status = .paused
@@ -365,6 +371,13 @@ final class DownloadCoordinator {
         for task in tasks {
             retry(task)
         }
+    }
+
+    func browserRecoveryBlockReason(for task: DownloadTask) -> BrowserDownloadRecoveryBlockReason? {
+        BrowserDownloadRecoveryPolicy.blockReason(
+            for: task,
+            runtimeBrowserContext: runtimeBrowserContexts[task.id]
+        )
     }
 
     func recheckSelected() {
@@ -753,6 +766,13 @@ final class DownloadCoordinator {
 
     private func start(_ task: DownloadTask, resetsQueueFailureState: Bool) {
         guard !task.isArchived else { return }
+        if let blockReason = BrowserDownloadRecoveryPolicy.blockReason(
+            for: task,
+            runtimeBrowserContext: runtimeBrowserContexts[task.id]
+        ) {
+            markTaskBlockedByBrowserRecoveryPolicy(task, reason: blockReason)
+            return
+        }
         if task.startedAt == nil {
             task.startedAt = .now
         }
@@ -868,6 +888,13 @@ final class DownloadCoordinator {
 
     func resume(_ task: DownloadTask) {
         guard !task.isArchived else { return }
+        if let blockReason = BrowserDownloadRecoveryPolicy.blockReason(
+            for: task,
+            runtimeBrowserContext: runtimeBrowserContexts[task.id]
+        ) {
+            markTaskBlockedByBrowserRecoveryPolicy(task, reason: blockReason)
+            return
+        }
         task.status = .queued
         task.errorMessage = nil
         task.speedBytesPerSecond = 0
@@ -1666,11 +1693,15 @@ final class DownloadCoordinator {
         scheduleNextQueueWake(from: tasks, now: now)
         guard availableSlots > 0 else { return }
 
-        for task in tasks
-            .filter({ !$0.isArchived && $0.status == .queued && $0.isQueueRetryDue(at: now) })
-            .prefix(availableSlots)
-        {
+        var startedCount = 0
+        for task in tasks.filter({ !$0.isArchived && $0.status == .queued && $0.isQueueRetryDue(at: now) }) {
+            guard startedCount < availableSlots else { break }
+            if let blockReason = browserRecoveryBlockReason(for: task) {
+                markTaskBlockedByBrowserRecoveryPolicy(task, reason: blockReason)
+                continue
+            }
             start(task, resetsQueueFailureState: false)
+            startedCount += 1
         }
     }
 
@@ -1809,8 +1840,6 @@ final class DownloadCoordinator {
                 message: snapshot.errorMessage.map(PrivacyRedactor.redactedText) ?? L10n.string("error_download_failed")
             )
             scheduleQueue()
-            runtimeBrowserContexts[task.id] = nil
-            runtimeHTTPOptions[task.id] = nil
         case .cancelled:
             task.speedBytesPerSecond = 0
             task.nextQueueRetryAt = nil
@@ -1868,6 +1897,22 @@ final class DownloadCoordinator {
         } catch {
             statusMessage = L10n.string("status_save_failed", error.localizedDescription)
         }
+    }
+
+    private func markTaskBlockedByBrowserRecoveryPolicy(
+        _ task: DownloadTask,
+        reason: BrowserDownloadRecoveryBlockReason
+    ) {
+        task.status = .failed
+        task.speedBytesPerSecond = 0
+        task.finishedAt = .now
+        task.errorMessage = reason.message
+        task.nextQueueRetryAt = nil
+        task.queueFailureCount = 0
+        task.appendLog(reason.message)
+        statusMessage = reason.shortStatus
+        save()
+        updateSleepPrevention()
     }
 
     private func settingsRecord() -> AppSettingsRecord? {

@@ -24,6 +24,14 @@ final class BrowserBridge {
         }
 
         let context = BrowserDownloadContext.context(from: message)
+        if let context, context.hasUnsupportedRequestReplay {
+            let reason = BrowserDownloadRecoveryBlockReason.unsupportedRequestReplay(
+                method: context.normalizedMethod,
+                hasBody: context.bodyMetadata != nil
+            )
+            lastMessage = reason.message
+            return
+        }
         let draft = DownloadDraft(
             source: url,
             suggestedFilename: message.suggestedFilename,
