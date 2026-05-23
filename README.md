@@ -31,6 +31,8 @@
 
 **SwiftGetX** 是一个面向 macOS 14+ 的轻量原生下载管理器原型，采用 **SwiftUI**、**SwiftData** 和 **Swift Package Manager** 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及默认纯 Swift 的 BT 下载能力。
 
+<img width="1036" height="634" alt="image" src="https://github.com/user-attachments/assets/5ace1e8d-6590-47ae-a6a3-b17ef1088f6a" />
+
 ---
 
 ## ✨ 核心特性
