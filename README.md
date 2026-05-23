@@ -123,7 +123,7 @@ graph TD
 1. 前往本仓库的 [Releases](https://github.com/vancehuds/SwiftGetX/releases) 页面下载最新版的 `SwiftGetX.dmg`。
 2. 双击打开 `.dmg` 挂载卷，将 **SwiftGetX** 拖入您的 **Applications (应用程序)** 文件夹中。
 3. **首次启动安全提示**：
-   * 官方 tag release workflow 会强制 Developer ID 签名、公证和 stapling 校验；如果你下载的是本地构建、fork 产物，或 release secrets 未配置的调试产物，macOS 仍可能提示：*“无法打开，因为 Apple 无法检查其是否包含恶意软件”* 或 *“来自未验证的开发者”*。
+   * 如果仓库配置了 Developer ID release secrets，官方 tag release workflow 会执行签名、公证和 stapling 校验；如果没有付费 Apple Developer 账号或下载的是本地构建、fork 产物，macOS 仍可能提示：*“无法打开，因为 Apple 无法检查其是否包含恶意软件”* 或 *“来自未验证的开发者”*。
    * **解决方法**：请打开 macOS 的 **系统设置 -> 隐私与安全**，拉到页面最下方找到“安全性”一栏，点击 **“仍要打开” (Open Anyway)**，并输入您的 Mac 开机密码进行授权，之后即可正常启动应用。
 
 ### 第二步：安装并绑定 Chrome 浏览器扩展
@@ -276,7 +276,7 @@ Scripts/package-dmg.sh release dist --dmg
 如果你准备打包发布或者向外界推广你的 SwiftGetX 衍生版本，请注意以下安全与规范要求：
 
 1.  **沙盒与公证 (Sandboxing & Notarization)**：
-    *   根据 macOS 的 Gatekeeper 机制，为避免出现“应用已损坏”的警告，发布包需要使用苹果开发者账号的 `Developer ID Application` 证书进行签名，并通过 `xcrun notarytool` 提交给苹果完成公证。
+    *   根据 macOS 的 Gatekeeper 机制，为避免出现“应用已损坏”的警告，推荐使用苹果开发者账号的 `Developer ID Application` 证书进行签名，并通过 `xcrun notarytool` 提交给苹果完成公证。没有付费账号时仍可发布未公证 DMG，但用户首次打开时通常需要手动允许。
     *   由于 Native Messaging 机制需要启动辅助子进程 `SwiftGetXNativeHost`，如果 App 运行在严苛沙盒（App Sandbox）中，请确保辅助进程已注册并在宿主 App 的 App Group 内，或在非沙盒模式下发布。
 2.  **不要将机密提交至仓库**：
     *   绝不要向 Git 提交本地调试生成的 `.pem` 密钥文件。

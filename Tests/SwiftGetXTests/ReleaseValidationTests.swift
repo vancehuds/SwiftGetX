@@ -40,7 +40,7 @@ struct ReleaseValidationTests {
         #expect(url.absoluteString == "https://github.com/vancehuds/SwiftGetX/releases/tag/v1.2.3")
     }
 
-    @Test("release validator covers strict secrets, Sparkle, signing, notarization, and appcast")
+    @Test("release validator covers optional signing, Sparkle, notarization, and appcast")
     func releaseValidatorCoversReleaseGates() throws {
         let script = try readText("Scripts/validate-release.sh")
 
@@ -49,7 +49,8 @@ struct ReleaseValidationTests {
         #expect(script.contains("Scripts/validate-release.sh app <SwiftGetX.app>"))
         #expect(script.contains("Scripts/validate-release.sh dmg <SwiftGetX.dmg>"))
         #expect(script.contains("Scripts/validate-release.sh appcast <appcast.xml>"))
-        #expect(script.contains("SWIFTGETX_RELEASE_STRICT=1"))
+        #expect(script.contains("Developer ID signing and notarization validation skipped"))
+        #expect(script.contains("SWIFTGETX_RELEASE_STRICT must be 0 or 1"))
         #expect(script.contains("APPLE_DEVELOPER_ID_CERTIFICATE_BASE64"))
         #expect(script.contains("APPLE_DEVELOPER_ID_APPLICATION_IDENTITY"))
         #expect(script.contains("APPLE_NOTARY_KEY_ID"))
@@ -64,18 +65,24 @@ struct ReleaseValidationTests {
         #expect(script.contains("sparkle:edSignature"))
     }
 
-    @Test("release workflow fails early and verifies signed artifacts")
+    @Test("release workflow supports unsigned fallback and verifies artifacts")
     func releaseWorkflowFailsEarlyAndVerifiesArtifacts() throws {
         let workflow = try readText(".github/workflows/release.yml")
 
-        #expect(workflow.contains("Validate release secrets and Sparkle configuration"))
+        #expect(workflow.contains("Configure release signing mode"))
+        #expect(workflow.contains("SWIFTGETX_RELEASE_STRICT=0"))
+        #expect(workflow.contains("SWIFTGETX_RELEASE_STRICT=1"))
+        #expect(workflow.contains("SWIFTGETX_IMPORT_DEVELOPER_ID_CERTIFICATE=0"))
+        #expect(workflow.contains("Incomplete Apple signing secrets"))
+        #expect(workflow.contains("ad-hoc signed app bundle and unsigned, unnotarized DMG"))
+        #expect(workflow.contains("Validate release configuration"))
         #expect(workflow.contains("Scripts/validate-release.sh environment"))
         #expect(workflow.contains("Import Developer ID certificate"))
-        #expect(workflow.contains("SWIFTGETX_RELEASE_STRICT: \"1\""))
+        #expect(workflow.contains("Skipping Developer ID certificate import for unsigned release"))
         #expect(workflow.contains("SWIFTGETX_CODESIGN_IDENTITY"))
         #expect(workflow.contains("APPLE_NOTARY_KEY_ID"))
         #expect(workflow.contains("Scripts/package-dmg.sh release dist --dmg"))
-        #expect(workflow.contains("Verify signed and notarized artifacts"))
+        #expect(workflow.contains("Verify release artifacts"))
         #expect(workflow.contains("Scripts/validate-release.sh app dist/SwiftGetX.app"))
         #expect(workflow.contains("Scripts/validate-release.sh dmg dist/SwiftGetX.dmg"))
         #expect(workflow.contains("SWIFTGETX_RELEASE_NOTES_URL"))

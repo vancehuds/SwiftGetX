@@ -29,6 +29,16 @@ require_env() {
     fi
 }
 
+has_any_env() {
+    local name
+    for name in "$@"; do
+        if [[ -n "${!name:-}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 require_any_env() {
     local description="$1"
     shift
@@ -85,17 +95,33 @@ validate_sparkle_config() {
 }
 
 validate_environment() {
-    [[ "${SWIFTGETX_RELEASE_STRICT:-}" == "1" ]] || fail "SWIFTGETX_RELEASE_STRICT=1 is required for release validation"
+    case "${SWIFTGETX_RELEASE_STRICT:-0}" in
+        1)
+            require_env APPLE_DEVELOPER_ID_CERTIFICATE_BASE64
+            require_env APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD
+            require_env APPLE_DEVELOPER_ID_APPLICATION_IDENTITY
+            require_env APPLE_NOTARY_KEY_ID
+            require_env APPLE_NOTARY_ISSUER_ID
+            require_any_env "Apple notary API key" APPLE_NOTARY_KEY_PATH APPLE_NOTARY_KEY APPLE_NOTARY_KEY_BASE64
+            ;;
+        0|"")
+            printf 'Developer ID signing and notarization validation skipped; SWIFTGETX_RELEASE_STRICT is not enabled.\n'
+            ;;
+        *)
+            fail "SWIFTGETX_RELEASE_STRICT must be 0 or 1"
+            ;;
+    esac
 
-    require_env APPLE_DEVELOPER_ID_CERTIFICATE_BASE64
-    require_env APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD
-    require_env APPLE_DEVELOPER_ID_APPLICATION_IDENTITY
-    require_env APPLE_NOTARY_KEY_ID
-    require_env APPLE_NOTARY_ISSUER_ID
-    require_any_env "Apple notary API key" APPLE_NOTARY_KEY_PATH APPLE_NOTARY_KEY APPLE_NOTARY_KEY_BASE64
     require_env SPARKLE_EDDSA_PRIVATE_KEY
-    require_any_env "Chrome extension signing key" CHROME_EXTENSION_KEY_BASE64 SWIFTGETX_CHROME_EXTENSION_KEY_BASE64
-    require_any_env "Chrome extension fixed ID" CHROME_EXTENSION_ID SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID
+
+    if [[ "${SWIFTGETX_RELEASE_STRICT:-0}" == "1" ]] \
+        || has_any_env CHROME_EXTENSION_KEY_BASE64 SWIFTGETX_CHROME_EXTENSION_KEY_BASE64 SWIFTGETX_CHROME_EXTENSION_KEY_PATH \
+        || has_any_env CHROME_EXTENSION_ID SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID; then
+        require_any_env "Chrome extension signing key" CHROME_EXTENSION_KEY_BASE64 SWIFTGETX_CHROME_EXTENSION_KEY_BASE64 SWIFTGETX_CHROME_EXTENSION_KEY_PATH
+        require_any_env "Chrome extension fixed ID" CHROME_EXTENSION_ID SWIFTGETX_EXPECTED_CHROME_EXTENSION_ID
+    else
+        printf 'Chrome extension fixed ID validation skipped; no release key or expected ID was provided.\n'
+    fi
 
     validate_sparkle_config
     printf 'Release environment validation passed.\n'

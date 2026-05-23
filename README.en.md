@@ -121,7 +121,7 @@ If you prefer to run pre-built binaries directly without compiling from source, 
 1. Head over to the repository's [Releases](https://github.com/vancehuds/SwiftGetX/releases) page and download the latest `SwiftGetX.dmg`.
 2. Double-click the downloaded `.dmg` file to mount it, and drag **SwiftGetX** into your **Applications** directory.
 3. **First-Time Launch Warning**:
-   * The official tag release workflow enforces Developer ID signing, notarization, and stapling validation. If you install a local build, fork artifact, or debug artifact built without release secrets, macOS may still block launch on double-click, displaying: *"Cannot be opened because Apple cannot check it for malicious software"* or *"Unverified Developer"*.
+   * When Developer ID release secrets are configured, the official tag release workflow performs signing, notarization, and stapling validation. If no paid Apple Developer account is available, or if you install a local build or fork artifact, macOS may still block launch on double-click, displaying: *"Cannot be opened because Apple cannot check it for malicious software"* or *"Unverified Developer"*.
    * **Solution**: Open macOS **System Settings -> Privacy & Security**. Scroll to the bottom to find the "Security" section, click **"Open Anyway"**, and enter your Mac passcode to authorize execution.
 
 ### Step 2: Install and Bind the Chrome Browser Extension
@@ -274,7 +274,7 @@ We use Apple's modern **Swift Testing** framework (`@Suite`, `@Test`, and `#expe
 Before distributing your custom build of SwiftGetX, note these critical macOS platform guidelines:
 
 1.  **Gatekeeper Codesigning & Notarization**:
-    *   To prevent Gatekeeper warnings on other machines, you must sign the binaries using an active Apple Developer account's `Developer ID Application` certificate and notarize the output via `xcrun notarytool`.
+    *   To prevent Gatekeeper warnings on other machines, you should sign the binaries using an active Apple Developer account's `Developer ID Application` certificate and notarize the output via `xcrun notarytool`. Without a paid account, you can still publish an unnotarized DMG, but users will usually need to allow the app manually on first launch.
 2.  **App Sandbox Restrictions**:
     *   Sandboxed apps are forbidden from launching arbitrary helper binaries (like `SwiftGetXNativeHost`) unless they share a matching App Group container, or operate in a privileged non-sandboxed environment.
 3.  **Secret Management**:
