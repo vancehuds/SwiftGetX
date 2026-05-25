@@ -140,6 +140,9 @@ final class DownloadCoordinator {
                 task.status = .queued
                 task.appendLog(L10n.string("log_restored_queued_after_restart"))
             }
+            for message in TorrentStatusAdvice.restartRecoveryMessages(for: task) {
+                task.appendLog(message)
+            }
         }
         save()
         if settings?.downloadRestartPolicy == .autoResume {

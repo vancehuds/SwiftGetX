@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct InspectorView: View {
@@ -703,6 +704,8 @@ private struct ConnectionsPanel: View {
     @Environment(\.responsiveLayout) private var layout
     @State private var trackerURL = ""
     @State private var trackerBatchText = ""
+    @State private var trackerSearchText = ""
+    @State private var peerSearchText = ""
     let task: DownloadTask
 
     var body: some View {
@@ -747,8 +750,46 @@ private struct ConnectionsPanel: View {
             if let health = task.torrentHealth {
                 healthPanel(health)
             }
+            advicePanel
             trackerPanel
             peerPanel
+        }
+    }
+
+    @ViewBuilder
+    private var advicePanel: some View {
+        let messages = TorrentStatusAdvice.messages(for: task)
+        if !messages.isEmpty {
+            VStack(alignment: .leading, spacing: layout.value(7)) {
+                Text(L10n.string("torrent_status_advice"))
+                    .font(layout.font(10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(messages, id: \.self) { message in
+                    HStack(alignment: .top, spacing: layout.value(7)) {
+                        Image(systemName: "info.circle")
+                            .font(layout.font(10.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, layout.value(1))
+                        Text(message)
+                            .font(layout.font(10.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                if shouldOfferRecheck {
+                    Button {
+                        coordinator.recheck(task)
+                    } label: {
+                        Label(L10n.string("action_recheck"), systemImage: "checkmark.seal")
+                    }
+                    .font(layout.font(10.5, weight: .semibold))
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(layout.value(10))
+            .background(ContentSurfaceBackground(cornerRadius: 8))
         }
     }
 
@@ -884,14 +925,21 @@ private struct ConnectionsPanel: View {
                         }
                     }
 
+                if !trackerBatchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(trackerBatchValidation.summary)
+                        .font(layout.font(10.2))
+                        .foregroundStyle(trackerBatchValidation.invalidEntries.isEmpty ? Color.secondary : Color.orange)
+                        .lineLimit(2)
+                }
+
                 HStack(spacing: layout.value(8)) {
                     Button {
-                        coordinator.addTorrentTrackers(task, urlsText: trackerBatchText)
+                        coordinator.addTorrentTrackers(task, urlsText: trackerBatchValidation.newURLs.joined(separator: "\n"))
                         trackerBatchText = ""
                     } label: {
                         Label(L10n.string("torrent_add_trackers"), systemImage: "plus.rectangle.on.rectangle")
                     }
-                    .disabled(trackerBatchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!trackerBatchValidation.hasUsableAdditions)
 
                     Button {
                         coordinator.removeTorrentTrackers(task, urls: trackerBatchURLs)
@@ -918,7 +966,11 @@ private struct ConnectionsPanel: View {
                     .font(layout.font(11))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(task.torrentTrackers.prefix(20)) { tracker in
+                TextField(L10n.string("torrent_tracker_search"), text: $trackerSearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(layout.font(11))
+
+                ForEach(filteredTrackers.prefix(20)) { tracker in
                     HStack(alignment: .top, spacing: layout.value(8)) {
                         VStack(alignment: .leading, spacing: layout.value(3)) {
                             Text(tracker.url)
@@ -931,6 +983,14 @@ private struct ConnectionsPanel: View {
                         }
                         Spacer()
                         Button {
+                            copyToPasteboard(tracker.url)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(L10n.string("torrent_copy_tracker"))
+                        .help(L10n.string("torrent_copy_tracker"))
+                        Button {
                             coordinator.removeTorrentTracker(task, url: tracker.url)
                         } label: {
                             Image(systemName: "minus.circle")
@@ -942,15 +1002,35 @@ private struct ConnectionsPanel: View {
                     .padding(layout.value(10))
                     .background(ContentSurfaceBackground(cornerRadius: 8))
                 }
+
+                if filteredTrackers.isEmpty {
+                    Text(L10n.string("torrent_tracker_filter_empty"))
+                        .font(layout.font(11))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
 
+    private var trackerBatchValidation: TorrentTrackerBatchValidation {
+        TorrentTrackerBatchParser.validate(
+            trackerBatchText,
+            existingURLs: task.torrentTrackers.map(\.url)
+        )
+    }
+
     private var trackerBatchURLs: [String] {
-        trackerBatchText
-            .components(separatedBy: CharacterSet(charactersIn: ", \n\t"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        TorrentTrackerBatchParser.validURLs(from: trackerBatchText)
+    }
+
+    private var filteredTrackers: [TorrentTrackerInfo] {
+        let query = trackerSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return task.torrentTrackers }
+        return task.torrentTrackers.filter { tracker in
+            tracker.url.lowercased().contains(query)
+                || tracker.status.lowercased().contains(query)
+                || tracker.errorMessage?.lowercased().contains(query) == true
+        }
     }
 
     private var peerPanel: some View {
@@ -964,7 +1044,11 @@ private struct ConnectionsPanel: View {
                     .font(layout.font(11))
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(task.torrentPeers.prefix(100)) { peer in
+                TextField(L10n.string("torrent_peer_search"), text: $peerSearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .font(layout.font(11))
+
+                ForEach(filteredPeers.prefix(100)) { peer in
                     HStack(spacing: layout.value(8)) {
                         VStack(alignment: .leading, spacing: layout.value(3)) {
                             Text(peer.address)
@@ -986,12 +1070,51 @@ private struct ConnectionsPanel: View {
                         }
                         .font(layout.font(10, design: .monospaced))
                         .foregroundStyle(.secondary)
+
+                        Button {
+                            copyToPasteboard(peer.address)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel(L10n.string("torrent_copy_peer"))
+                        .help(L10n.string("torrent_copy_peer"))
                     }
                     .padding(layout.value(10))
                     .background(ContentSurfaceBackground(cornerRadius: 8))
                 }
+
+                if filteredPeers.isEmpty {
+                    Text(L10n.string("torrent_peer_filter_empty"))
+                        .font(layout.font(11))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
+    }
+
+    private var filteredPeers: [TorrentPeerInfo] {
+        let query = peerSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return task.torrentPeers }
+        return task.torrentPeers.filter { peer in
+            peer.address.lowercased().contains(query)
+                || peer.client.lowercased().contains(query)
+                || peer.flags.lowercased().contains(query)
+                || peer.source?.lowercased().contains(query) == true
+        }
+    }
+
+    private var shouldOfferRecheck: Bool {
+        guard task.isTorrent else { return false }
+        if task.torrentResumeState?.status == .missing || task.torrentResumeState?.status == .failed {
+            return true
+        }
+        return task.torrentResumeState == nil && task.downloadedBytes > 0 && !task.status.usesActiveClock
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 
     private func trackerSubtitle(_ tracker: TorrentTrackerInfo) -> String {

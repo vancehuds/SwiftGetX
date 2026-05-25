@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import SwiftGetXCore
 import UniformTypeIdentifiers
@@ -22,6 +23,7 @@ struct NewTaskSheet: View {
     @State private var selectedFileIndexesBySource = [String: Set<Int>]()
     @State private var filePrioritiesBySource = [String: [Int: TorrentFilePriority]]()
     @State private var isLoadingPreviews = false
+    @State private var previewRefreshNonce = 0
     @State private var didResolveNativeHandoff = false
     let draft: DownloadDraft?
 
@@ -189,7 +191,19 @@ struct NewTaskSheet: View {
                 saveDirectory: saveDirectory,
                 previews: previews,
                 selectedFileIndexesBySource: $selectedFileIndexesBySource,
-                filePrioritiesBySource: $filePrioritiesBySource
+                filePrioritiesBySource: $filePrioritiesBySource,
+                onRetryPreview: { source in
+                    retryPreview(for: source)
+                },
+                onAddAnyway: {
+                    addTasksAndDismiss()
+                },
+                onCopySource: { source in
+                    copyToPasteboard(source)
+                },
+                onCancelSource: { source in
+                    removeSource(source)
+                }
             )
 
             HStack {
@@ -203,38 +217,7 @@ struct NewTaskSheet: View {
                 Spacer()
 
                 Button {
-                    guard !rejectExpiredNativeHandoffIfNeeded() else {
-                        dismiss()
-                        return
-                    }
-
-                    let sources = SourceParser.extractSources(from: sourceText)
-                    let tasks: [DownloadTask]
-                    if hasCompletePreviews(for: sources) {
-                        tasks = coordinator.add(
-                            previews: previews,
-                            saveDirectory: saveDirectory,
-                            selectedFileIndexes: selectedFileIndexesForCoordinator,
-                            filePriorities: filePrioritiesForCoordinator,
-                            httpOptions: httpDownloadOptions
-                        )
-                    } else {
-                        tasks = coordinator.add(
-                            source: sourceText,
-                            saveDirectory: saveDirectory,
-                            suggestedFilename: effectiveSuggestedFilename,
-                            browserContext: draft?.browserContext,
-                            httpOptions: httpDownloadOptions
-                        )
-                    }
-                    acknowledgeNativeHandoffIfNeeded(
-                        decision: NativeHandoffDecisionFactory.decision(
-                            queuedTaskCount: tasks.count,
-                            requiresUserConfirmation: draft?.requiresUserConfirmation == true
-                                || draft?.isBrowserTakeover == true
-                        )
-                    )
-                    dismiss()
+                    addTasksAndDismiss()
                 } label: {
                     Label(L10n.string("add_task"), systemImage: "plus.circle.fill")
                         .font(layout.font(12, weight: .semibold))
@@ -265,6 +248,7 @@ struct NewTaskSheet: View {
             httpChecksumAlgorithm.rawValue,
             httpChecksumDigest,
             httpHeaderText,
+            "\(previewRefreshNonce)",
             draft?.browserContext?.finalURL ?? "",
             draft?.browserContext?.originalURL ?? ""
         ].joined(separator: "\u{1F}")
@@ -367,6 +351,58 @@ struct NewTaskSheet: View {
             let separator = sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n"
             sourceText += separator + paths.joined(separator: "\n")
         }
+    }
+
+    private func retryPreview(for source: String) {
+        guard currentSources.contains(source) else { return }
+        previews.removeAll { $0.source == source }
+        previewRefreshNonce += 1
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    private func removeSource(_ source: String) {
+        sourceText = currentSources
+            .filter { $0 != source }
+            .joined(separator: "\n")
+    }
+
+    private func addTasksAndDismiss() {
+        guard !rejectExpiredNativeHandoffIfNeeded() else {
+            dismiss()
+            return
+        }
+
+        let sources = SourceParser.extractSources(from: sourceText)
+        let tasks: [DownloadTask]
+        if hasCompletePreviews(for: sources) {
+            tasks = coordinator.add(
+                previews: previews,
+                saveDirectory: saveDirectory,
+                selectedFileIndexes: selectedFileIndexesForCoordinator,
+                filePriorities: filePrioritiesForCoordinator,
+                httpOptions: httpDownloadOptions
+            )
+        } else {
+            tasks = coordinator.add(
+                source: sourceText,
+                saveDirectory: saveDirectory,
+                suggestedFilename: effectiveSuggestedFilename,
+                browserContext: draft?.browserContext,
+                httpOptions: httpDownloadOptions
+            )
+        }
+        acknowledgeNativeHandoffIfNeeded(
+            decision: NativeHandoffDecisionFactory.decision(
+                queuedTaskCount: tasks.count,
+                requiresUserConfirmation: draft?.requiresUserConfirmation == true
+                    || draft?.isBrowserTakeover == true
+            )
+        )
+        dismiss()
     }
 
     private var selectedFileIndexesForCoordinator: [String: [Int]] {
@@ -676,6 +712,10 @@ private struct SourcePreviewView: View {
     let previews: [TorrentMetadataPreview]
     @Binding var selectedFileIndexesBySource: [String: Set<Int>]
     @Binding var filePrioritiesBySource: [String: [Int: TorrentFilePriority]]
+    let onRetryPreview: (String) -> Void
+    let onAddAnyway: () -> Void
+    let onCopySource: (String) -> Void
+    let onCancelSource: (String) -> Void
 
     var body: some View {
         let sources = SourceParser.extractSources(from: sourceText)
@@ -705,7 +745,11 @@ private struct SourcePreviewView: View {
                                 TorrentPreviewRow(
                                     preview: preview.plannedForSaveDirectory(saveDirectory),
                                     selectedFileIndexes: selectionBinding(for: preview),
-                                    filePriorities: priorityBinding(for: preview)
+                                    filePriorities: priorityBinding(for: preview),
+                                    onRetryPreview: { onRetryPreview(preview.source) },
+                                    onAddAnyway: onAddAnyway,
+                                    onCopySource: { onCopySource(preview.source) },
+                                    onCancelSource: { onCancelSource(preview.source) }
                                 )
                             } else {
                                 let kind = SourceParser.kind(for: source)
@@ -787,6 +831,13 @@ private struct TorrentPreviewRow: View {
     let preview: TorrentMetadataPreview
     @Binding var selectedFileIndexes: Set<Int>
     @Binding var filePriorities: [Int: TorrentFilePriority]
+    let onRetryPreview: () -> Void
+    let onAddAnyway: () -> Void
+    let onCopySource: () -> Void
+    let onCancelSource: () -> Void
+    @State private var fileSearchText = ""
+    @State private var extensionFilter = ""
+    @State private var bulkPriority: TorrentFilePriority = .normal
 
     var body: some View {
         VStack(alignment: .leading, spacing: layout.value(8)) {
@@ -806,6 +857,16 @@ private struct TorrentPreviewRow: View {
                 }
 
                 Spacer()
+            }
+
+            if showsMagnetTimeoutActions {
+                MagnetMetadataTimeoutActions(
+                    preview: preview,
+                    onRetryPreview: onRetryPreview,
+                    onAddAnyway: onAddAnyway,
+                    onCopySource: onCopySource,
+                    onCancelSource: onCancelSource
+                )
             }
 
             if !preview.files.isEmpty {
@@ -829,8 +890,12 @@ private struct TorrentPreviewRow: View {
                         .foregroundStyle(.secondary)
                 }
 
+                torrentSelectionTools
+
+                folderTree
+
                 VStack(alignment: .leading, spacing: layout.value(4)) {
-                    ForEach(preview.files) { file in
+                    ForEach(filteredFiles) { file in
                         HStack(spacing: layout.value(8)) {
                             Button {
                                 toggle(file)
@@ -863,6 +928,12 @@ private struct TorrentPreviewRow: View {
                                 .frame(width: layout.value(78), alignment: .trailing)
                         }
                     }
+                }
+
+                if filteredFiles.isEmpty {
+                    Text(L10n.string("torrent_file_filter_empty"))
+                        .font(layout.font(10.5))
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -923,6 +994,105 @@ private struct TorrentPreviewRow: View {
         return preview.metadataStatus.title
     }
 
+    private var showsMagnetTimeoutActions: Bool {
+        preview.kind == .torrentMagnet
+            && preview.metadataStatus == .fetching
+            && preview.files.isEmpty
+    }
+
+    private var filteredFiles: [TorrentFile] {
+        TorrentFileUX.filteredFiles(preview.files, searchText: fileSearchText)
+    }
+
+    private var folderGroups: [TorrentFileFolderGroup] {
+        TorrentFileUX.folderGroups(in: preview.files)
+    }
+
+    private var extensionMatchedIndexes: [Int] {
+        TorrentFileUX.fileIndexes(in: preview.files, matchingExtensions: extensionFilter)
+    }
+
+    private var torrentSelectionTools: some View {
+        VStack(alignment: .leading, spacing: layout.value(8)) {
+            TextField(L10n.string("torrent_file_search"), text: $fileSearchText)
+                .textFieldStyle(.roundedBorder)
+                .font(layout.font(10.8))
+
+            HStack(spacing: layout.value(8)) {
+                TextField(L10n.string("torrent_extension_filter"), text: $extensionFilter)
+                    .textFieldStyle(.roundedBorder)
+                    .font(layout.font(10.8))
+
+                Picker("", selection: $bulkPriority) {
+                    ForEach(TorrentFilePriority.allCases) { priority in
+                        Text(priority.title).tag(priority)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: layout.value(100))
+
+                Button {
+                    apply(priority: bulkPriority, to: extensionMatchedIndexes)
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                }
+                .disabled(extensionMatchedIndexes.isEmpty)
+                .accessibilityLabel(L10n.string("torrent_apply_extension_filter"))
+                .help(L10n.string("torrent_apply_extension_filter"))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var folderTree: some View {
+        if !folderGroups.isEmpty {
+            VStack(alignment: .leading, spacing: layout.value(5)) {
+                Text(L10n.string("torrent_folders"))
+                    .font(layout.font(10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(folderGroups.prefix(8)) { folder in
+                    HStack(spacing: layout.value(7)) {
+                        Image(systemName: "folder")
+                            .font(layout.font(10.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, CGFloat(folder.depth) * layout.value(10))
+
+                        VStack(alignment: .leading, spacing: layout.value(1)) {
+                            Text(folder.displayName)
+                                .font(layout.font(10.8, weight: .medium))
+                                .lineLimit(1)
+                            Text(L10n.string(
+                                "torrent_folder_file_count",
+                                folder.fileIndexes.count,
+                                ByteCountFormatter.downloadFormatter.string(fromByteCount: folder.totalBytes)
+                            ))
+                            .font(layout.font(9.8))
+                            .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Menu {
+                            ForEach(TorrentFilePriority.allCases) { priority in
+                                Button(priority.title) {
+                                    apply(priority: priority, to: folder.fileIndexes)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .accessibilityLabel(L10n.string("torrent_folder_priority"))
+                        .help(L10n.string("torrent_folder_priority"))
+                    }
+                }
+            }
+            .padding(layout.value(8))
+            .background(ContentSurfaceBackground(cornerRadius: 6))
+        }
+    }
+
     private var previewColor: Color {
         switch preview.kind {
         case .http:
@@ -942,6 +1112,18 @@ private struct TorrentPreviewRow: View {
             selectedFileIndexes.insert(file.index)
             filePriorities[file.index] = .normal
         }
+    }
+
+    private func apply(priority: TorrentFilePriority, to indexes: [Int]) {
+        let plan = TorrentFileUX.apply(
+            priority: priority,
+            to: indexes,
+            files: preview.files,
+            selectedFileIndexes: selectedFileIndexes,
+            priorities: filePriorities
+        )
+        selectedFileIndexes = plan.selectedFileIndexes
+        filePriorities = plan.priorities
     }
 
     private func priorityBinding(for file: TorrentFile) -> Binding<TorrentFilePriority> {
@@ -970,6 +1152,61 @@ private struct TorrentPreviewRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+    }
+}
+
+private struct MagnetMetadataTimeoutActions: View {
+    @Environment(\.responsiveLayout) private var layout
+    let preview: TorrentMetadataPreview
+    let onRetryPreview: () -> Void
+    let onAddAnyway: () -> Void
+    let onCopySource: () -> Void
+    let onCancelSource: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: layout.value(7)) {
+            HStack(alignment: .top, spacing: layout.value(8)) {
+                Image(systemName: "clock.badge.exclamationmark")
+                    .font(layout.font(12, weight: .semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: layout.value(18))
+
+                VStack(alignment: .leading, spacing: layout.value(3)) {
+                    Text(L10n.string("torrent_magnet_timeout_title"))
+                        .font(layout.font(10.8, weight: .semibold))
+                    Text(timeoutDetail)
+                        .font(layout.font(10.3))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+
+            HStack(spacing: layout.value(6)) {
+                Button(L10n.string("torrent_continue_waiting")) {
+                    onRetryPreview()
+                }
+                Button(L10n.string("torrent_add_anyway")) {
+                    onAddAnyway()
+                }
+                Button(L10n.string("torrent_copy_magnet")) {
+                    onCopySource()
+                }
+                Button(L10n.string("action_cancel")) {
+                    onCancelSource()
+                }
+            }
+            .font(layout.font(10.3, weight: .semibold))
+        }
+        .padding(layout.value(8))
+        .background(ContentSurfaceBackground(cornerRadius: 6))
+    }
+
+    private var timeoutDetail: String {
+        let trackerCount = preview.trackers.count
+        if trackerCount > 0 {
+            return L10n.string("torrent_magnet_timeout_detail", trackerCount)
+        }
+        return preview.errorMessage ?? L10n.string("torrent_metadata_timeout")
     }
 }
 
