@@ -220,6 +220,50 @@ private struct OverviewPanel: View {
                     symbol: "gauge.high",
                     color: .secondary
                 )
+
+                if task.isTorrent {
+                    MetricCard(
+                        title: L10n.string("metric_upload_speed"),
+                        value: speed(torrentUploadRate),
+                        symbol: "arrow.up.circle",
+                        color: torrentUploadRate > 0 ? .orange : .secondary
+                    )
+
+                    MetricCard(
+                        title: L10n.string("torrent_share_ratio"),
+                        value: ratioText(torrentShareRatio),
+                        symbol: "arrow.up.arrow.down.circle",
+                        color: torrentShareRatio > 0 ? .mint : .secondary
+                    )
+
+                    MetricCard(
+                        title: L10n.string("torrent_peer_count"),
+                        value: "\(torrentPeerCount)",
+                        symbol: "person.2",
+                        color: torrentPeerCount > 0 ? .cyan : .secondary
+                    )
+
+                    MetricCard(
+                        title: L10n.string("torrent_trackers"),
+                        value: "\(torrentTrackerCount)",
+                        symbol: "dot.radiowaves.left.and.right",
+                        color: torrentTrackerCount > 0 ? .purple : .secondary
+                    )
+
+                    MetricCard(
+                        title: L10n.string("torrent_engine"),
+                        value: torrentEngineTitle,
+                        symbol: "gearshape.2",
+                        color: .secondary
+                    )
+
+                    MetricCard(
+                        title: L10n.string("torrent_seeding_time"),
+                        value: torrentSeedingTimeText,
+                        symbol: "leaf.circle",
+                        color: torrentSeedingDuration > 0 ? .mint : .secondary
+                    )
+                }
             }
 
             VStack(spacing: layout.value(8)) {
@@ -269,9 +313,50 @@ private struct OverviewPanel: View {
             : "--"
     }
 
+    private var torrentUploadRate: Int64 {
+        task.torrentConnection?.uploadRate ?? 0
+    }
+
+    private var torrentShareRatio: Double {
+        task.torrentConnection?.shareRatio ?? 0
+    }
+
+    private var torrentPeerCount: Int {
+        task.torrentConnection?.peerCount
+            ?? task.torrentHealth?.peerCount
+            ?? task.torrentPeers.count
+    }
+
+    private var torrentTrackerCount: Int {
+        task.torrentHealth?.trackerCount ?? task.torrentTrackers.count
+    }
+
+    private var torrentEngineTitle: String {
+        let engine = task.torrentConnection?.engine ?? task.torrentHealth?.engine
+        let status = task.torrentConnection?.engineStatus ?? task.torrentHealth?.engineStatus
+        guard let engine else { return "--" }
+        guard let status else { return engine.title }
+        return "\(engine.title) · \(status.title)"
+    }
+
+    private var torrentSeedingDuration: TimeInterval {
+        task.torrentConnection?.seedingDurationSeconds
+            ?? task.torrentHealth?.seedingDurationSeconds
+            ?? 0
+    }
+
+    private var torrentSeedingTimeText: String {
+        torrentSeedingDuration > 0 ? TimeFormatter.eta(torrentSeedingDuration) : "--"
+    }
+
     private func speed(_ bytesPerSecond: Int64) -> String {
         guard bytesPerSecond > 0 else { return "--" }
         return ByteCountFormatter.downloadFormatter.string(fromByteCount: bytesPerSecond) + "/s"
+    }
+
+    private func ratioText(_ ratio: Double) -> String {
+        guard ratio > 0 else { return "--" }
+        return String(format: "%.2f", ratio)
     }
 
     private static func dateString(_ date: Date) -> String {

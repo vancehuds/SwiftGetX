@@ -51,6 +51,33 @@ struct TorrentMetadataServiceTests {
         ])
     }
 
+    @Test("local torrent preview exposes web seed list")
+    func localTorrentPreviewExposesWebSeedList() async throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let sourceURL = directory.appendingPathComponent("web-seeded.torrent")
+        try Self.singleFileTorrentData(
+            name: "payload.bin",
+            length: 99,
+            urlList: [
+                "https://seed.example/payload.bin",
+                "  https://mirror.example/payload.bin  "
+            ],
+            httpSeeds: ["https://seed.example/payload.bin"]
+        ).write(to: sourceURL)
+        let service = TorrentMetadataService()
+
+        let preview = await service.preview(source: sourceURL.path)
+
+        #expect(preview.metadataStatus == .available)
+        #expect(preview.webSeeds == [
+            "https://seed.example/payload.bin",
+            "https://mirror.example/payload.bin"
+        ])
+    }
+
     @Test("magnet preview exposes files before download")
     func magnetPreviewExposesFilesBeforeDownload() async {
         let service = TorrentMetadataService(magnetPreview: { _ in
@@ -60,19 +87,27 @@ struct TorrentMetadataServiceTests {
                     TorrentFile(index: 0, path: "Demo/movie.mkv", size: 100),
                     TorrentFile(index: 1, path: "Demo/readme.txt", size: 20)
                 ],
-                trackers: ["udp://tracker.example:80/announce"]
+                trackers: ["udp://tracker.example:80/announce"],
+                webSeeds: ["https://preview-seed.example/demo"]
             )
         })
 
         let preview = await service.preview(
-            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Fallback&tr=http%3A%2F%2Ftracker.example%2Fannounce"
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Fallback&tr=http%3A%2F%2Ftracker.example%2Fannounce&ws=https%3A%2F%2Fsource-seed.example%2Fdemo"
         )
 
         #expect(preview.kind == .torrentMagnet)
         #expect(preview.displayName == "Demo")
         #expect(preview.metadataStatus == .available)
         #expect(preview.totalBytes == 120)
-        #expect(preview.trackers == ["udp://tracker.example:80/announce"])
+        #expect(preview.trackers == [
+            "udp://tracker.example:80/announce",
+            "http://tracker.example/announce"
+        ])
+        #expect(preview.webSeeds == [
+            "https://preview-seed.example/demo",
+            "https://source-seed.example/demo"
+        ])
         #expect(preview.selectedFileIndexes == [0, 1])
         #expect(preview.files.map(\.path) == ["Demo/movie.mkv", "Demo/readme.txt"])
     }
@@ -88,12 +123,14 @@ struct TorrentMetadataServiceTests {
         )
 
         let preview = await service.preview(
-            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Timeout&xl=42"
+            source: "magnet:?xt=urn:btih:0123456789012345678901234567890123456789&dn=Timeout&xl=42&tr=udp%3A%2F%2Ftimeout.example%3A80%2Fannounce&ws=https%3A%2F%2Ftimeout-seed.example%2Fpayload.bin"
         )
 
         #expect(preview.displayName == "Timeout")
         #expect(preview.metadataStatus == .fetching)
         #expect(preview.totalBytes == 42)
+        #expect(preview.trackers == ["udp://timeout.example:80/announce"])
+        #expect(preview.webSeeds == ["https://timeout-seed.example/payload.bin"])
         #expect(preview.files.isEmpty)
     }
 
@@ -101,21 +138,38 @@ struct TorrentMetadataServiceTests {
         name: String,
         length: Int,
         announce: String? = nil,
-        announceList: [[String]] = []
+        announceList: [[String]] = [],
+        urlList: [String] = [],
+        httpSeeds: [String] = []
     ) -> Data {
-        var data = Data("d".utf8)
+        var fields = [(String, Data)]()
         if let announce {
-            data.append(bencodeString("announce"))
-            data.append(bencodeString(announce))
+            fields.append(("announce", bencodeString(announce)))
         }
         if !announceList.isEmpty {
-            data.append(bencodeString("announce-list"))
-            data.append(bencodeList(announceList.map { tier in
+            fields.append(("announce-list", bencodeList(announceList.map { tier in
                 bencodeList(tier.map { bencodeString($0) })
-            }))
+            })))
         }
-        data.append(bencodeString("info"))
-        data.append(Data("d6:lengthi\(length)e4:name\(name.count):\(name)12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaae".utf8))
+        if !httpSeeds.isEmpty {
+            fields.append(("httpseeds", bencodeList(httpSeeds.map { bencodeString($0) })))
+        }
+        fields.append((
+            "info",
+            Data("d6:lengthi\(length)e4:name\(name.count):\(name)12:piece lengthi16384e6:pieces20:aaaaaaaaaaaaaaaaaaaae".utf8)
+        ))
+        if !urlList.isEmpty {
+            fields.append(("url-list", bencodeList(urlList.map { bencodeString($0) })))
+        }
+        return bencodeDictionary(fields)
+    }
+
+    private static func bencodeDictionary(_ fields: [(String, Data)]) -> Data {
+        var data = Data("d".utf8)
+        for (key, value) in fields.sorted(by: { $0.0 < $1.0 }) {
+            data.append(bencodeString(key))
+            data.append(value)
+        }
         data.append(UInt8(ascii: "e"))
         return data
     }

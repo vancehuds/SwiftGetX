@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import SwiftGetXCore
+import SwiftGetXTorrentCore
 import UniformTypeIdentifiers
 
 struct NewTaskSheet: View {
@@ -83,13 +84,13 @@ struct NewTaskSheet: View {
                     RoundedRectangle(cornerRadius: layout.value(10), style: .continuous)
                         .fill(Color.primary.opacity(0.07))
                         .frame(width: layout.value(42), height: layout.value(42))
-                    Image(systemName: "doc.badge.plus")
+                    Image(systemName: isTorrentFocused ? "magnet" : "doc.badge.plus")
                         .font(layout.font(18, weight: .semibold))
                         .foregroundStyle(Color.primary)
                 }
 
                 VStack(alignment: .leading, spacing: layout.value(3)) {
-                    Text(L10n.string("new_task_title"))
+                    Text(L10n.string(newTaskTitleKey))
                         .font(layout.font(16, weight: .semibold))
                         .foregroundStyle(Color.primary)
                     Text(subtitle)
@@ -105,7 +106,7 @@ struct NewTaskSheet: View {
 
             ZStack(alignment: .topLeading) {
                 if sourceText.isEmpty {
-                    Text(L10n.string("new_task_source_placeholder"))
+                    Text(L10n.string(sourcePlaceholderKey))
                         .font(layout.font(12))
                         .foregroundStyle(.secondary.opacity(0.8))
                         .padding(.horizontal, layout.value(14))
@@ -233,7 +234,18 @@ struct NewTaskSheet: View {
         if let draft, draft.isTrustedNativeHandoff, draft.isBrowserTakeover {
             return L10n.string("new_task_browser_takeover_subtitle")
         }
+        if isTorrentFocused {
+            return L10n.string("new_task_torrent_subtitle")
+        }
         return L10n.string("new_task_subtitle")
+    }
+
+    private var newTaskTitleKey: String {
+        isTorrentFocused ? "new_task_torrent_title" : "new_task_title"
+    }
+
+    private var sourcePlaceholderKey: String {
+        isTorrentFocused ? "new_task_torrent_source_placeholder" : "new_task_source_placeholder"
     }
 
     private var previewRefreshKey: String {
@@ -265,6 +277,17 @@ struct NewTaskSheet: View {
 
     private var currentSources: [String] {
         SourceParser.extractSources(from: sourceText)
+    }
+
+    private var isTorrentFocused: Bool {
+        let sources = currentSources
+        guard !sources.isEmpty else {
+            return draft?.prefersTorrentInput == true
+        }
+        return !sources.isEmpty && sources.allSatisfy { source in
+            let kind = SourceParser.kind(for: source)
+            return kind == .torrentMagnet || kind == .torrentFile
+        }
     }
 
     private var canAddTask: Bool {
@@ -957,12 +980,39 @@ private struct TorrentPreviewRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-            } else if preview.kind == .http {
+            }
+
+            if !preview.webSeeds.isEmpty {
+                VStack(alignment: .leading, spacing: layout.value(3)) {
+                    Text(L10n.string("torrent_web_seeds"))
+                        .font(layout.font(10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(Array(preview.webSeeds.prefix(3).enumerated()), id: \.offset) { _, webSeed in
+                        Text(webSeed)
+                            .font(layout.font(10.5))
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    if preview.webSeeds.count > 3 {
+                        Text(L10n.string("torrent_preview_more_web_seeds", preview.webSeeds.count - 3))
+                            .font(layout.font(10.5))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if preview.kind == .http {
                 HTTPPreviewDetails(preview: preview)
             }
 
             if preview.kind != .http {
                 VStack(alignment: .leading, spacing: layout.value(3)) {
+                    if let infoHash = magnetInfoHash {
+                        detailRow(title: L10n.string("torrent_info_hash"), value: infoHash)
+                    }
                     if let saveDirectoryPath = preview.torrentSaveDirectoryPath {
                         detailRow(title: L10n.string("torrent_save_directory"), value: saveDirectoryPath)
                     }
@@ -998,6 +1048,11 @@ private struct TorrentPreviewRow: View {
         preview.kind == .torrentMagnet
             && preview.metadataStatus == .fetching
             && preview.files.isEmpty
+    }
+
+    private var magnetInfoHash: String? {
+        guard preview.kind == .torrentMagnet else { return nil }
+        return try? MagnetURI.parse(preview.source).infoHashV1Hex
     }
 
     private var filteredFiles: [TorrentFile] {

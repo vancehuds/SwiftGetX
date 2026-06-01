@@ -93,11 +93,14 @@
 "choose_directory" = "Choose Directory";
 "clipboard_detected_link" = "Download link detected";
 "clipboard_link_detection" = "Clipboard link detection";
+"command_add_magnet" = "Add Magnet Link";
 "command_check_for_updates" = "Check for Updates…";
 "command_delete_selected" = "Delete Selected";
 "command_focus_search" = "Find Tasks";
 "command_new_download" = "New Download";
+"command_open_torrent_file" = "Open Torrent File…";
 "command_pause_all" = "Pause All";
+"command_paste_source" = "Paste Source";
 "command_recheck_selected" = "Verify Selected";
 "command_reveal_selected" = "Show Selected in Finder";
 "command_retry_selected" = "Retry Selected";
@@ -339,6 +342,7 @@
 "metric_average_speed" = "Average Speed";
 "metric_peak_speed" = "Peak Speed";
 "metric_task_status" = "Task Status";
+"metric_upload_speed" = "Upload Speed";
 "native_host_all_good" = "Everything is OK";
 "native_host_binary_missing_detail" = "Could not find the SwiftGetXNativeHost executable. Make sure the app is fully installed.";
 "native_host_browser_configured_origin_count" = "%@ Native Host was configured automatically with %d extension origins.";
@@ -384,6 +388,9 @@
 "new_task_source_placeholder" = "Paste one or more download links here (supports multi-line direct links, magnet links, or torrent URLs)";
 "new_task_subtitle" = "Paste multiple direct links, magnet links, or torrent file addresses at once.";
 "new_task_title" = "New Download Task";
+"new_task_torrent_source_placeholder" = "Paste magnet links, torrent file paths, or torrent URLs here";
+"new_task_torrent_subtitle" = "Paste a magnet link or open one or more .torrent files, then choose files before adding.";
+"new_task_torrent_title" = "Add BT Download";
 "not_supported_or_unknown" = "Not supported / unknown";
 "notification_download_complete" = "Download Complete";
 "notification_seeding_stopped" = "Seeding Stopped";
@@ -495,6 +502,8 @@
 "torrent_preview_loading" = "Fetching BT metadata...";
 "torrent_preview_more_files" = "... and %d more files";
 "torrent_preview_more_trackers" = "... and %d more trackers";
+"torrent_preview_more_web_seeds" = "... and %d more web seeds";
+"torrent_info_hash" = "Info Hash";
 "torrent_output_name" = "BT Output Name";
 "torrent_relocate_download" = "Relocate torrent download";
 "torrent_relocate_path" = "New save directory";
@@ -568,6 +577,7 @@
 "log_torrent_resume_data_failed_recheck" = "Torrent resume data failed to load; use Verify to rebuild progress.";
 "torrent_upload_speed" = "Upload Speed";
 "torrent_upload_slots" = "Upload Slots";
+"torrent_web_seeds" = "Web Seeds";
 "settings_system_language" = "Language";
 "language_system" = "System Default";
 "torrent_swift_engine_runtime_pending" = "Swift torrent engine is metadata-only until tracker, peer, and storage tasks are implemented.";

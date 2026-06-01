@@ -49,6 +49,8 @@ The adapter should translate libtorrent state into `DownloadSnapshot` so SwiftUI
 ## Current SwiftTorrent Capabilities
 
 - Magnet and `.torrent` input.
+- Magnet parameter parsing for trackers, web seeds (`ws`), acceptable/exact sources (`as`/`xs`), exact length, and explicit v2-only `btmh` diagnostics.
+- `.torrent` web seed parsing for `url-list` and `httpseeds`, plus explicit v2-only rejection while allowing v1-compatible hybrid metadata.
 - DHT, PEX, LSD, and tracker updates, with DHT/PEX/LSD applied to each torrent as runtime flags.
 - Metadata acquisition and file list reporting.
 - Selected-file priorities, per-file priority changes, and sequential download toggles.
@@ -65,3 +67,17 @@ The adapter should translate libtorrent state into `DownloadSnapshot` so SwiftUI
 
 - Add real-world magnet and `.torrent` integration tests with controlled fixtures.
 - Keep optional libtorrent, Boost, OpenSSL, and CMake requirements out of ordinary release paths unless a release explicitly opts into the reference adapter again.
+
+## Manual Acceptance Matrix
+
+Use the default SwiftPM build path unless the scenario explicitly mentions the optional native reference build.
+
+| Scenario | Steps | Expected result |
+| --- | --- | --- |
+| Magnet entry point | Choose **Add Magnet Link** from the toolbar plus menu or File menu, then paste a v1 `btih` magnet. | The new task sheet opens in BT mode, keeps the magnet icon/title, shows tracker and web seed hints when present, and allows adding before metadata completes. |
+| Torrent file entry point | Choose **Open Torrent File...** and select one or more `.torrent` files. | The new task sheet is prefilled with local paths, previews file lists, and uses torrent-focused copy and save-path details. |
+| Web-seeded torrent | Open a `.torrent` containing `url-list` or `httpseeds`. | Preview shows deduplicated Web Seeds and the created task preserves tracker/web seed metadata for diagnostics. |
+| v2-only torrent | Open a v2-only `.torrent` or `btmh` magnet. | The Swift engine rejects it with an explicit BitTorrent v2 unsupported diagnostic instead of a generic parse failure. |
+| Hybrid torrent | Open a torrent with v1 fields plus v2 markers. | The Swift parser accepts the v1-compatible metadata and marks it as hybrid for diagnostics. |
+| Inspector metrics | Select an active or completed BT task. | Overview includes upload speed, share ratio, peers, trackers, engine status, and seeding time cards in addition to generic download metrics. |
+| Timeout fallback | Paste a magnet with `dn`, `xl`, `tr`, and `ws` but no reachable peers. | Timeout state keeps display name, size, trackers, and web seed hints so the task can still be added for background resolution. |

@@ -15,6 +15,7 @@ struct TorrentMetadataPreview: Equatable, Sendable {
     var metadataStatus: TorrentMetadataStatus
     var errorMessage: String?
     var trackers: [String]
+    var webSeeds: [String]
     var httpResponseMetadata: HTTPResponseMetadata?
     var supportsResume: Bool
     var savePath: String?
@@ -39,6 +40,7 @@ struct TorrentMetadataPreview: Equatable, Sendable {
         metadataStatus: TorrentMetadataStatus,
         errorMessage: String?,
         trackers: [String] = [],
+        webSeeds: [String] = [],
         httpResponseMetadata: HTTPResponseMetadata? = nil,
         supportsResume: Bool = false,
         savePath: String? = nil,
@@ -58,6 +60,7 @@ struct TorrentMetadataPreview: Equatable, Sendable {
         self.metadataStatus = metadataStatus
         self.errorMessage = errorMessage
         self.trackers = trackers
+        self.webSeeds = webSeeds
         self.httpResponseMetadata = httpResponseMetadata
         self.supportsResume = supportsResume
         self.savePath = savePath
@@ -107,17 +110,20 @@ struct TorrentMagnetPreviewResult: Sendable {
     var files: [TorrentFile]
     var totalBytes: Int64
     var trackers: [String]
+    var webSeeds: [String]
 
     init(
         displayName: String? = nil,
         files: [TorrentFile],
         totalBytes: Int64? = nil,
-        trackers: [String] = []
+        trackers: [String] = [],
+        webSeeds: [String] = []
     ) {
         self.displayName = displayName
         self.files = files
         self.totalBytes = totalBytes ?? files.reduce(0) { $0 + $1.size }
         self.trackers = trackers
+        self.webSeeds = webSeeds
     }
 }
 
@@ -204,7 +210,8 @@ actor TorrentMetadataService {
                 totalBytes: metadata.totalLength,
                 metadataStatus: .available,
                 errorMessage: nil,
-                trackers: metadata.trackerURLs
+                trackers: metadata.trackerURLs,
+                webSeeds: metadata.webSeeds
             )
         } catch {
             return TorrentMetadataPreview(
@@ -221,6 +228,10 @@ actor TorrentMetadataService {
     }
 
     private func previewMagnet(source: String, suggestedFilename: String?) async -> TorrentMetadataPreview {
+        let magnet = try? MagnetURI.parse(source)
+        let magnetTrackers = magnet?.trackers ?? MagnetURI.parseTrackers(from: source)
+        let magnetWebSeeds = magnet?.webSeeds ?? MagnetURI.parseWebSeeds(from: source)
+
         do {
             let preview = try await magnetPreviewResult(source: source)
             return TorrentMetadataPreview(
@@ -228,18 +239,17 @@ actor TorrentMetadataService {
                 kind: .torrentMagnet,
                 displayName: suggestedFilename?.nonEmpty
                     ?? preview.displayName?.nonEmpty
+                    ?? magnet?.displayName?.nonEmpty
                     ?? SourceParser.displayName(for: source, kind: .torrentMagnet),
                 resolvedTorrentFilePath: nil,
                 files: preview.files,
                 totalBytes: preview.totalBytes,
                 metadataStatus: .available,
                 errorMessage: nil,
-                trackers: preview.trackers.isEmpty
-                    ? MagnetURI.parseTrackers(from: source)
-                    : preview.trackers
+                trackers: Self.deduplicatedStrings(preview.trackers + magnetTrackers),
+                webSeeds: Self.deduplicatedStrings(preview.webSeeds + magnetWebSeeds)
             )
         } catch {
-            let magnet = try? MagnetURI.parse(source)
             let metadataStatus: TorrentMetadataStatus = (error as? TorrentMetadataError) == .metadataTimeout
                 ? .fetching
                 : .unavailable
@@ -254,7 +264,8 @@ actor TorrentMetadataService {
                 totalBytes: magnet?.exactLength ?? 0,
                 metadataStatus: metadataStatus,
                 errorMessage: error.localizedDescription,
-                trackers: magnet?.trackers ?? MagnetURI.parseTrackers(from: source)
+                trackers: magnetTrackers,
+                webSeeds: magnetWebSeeds
             )
         }
     }
@@ -299,11 +310,21 @@ actor TorrentMetadataService {
             return TorrentMagnetPreviewResult(
                 displayName: preview.displayName,
                 files: preview.files,
-                trackers: MagnetURI.parseTrackers(from: source)
+                trackers: MagnetURI.parseTrackers(from: source),
+                webSeeds: MagnetURI.parseWebSeeds(from: source)
             )
         }
         #endif
         return try await SwiftTorrentMetadataPreviewer().preview(magnet: source)
+    }
+
+    private static func deduplicatedStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return values.compactMap { value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { return nil }
+            return trimmed
+        }
     }
 
     private actor SwiftTorrentMetadataPreviewer {
@@ -366,7 +387,8 @@ actor TorrentMetadataService {
                             TorrentFile(index: $0.index, path: $0.path, size: $0.length, progress: 0)
                         },
                         totalBytes: metainfo.totalLength,
-                        trackers: metainfo.trackerURLs
+                        trackers: metainfo.trackerURLs,
+                        webSeeds: TorrentMetadataService.deduplicatedStrings(metainfo.webSeeds + magnet.webSeeds)
                     )
                 } catch {
                     lastError = error

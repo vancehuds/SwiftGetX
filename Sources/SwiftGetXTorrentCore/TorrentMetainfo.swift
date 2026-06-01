@@ -41,8 +41,10 @@ public struct TorrentMetainfo: Equatable, Sendable {
     public var pieces: [Data]
     public var announce: String?
     public var announceList: [[String]]
+    public var webSeeds: [String]
     public var isPrivate: Bool
     public var isMultiFile: Bool
+    public var isHybridV2: Bool
     public var infoDictionaryBytes: Data
     public var infoHashV1: Data
 
@@ -93,6 +95,8 @@ public struct TorrentMetainfo: Equatable, Sendable {
             throw TorrentCoreError.invalidMetainfo("Missing torrent info dictionary.")
         }
 
+        try validateSupportedV1Metadata(info: info, root: root)
+        let isHybridV2 = isHybridV2(info: info, root: root)
         let infoDictionaryBytes = try canonicalInfoBytes(from: data, limits: limits)
         let hash = Insecure.SHA1.hash(data: infoDictionaryBytes)
         let name = string(in: info, preferredKey: "name.utf-8", fallbackKey: "name") ?? "torrent"
@@ -117,8 +121,10 @@ public struct TorrentMetainfo: Equatable, Sendable {
             pieces: pieces,
             announce: root[stringKey("announce")]?.stringValue,
             announceList: announceList(from: root[stringKey("announce-list")]),
+            webSeeds: webSeeds(from: root),
             isPrivate: integer(in: info, key: "private") == 1,
             isMultiFile: parsedFiles.isMultiFile,
+            isHybridV2: isHybridV2,
             infoDictionaryBytes: infoDictionaryBytes,
             infoHashV1: Data(hash)
         )
@@ -128,6 +134,7 @@ public struct TorrentMetainfo: Equatable, Sendable {
         data: Data,
         announce: String? = nil,
         announceList: [[String]] = [],
+        webSeeds: [String] = [],
         limits: BencodeLimits = .default
     ) throws -> TorrentMetainfo {
         let infoValue: BencodeValue
@@ -140,6 +147,8 @@ public struct TorrentMetainfo: Equatable, Sendable {
             throw TorrentCoreError.invalidMetainfo("Missing torrent info dictionary.")
         }
 
+        try validateSupportedV1Metadata(info: info, root: nil)
+        let isHybridV2 = isHybridV2(info: info, root: nil)
         let name = string(in: info, preferredKey: "name.utf-8", fallbackKey: "name") ?? "torrent"
         let pieceLength = integer(in: info, key: "piece length")
         guard let pieceLength, pieceLength > 0 else {
@@ -161,8 +170,10 @@ public struct TorrentMetainfo: Equatable, Sendable {
             pieces: pieces,
             announce: announce,
             announceList: announceList,
+            webSeeds: sanitizedStrings(webSeeds),
             isPrivate: integer(in: info, key: "private") == 1,
             isMultiFile: parsedFiles.isMultiFile,
+            isHybridV2: isHybridV2,
             infoDictionaryBytes: data,
             infoHashV1: Data(Insecure.SHA1.hash(data: data))
         )
@@ -263,6 +274,61 @@ public struct TorrentMetainfo: Equatable, Sendable {
             let trackers = trackerValues.compactMap(\.stringValue).filter { !$0.isEmpty }
             return trackers.isEmpty ? nil : trackers
         }
+    }
+
+    private static func webSeeds(from root: [Data: BencodeValue]) -> [String] {
+        deduplicatedStrings(
+            stringList(from: root[stringKey("url-list")])
+                + stringList(from: root[stringKey("httpseeds")])
+        )
+    }
+
+    private static func stringList(from value: BencodeValue?) -> [String] {
+        switch value {
+        case .data(let data)?:
+            guard let string = String(data: data, encoding: .utf8) else { return [] }
+            return [string]
+        case .list(let values)?:
+            return values.compactMap(\.stringValue)
+        case nil, .integer(_)?, .dictionary(_)?:
+            return []
+        }
+    }
+
+    private static func sanitizedStrings(_ values: [String]) -> [String] {
+        values.compactMap { value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+    }
+
+    private static func deduplicatedStrings(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        return sanitizedStrings(values).filter { seen.insert($0).inserted }
+    }
+
+    private static func validateSupportedV1Metadata(
+        info: [Data: BencodeValue],
+        root: [Data: BencodeValue]?
+    ) throws {
+        guard hasV2Signals(info: info, root: root), !hasV1Metadata(info: info) else { return }
+        throw TorrentCoreError.invalidMetainfo("BitTorrent v2 torrents are not supported by the Swift engine yet.")
+    }
+
+    private static func isHybridV2(info: [Data: BencodeValue], root: [Data: BencodeValue]?) -> Bool {
+        hasV2Signals(info: info, root: root) && hasV1Metadata(info: info)
+    }
+
+    private static func hasV2Signals(info: [Data: BencodeValue], root: [Data: BencodeValue]?) -> Bool {
+        integer(in: info, key: "meta version") == 2
+            || info[stringKey("file tree")] != nil
+            || root?[stringKey("piece layers")] != nil
+    }
+
+    private static func hasV1Metadata(info: [Data: BencodeValue]) -> Bool {
+        info[stringKey("piece length")] != nil
+            && info[stringKey("pieces")] != nil
+            && (info[stringKey("length")] != nil || info[stringKey("files")] != nil)
     }
 
     private static func canonicalInfoBytes(from data: Data, limits: BencodeLimits) throws -> Data {

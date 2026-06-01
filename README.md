@@ -43,10 +43,12 @@
 *   **多语言动态本地化**：支持系统默认、英文、简体中文的运行时动态切换。切换时 UI 即时刷新，无需重启 App，配合自主研发的 `AppResources` 实现资源与本地化文件的智能发现与按需加载。
 *   **智能剪贴板**：自动检测剪贴板链接，并在主界面弹出流线型玻璃拟态的下载建议条。
 *   **Sparkle 自动更新**：集成 macOS 黄金标准 [Sparkle](https://sparkle-project.org) 框架，支持启动时自动检查更新及菜单栏“检查更新…”手动触发。更新包基于 EdDSA (Ed25519) 密钥签名验证完整性，配合 GitHub Actions 自动化流水线签名并分发 `appcast.xml`。
+*   **SwiftData 启动恢复 (`StartupRecovery`)**：启动时若 SwiftData `ModelContainer` 损坏或版本不兼容，会自动隔离受影响的 `.store` 与 `.store-shm`/`.store-wal` 文件，弹出可阅读的恢复面板供用户选择“重建库”或“退出”，避免一次性静默丢失任务历史。
 
 ### ⚡ 模块化 HTTP/HTTPS 下载引擎
 *   **多线程分段**：支持高性能多线程多分段下载，支持 Range 断点续传，支持为每个任务指定个性化的 HTTP 下载选项。
 *   **响应元数据保存**：自动探测并记录服务器的 HTTP 响应元数据（如 ETag、Last-Modified、Server 报头等），提供专业的网络诊断视轨。
+*   **校验和验证**：内置基于 `CryptoKit` 的 SHA-256 / SHA-1 / MD5 校验能力，可在新建任务时填入期望值，完成后自动核对并以单独状态卡呈现于检查器，避免下载到损坏或被篡改的文件。
 *   **调度策略与恢复**：内置强健的任务调度队列协调器，支持全局/队列并发限制、下载失败后自动重新排队、以及自定义的重试策略和次数上限。
 *   **安全性**：使用临时 `.part` 文件存储未完成的下载，校验成功后无缝重命名。
 
@@ -54,6 +56,8 @@
 *   **Chrome 下载接管**：内置 Chrome 扩展（Manifest V3），默认开启“下载接管”。当在 Chrome 中触发符合规则的下载任务时，扩展将任务透明接管，并通过 Native Messaging 协议派发给 SwiftGetX，随后自动取消 Chrome 原生下载任务。如果交接失败，Chrome 将无缝继续下载。
 *   **多 Chromium 浏览器发现**：App 内置智能宿主扫描器，会在启动或激活时**自动发现**本地 Chrome、Chrome Canary、Edge、Brave、Vivaldi、Arc、Chromium 以及 Atlas 的 Extension 配置文件，自动探测 Extension ID 并一键修复本地 Native Messaging 宿主清单（`com.swiftgetx.native.json`），用户无需任何手动配置。
 *   **完整上下文传递**：交接时智能捕获并携带浏览器下载上下文（包括来源页面 URL、标题、建议的文件名等），并通过安全的自定义协议 `swiftgetx://download` 与 `swiftgetx://browser-setup` 进行派发，同时支持在偏好设置中一键开启诊断面板。
+*   **下载恢复策略 (`BrowserDownloadRecoveryPolicy`)**：所有来自浏览器的任务都会经过统一的恢复策略评估。当请求要求携带 Cookie/Authorization 头部等运行时凭据，或要求重放非简单方法（含 body）时，主 App 会拒绝接管并向扩展回传明确原因，让浏览器回退到原生下载，避免把登录态或带 body 的请求交给不恰当的下载器。
+*   **Native Messaging 桥接层 (`BrowserBridge`)**：在 SwiftGetXCore 协议之上统一封装 Chrome / Safari 扩展的入口与回执格式，新增协议字段时只需调整 Bridge，下游 `DownloadCoordinator` 与 UI 无需感知来源差异。
 *   **Safari 功能等效扩展**：内置 Safari Web Extension 资源，覆盖右键菜单、弹窗发送、选区发送、页面下载链接扫描、连接诊断和下载接管开关；正式分发时仍需在 Xcode 中配置 Safari App Extension Target 并走苹果签名链。
 
 ### 🧬 双引擎 BitTorrent 下载架构
@@ -61,8 +65,9 @@
 *   **Swift 原生极速 BT 模块**：内置纯 Swift 编写的极速 BT/DHT 功能。自主实现了基于 KRPC 的 UDP 磁力链接寻址、DHT 路由表管理、LSD 本地服务发现及 PEX 节点交换，零 C++ 依赖极速启动并探测 Peer。
 *   **协议栈纯 Swift 实现**：自主开发了 Peer Wire Protocol 原生二进制协议栈（具备最大数据帧长限制以防内存溢出攻击），并完美实现 BEP 9 / BEP 10 磁力链接扩展协议，支持直接与 Peer 进行 Metadata 元数据交换，实现“无种子”情况下的快速磁力解析。同时内置了纯 Swift 编写的 UDP 与 HTTP Tracker 客户端，实现主动 Tracker 公告宣告。
 *   **可选参考 BT 引擎 (libtorrent)**：仓库内置了 `arvidn/libtorrent` v2.0.12 源码包，并通过 `CSwiftGetXLibtorrent` 提供 C++ 封装。默认发行与日常构建使用纯 SwiftTorrent 路径；只有设置 `SWIFTGETX_ENABLE_LIBTORRENT=1` 时才会启用可选 libtorrent 参考实现。
+*   **磁力链接预览与选择 UI (`TorrentMetadataService` + `TorrentUXSupport`)**：粘贴磁力链接后会立刻异步取回候选文件列表（Tracker、Web Seed、精确长度等参数也会一并解析），允许用户在新建任务面板里勾选/取消单个文件后再开始下载，体验上接近成熟的 BT 客户端；超时场景下仍保留显示名与提示，任务照常进入后台解析。
 *   **精细化运行时控制**：支持一键开关 DHT, PEX, LSD 协议，支持自定义引导路由节点。提供每秒上传/下载限速、顺序下载模式、最大连接数/上传槽限制、种子分享率限速等运行时配置。
-*   **深度健康快照与监控**：实时呈现涵盖 Metadata 获取状态、已连接/正在连接 Peer 列表（最高支持 100 个 Peer 监视）、Tracker 详细列表（支持重新公告、手动增删）、DHT 节点数及 resume 数据脏状态的全面健康快照。
+*   **深度健康快照与监控**：实时呈现涵盖 Metadata 获取状态、已连接/正在连接 Peer 列表（最高支持 100 个 Peer 监视）、Tracker 详细列表（支持重新公告、手动增删）、DHT 节点数及 resume 数据脏状态的全面健康快照；BT 任务检查器额外暴露上传速率、分享率、做种时长等专属指标卡。
 
 
 ---
@@ -79,10 +84,13 @@ graph TD
     classDef engine fill:#FFF3E0,stroke:#FF8F00,stroke-width:2px;
     
     Chrome["Chromium 浏览器扩展 (Manifest V3)"]:::browser
+    Safari["Safari Web Extension"]:::browser
     NativeHost["SwiftGetXNativeHost (轻量 C 交接程序)"]:::browser
     MainApp["SwiftGetX 主程序 (SwiftUI 界面)"]:::main
     Models["SwiftData 数据持久化模型"]:::main
+    StartupRecovery["StartupRecovery (启动恢复)"]:::main
     Coordinator["Services & Coordinator 协调器"]:::main
+    BrowserBridge["BrowserBridge / BrowserDownloadRecoveryPolicy"]:::main
     Adapter["DownloadEngineAdapter 统一接口"]:::core
     HTTPEngine["HTTPDownloadEngine 多线程引擎"]:::engine
     TorrentAdapter["TorrentEngineAdapter BT适配接口"]:::core
@@ -91,9 +99,12 @@ graph TD
     Libtorrent["arvidn/libtorrent 核心库"]:::engine
 
     Chrome <-->|"Native Messaging"| NativeHost
+    Safari <-->|"Native Messaging / Deep Link"| MainApp
     NativeHost -->|"Deep Link (自定义协议派发)"| MainApp
     MainApp --> Models
+    MainApp --> StartupRecovery
     MainApp --> Coordinator
+    MainApp --> BrowserBridge
     Coordinator --> Adapter
     Adapter --> HTTPEngine
     Adapter --> TorrentAdapter
@@ -102,16 +113,31 @@ graph TD
     LibtorrentWrapper --> Libtorrent
 ```
 
+> 📦 **库产品**：`Sources/SwiftGetXTorrentCore` 以 `SwiftGetXTorrentCore` 库产品形式对外暴露，第三方 Swift 项目可单独依赖纯 Swift BT 协议栈而不必引入 UI。
+
 ### 📂 目录说明
 
-*   `Sources/SwiftGetX/`：主 macOS 应用程序源码（UI、持久化服务、核心业务逻辑与 bundled 浏览器扩展资源）。
+*   `Sources/SwiftGetX/`：主 macOS 应用程序源码，下分
+    *   `Models/` — SwiftData 模型与持久化配置（任务、规则、设置、校验和模型等）；
+    *   `Services/` — 业务协调层，含 `DownloadCoordinator` 调度器、`HTTPDownloadEngine` 多线程引擎、`TorrentDownloadEngine` BT 引擎、`StartupRecovery` 启动恢复、`PersistenceArchive` 持久化归档、`SupportDiagnostics` 诊断支持等；
+    *   `Services/Browser/` — 浏览器集成子模块：Chrome/Safari 扩展发现、`ChromeNativeHostRegistrar`、`BrowserBridge` 桥接层、`BrowserDownloadRecoveryPolicy` 恢复策略与 Deep Link 策略；
+    *   `UI/` — SwiftUI 视图层（`ContentView`、`TaskListView`、`InspectorView`、`NewTaskSheet`、`SettingsView`、`SidebarView`、`StartupRecoveryView` 等），并以 `UI/Design/` 收口玻璃拟态与响应式布局原语；
+    *   `Utilities/` — 通用工具与 `TorrentUXSupport` 等特性工具；
+    *   `Resources/` — 图标、Chrome / Safari 扩展资源包、本地化 `en.lproj` / `zh-Hans.lproj`、`AppInfo.plist` 与 `Acknowledgements.md`。
 *   `Sources/SwiftGetXCore/`：共享协议模块。包含浏览器通讯协议、Deep Link 模型和 Native Messaging 的消息 Framing。
 *   `Sources/SwiftGetXNativeHost/`：轻量级 C 语言浏览器交接进程，读取 Chrome Standard I/O 并派发 Deep Link。
-*   `Sources/CSwiftGetXLibtorrent/`：C++ Bridge 封装。使得 Swift 可以直接通过 C-API 操纵 libtorrent。
+*   `Sources/SwiftGetXTorrentCore/`：纯 Swift 编写的 BT 协议栈与 DHT/Tracker 客户端，独立 `SwiftGetXTorrentCore` 库产品。
+*   `Sources/CSwiftGetXLibtorrent/`：C++ Bridge 封装。使得 Swift 可以直接通过 C-API 操纵 libtorrent（仅 `SWIFTGETX_ENABLE_LIBTORRENT=1` 时编译）。
 *   `Native/CSwiftGetXLibtorrent/`：CMake 构建配置，用于自动化编译 libtorrent 静态库及其依赖。
 *   `Vendor/libtorrent/`：采用 Git 子模块锁定的 upstream `arvidn/libtorrent` 源码。
-*   `Tests/SwiftGetXTests/`：完整的单元和集成测试用例，内含本地分段 HTTP Mock Range 测试服务器。
-*   `Scripts/`：辅助脚本（包括打包、安装 native-host 辅助脚本、libtorrent 编译脚本）。
+*   `Tests/SwiftGetXTests/`：完整的单元和集成测试用例，内含本地分段 HTTP Mock Range 测试服务器、持久化归档与启动恢复的临时容器 fixture。
+*   `Scripts/`：辅助脚本，包括：
+    *   `local-build.sh` — 一键本地编译 / 测试 / 打包入口；
+    *   `package-dmg.sh` — App / DMG 打包与 Ad-hoc 签名；
+    *   `package-chrome-extension.sh` — Chrome 扩展打包；
+    *   `validate-release.sh` — 发布前环境、App、DMG、Sparkle appcast 的安全校验；
+    *   `generate-appcast.sh` — 由 `SwiftGetX.dmg` 与 Sparkle 私钥生成 `appcast.xml`；
+    *   `build-libtorrent.sh` / `install-native-host.sh` / `find-chrome-extension-id.mjs` / `make-crx.mjs` — libtorrent 编译、Native Host 安装与扩展打包辅助。
 
 ---
 
@@ -166,6 +192,9 @@ Scripts/local-build.sh --skip-tests
 # Release 构建
 Scripts/local-build.sh --release
 
+# 编译前清理 SwiftPM 缓存
+Scripts/local-build.sh --clean
+
 # 一键安装可选 native libtorrent 参考实现依赖（cmake boost openssl）
 Scripts/local-build.sh --install-deps
 
@@ -176,10 +205,13 @@ Scripts/local-build.sh --native-libtorrent
 Scripts/local-build.sh --release --dmg
 
 # 仅打包 Chrome 扩展生成 dist/chrome/*.crx 和 *.zip 资源
-Scripts/local-build.sh --chrome-extension
+Scripts/local-build.sh --chrome
 
 # 构建后安装 Chrome Native Messaging Host（可省略 ID 自动发现）
 Scripts/local-build.sh --install-native-host <your-extension-id>
+
+# 编译/测试/打包完成后自动运行 SwiftGetX
+Scripts/local-build.sh --run
 ```
 
 ### 1. 基础构建（默认 SwiftTorrent）
@@ -255,10 +287,21 @@ Scripts/package-dmg.sh debug dist
 Scripts/package-dmg.sh release dist --dmg
 ```
 
+### 发布前安全校验
+`Scripts/validate-release.sh` 统一负责发布前各阶段的安全检查，可在本地或 CI 中按子命令分别调用：
+
+```sh
+Scripts/validate-release.sh environment  # 校验 Apple / Sparkle / Chrome 扩展密钥与 SUFeedURL
+Scripts/validate-release.sh sparkle      # 仅校验 AppInfo.plist 中的 Sparkle 公钥
+Scripts/validate-release.sh app dist/SwiftGetX.app    # 校验 .app 签名、Sparkle.framework、Native Host
+Scripts/validate-release.sh dmg dist/SwiftGetX.dmg    # 校验 DMG 签名 / 公证 / stapling
+Scripts/validate-release.sh appcast dist/appcast/appcast.xml  # 校验 Sparkle appcast 字段
+```
+
 ### GitHub Actions CI
 项目在 `.github/workflows/` 下预置了全自动的流水线：
-*   `build.yml`：每次触发 PR 或 Push 时自动在 `macos-15` 容器中编译、测试并生成可供下载的 DMG。
-*   `release.yml`：当你向 GitHub 推送以 `v*` 开头的版本 Tag 时，自动编译、封包并自动创建 Release、上传安装 DMG 和 Chrome 扩展 ZIP/CRX 安装包。
+*   `build.yml`：每次触发 PR 或 Push 时先调用 `Scripts/validate-release.sh sparkle` 校验 Sparkle 配置，再运行 `swift test` 单元测试，然后打包 `dist/SwiftGetX.dmg` 与 `dist/chrome/*` 产物并以 artifact 上传。
+*   `release.yml`：当你向 GitHub 推送以 `v*` 开头的版本 Tag 时，会按顺序执行 `validate-release.sh environment` → 测试 → Developer ID 证书导入（仅在配置了 Apple 机密时）→ `package-dmg.sh` → `validate-release.sh app/dmg` → Chrome 扩展打包 → `generate-appcast.sh` → appcast 校验 → 发布到 `gh-pages` 分支并通过 `softprops/action-gh-release` 创建 GitHub Release。当未配置任何 Apple Developer 密钥时，workflow 会输出警告并改发 Ad-hoc 签名版本，确保开源贡献者也能无门槛出包。
 
 ---
 
@@ -266,7 +309,7 @@ Scripts/package-dmg.sh release dist --dmg
 
 测试是 SwiftGetX 品质的基石，我们使用 Swift 官方全新的 **Swift Testing** 框架构建测试组：
 
-*   **测试覆盖范围**：深色模式适配器、链接捕获过滤、Native Messaging 报文封包/解包（Framing）、多段下载调度器（Segment Planner）、重复文件名冲突重命名算法，以及真实的本地分段 HTTP 断点续传正确性测试。
+*   **测试覆盖范围**：深色模式适配器、链接捕获过滤、Native Messaging 报文封包/解包（Framing）、多段下载调度器（Segment Planner）、重复文件名冲突重命名算法、HTTP 校验和验证、本地分段 HTTP 断点续传正确性、SwiftData 持久化归档与启动恢复、BT 协议栈（Peer Wire、DHT、Tracker、扩展协议）、磁力链接元数据预览、菜单栏快照、扩展发现与 Native Host 注册、Release 校验脚本等多个模块。
 *   测试命令：`swift test` 或开启 BT 引擎测试 `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test`。
 
 ---
@@ -276,11 +319,12 @@ Scripts/package-dmg.sh release dist --dmg
 如果你准备打包发布或者向外界推广你的 SwiftGetX 衍生版本，请注意以下安全与规范要求：
 
 1.  **沙盒与公证 (Sandboxing & Notarization)**：
-    *   根据 macOS 的 Gatekeeper 机制，为避免出现“应用已损坏”的警告，推荐使用苹果开发者账号的 `Developer ID Application` 证书进行签名，并通过 `xcrun notarytool` 提交给苹果完成公证。没有付费账号时仍可发布未公证 DMG，但用户首次打开时通常需要手动允许。
+    *   根据 macOS 的 Gatekeeper 机制，为避免出现“应用已损坏”的警告，推荐使用苹果开发者账号的 `Developer ID Application` 证书进行签名，并通过 `xcrun notarytool` 提交给苹果完成公证。`release.yml` 在检测到 `APPLE_DEVELOPER_ID_*` 与 `APPLE_NOTARY_*` 全部就位时会自动启用严格模式（`SWIFTGETX_RELEASE_STRICT=1`），执行 `spctl --assess` 与 `xcrun stapler validate` 双重校验。
+    *   如果没有付费 Apple Developer 账号，仓库现也支持 **未签名发布路径**：`release.yml` 会发出 `::warning` 并改用 Ad-hoc 签名打包，DMG 同步为未公证状态。`validate-release.sh` 在 `SWIFTGETX_RELEASE_STRICT=0` 时跳过强制签名/公证检查，但仍会校验 Sparkle 公钥、`SUFeedURL` 与 Chrome 扩展密钥（如果提供），确保不会发布一份“连 appcast 都不通过”的破损产物。
     *   由于 Native Messaging 机制需要启动辅助子进程 `SwiftGetXNativeHost`，如果 App 运行在严苛沙盒（App Sandbox）中，请确保辅助进程已注册并在宿主 App 的 App Group 内，或在非沙盒模式下发布。
 2.  **不要将机密提交至仓库**：
-    *   绝不要向 Git 提交本地调试生成的 `.pem` 密钥文件。
-    *   不要提交任何苹果开发者的 `api_key` 配置文件或 Keychain 密码。
+    *   绝不要向 Git 提交本地调试生成的 `.pem` / Sparkle EdDSA 私钥 / Chrome 扩展 `.pem` 密钥文件。
+    *   不要提交任何苹果开发者的 `api_key` 配置文件或 Keychain 密码。发布前请通过 `Scripts/validate-release.sh environment` 提前发现缺漏，避免 Tag 推送后才发现问题。
 
 ---
 

@@ -18,6 +18,7 @@ struct DownloadDraft: Equatable, Sendable {
     var linkTrust: DownloadLinkTrust = .publicLink
     var sourceCount: Int = 1
     var requiresNativePayloadSource = false
+    var prefersTorrentInput = false
 
     var containsTorrentSource: Bool {
         SourceParser.extractSources(from: source).contains {

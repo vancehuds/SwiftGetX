@@ -124,6 +124,49 @@ struct SwiftGetXTorrentCoreTests {
         #expect(metainfo.infoHashV1Hex == sha1Hex(info))
     }
 
+    @Test("parses torrent web seeds and hybrid v2 marker")
+    func parsesTorrentWebSeedsAndHybridV2Marker() throws {
+        let info = bencodeDictionary([
+            ("length", bencodeInteger(42)),
+            ("meta version", bencodeInteger(2)),
+            ("name", bencodeString("hybrid.bin")),
+            ("piece length", bencodeInteger(16_384)),
+            ("pieces", bencodeData(Data("aaaaaaaaaaaaaaaaaaaa".utf8)))
+        ])
+        let metainfo = try TorrentMetainfo.parse(data: bencodeDictionary([
+            ("httpseeds", bencodeList([
+                bencodeString("https://seed.example/payload.bin")
+            ])),
+            ("info", info),
+            ("url-list", bencodeList([
+                bencodeString("https://seed.example/payload.bin"),
+                bencodeString("  https://mirror.example/payload.bin  ")
+            ]))
+        ]))
+
+        #expect(metainfo.name == "hybrid.bin")
+        #expect(metainfo.webSeeds == [
+            "https://seed.example/payload.bin",
+            "https://mirror.example/payload.bin"
+        ])
+        #expect(metainfo.isHybridV2)
+    }
+
+    @Test("rejects v2-only torrent metainfo with explicit diagnostic")
+    func rejectsV2OnlyTorrentMetainfoWithExplicitDiagnostic() {
+        let info = bencodeDictionary([
+            ("file tree", bencodeDictionary([])),
+            ("meta version", bencodeInteger(2)),
+            ("name", bencodeString("v2-only"))
+        ])
+
+        #expect(throws: TorrentCoreError.invalidMetainfo("BitTorrent v2 torrents are not supported by the Swift engine yet.")) {
+            try TorrentMetainfo.parse(data: bencodeDictionary([
+                ("info", info)
+            ]))
+        }
+    }
+
     @Test("rejects invalid torrent metainfo")
     func rejectsInvalidTorrentMetainfo() {
         #expect(throws: TorrentCoreError.invalidMetainfo("Invalid piece hashes.")) {
@@ -515,14 +558,17 @@ struct SwiftGetXTorrentCoreTests {
 
     @Test("parses magnet hex btih display name trackers and length")
     func parsesMagnetHexBtihDisplayNameTrackersAndLength() throws {
-        let magnet = try MagnetURI.parse(
-            "magnet:?xt=urn:btih:2c5e446faaaacea19b3f4e1df8d64213aaf88d1c&dn=Demo%20File&tr=http%3A%2F%2Ft%2Fannounce&tr=udp%3A%2F%2Ft%2Fannounce&xl=42"
-        )
+        let rawMagnet = "magnet:?xt=urn:btih:2c5e446faaaacea19b3f4e1df8d64213aaf88d1c&dn=Demo%20File&tr=http%3A%2F%2Ft%2Fannounce&tr=udp%3A%2F%2Ft%2Fannounce&ws=https%3A%2F%2Fseed.example%2Fpayload.bin&as=https%3A%2F%2Fsource.example%2Fpayload.torrent&xs=https%3A%2F%2Fexact.example%2Fpayload.torrent&xl=42"
+        let magnet = try MagnetURI.parse(rawMagnet)
 
         #expect(magnet.infoHashV1Hex == "2c5e446faaaacea19b3f4e1df8d64213aaf88d1c")
         #expect(magnet.displayName == "Demo File")
         #expect(magnet.trackers == ["http://t/announce", "udp://t/announce"])
+        #expect(magnet.webSeeds == ["https://seed.example/payload.bin"])
+        #expect(magnet.acceptableSources == ["https://source.example/payload.torrent"])
+        #expect(magnet.exactSources == ["https://exact.example/payload.torrent"])
         #expect(magnet.exactLength == 42)
+        #expect(MagnetURI.parseWebSeeds(from: rawMagnet) == ["https://seed.example/payload.bin"])
     }
 
     @Test("parses magnet base32 btih")
@@ -536,6 +582,9 @@ struct SwiftGetXTorrentCoreTests {
     func rejectsInvalidMagnetInputs() {
         #expect(throws: TorrentCoreError.invalidMagnet("Magnet URI is missing a btih topic.")) {
             try MagnetURI.parse("magnet:?dn=NoHash")
+        }
+        #expect(throws: TorrentCoreError.invalidMagnet("BitTorrent v2 magnet is not supported by the Swift engine yet.")) {
+            try MagnetURI.parse("magnet:?xt=urn:btmh:1220aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         }
         #expect(throws: TorrentCoreError.invalidMagnet("Magnet btih hash must be 40-character hex or 32-character base32.")) {
             try MagnetURI.parse("magnet:?xt=urn:btih:not-a-valid-hash")

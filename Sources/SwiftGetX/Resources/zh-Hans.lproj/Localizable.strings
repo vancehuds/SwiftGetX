@@ -93,11 +93,14 @@
 "choose_directory" = "选择目录";
 "clipboard_detected_link" = "检测到下载链接";
 "clipboard_link_detection" = "剪贴板链接检测";
+"command_add_magnet" = "添加磁力链接";
 "command_check_for_updates" = "检查更新…";
 "command_delete_selected" = "删除所选";
 "command_focus_search" = "查找任务";
 "command_new_download" = "新建下载任务";
+"command_open_torrent_file" = "打开种子文件…";
 "command_pause_all" = "暂停全部";
+"command_paste_source" = "粘贴来源";
 "command_recheck_selected" = "校验所选";
 "command_reveal_selected" = "在访达中显示所选";
 "command_retry_selected" = "重试所选";
@@ -339,6 +342,7 @@
 "metric_average_speed" = "平均速度";
 "metric_peak_speed" = "峰值速度";
 "metric_task_status" = "任务状态";
+"metric_upload_speed" = "上传速度";
 "native_host_all_good" = "一切正常";
 "native_host_binary_missing_detail" = "找不到 SwiftGetXNativeHost 可执行文件。请确认 App 完整安装。";
 "native_host_browser_configured_origin_count" = "%@ Native Host 已自动配置，并写入 %d 个插件来源";
@@ -384,6 +388,9 @@
 "new_task_source_placeholder" = "在此粘贴一个或多个下载链接（支持多行直链、磁力链接、或种子 URL）";
 "new_task_subtitle" = "支持一次粘贴多个直链、磁力链接或种子文件地址。";
 "new_task_title" = "新建下载任务";
+"new_task_torrent_source_placeholder" = "在此粘贴磁力链接、种子文件路径或种子 URL";
+"new_task_torrent_subtitle" = "粘贴磁力链接或打开一个/多个 .torrent 文件，添加前可选择文件。";
+"new_task_torrent_title" = "添加 BT 下载";
 "not_supported_or_unknown" = "不支持/未知";
 "notification_download_complete" = "下载完成";
 "notification_seeding_stopped" = "做种已停止";
@@ -495,6 +502,8 @@
 "torrent_preview_loading" = "正在获取 BT metadata...";
 "torrent_preview_more_files" = "... 以及其它 %d 个文件";
 "torrent_preview_more_trackers" = "... 以及其它 %d 个 Tracker";
+"torrent_preview_more_web_seeds" = "... 以及其它 %d 个 Web Seed";
+"torrent_info_hash" = "Info Hash";
 "torrent_output_name" = "BT 输出名称";
 "torrent_relocate_download" = "重新定位种子下载";
 "torrent_relocate_path" = "新的保存目录";
@@ -568,6 +577,7 @@
 "log_torrent_resume_data_failed_recheck" = "种子恢复数据载入失败；建议使用校验重建进度。";
 "torrent_upload_speed" = "上传速度";
 "torrent_upload_slots" = "上传槽";
+"torrent_web_seeds" = "Web Seed";
 "settings_system_language" = "语言";
 "language_system" = "系统默认";
 "torrent_swift_engine_runtime_pending" = "Swift BT 引擎目前仅支持 metadata；Tracker、Peer 和存储任务实现后才会进行实际传输。";

@@ -2,6 +2,7 @@ import AppKit
 import SwiftData
 import SwiftUI
 import SwiftGetXCore
+import UniformTypeIdentifiers
 import UserNotifications
 
 @main
@@ -395,6 +396,21 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut("n")
 
+            Button(L10n.string("command_add_magnet")) {
+                presentTorrentInput()
+            }
+            .keyboardShortcut("m", modifiers: [.command, .option])
+
+            Button(L10n.string("command_open_torrent_file")) {
+                openTorrentFiles()
+            }
+            .keyboardShortcut("t", modifiers: [.command, .option])
+
+            Button(L10n.string("command_paste_source")) {
+                pasteSourceDraft()
+            }
+            .keyboardShortcut("v", modifiers: [.command, .option])
+
             Button(L10n.string("command_pause_all")) {
                 coordinator.pauseAll()
             }
@@ -440,6 +456,59 @@ struct AppCommands: Commands {
                 NotificationCenter.default.post(name: .focusTaskSearch, object: nil)
             }
             .keyboardShortcut("f")
+        }
+    }
+
+    private func presentTorrentInput() {
+        NotificationCenter.default.post(
+            name: .showNewTaskSheet,
+            object: DownloadDraft(source: "", sourceCount: 0, prefersTorrentInput: true)
+        )
+    }
+
+    private func pasteSourceDraft() {
+        guard let source = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !source.isEmpty
+        else {
+            NotificationCenter.default.post(name: .showNewTaskSheet, object: nil)
+            return
+        }
+
+        NotificationCenter.default.post(
+            name: .showNewTaskSheet,
+            object: DownloadDraft(
+                source: source,
+                sourceCount: SourceParser.extractSources(from: source).count,
+                prefersTorrentInput: Self.looksLikeTorrentSource(source)
+            )
+        )
+    }
+
+    private func openTorrentFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "torrent") ?? .data]
+        guard panel.runModal() == .OK else { return }
+
+        let paths = panel.urls.map(\.path)
+        guard !paths.isEmpty else { return }
+
+        NotificationCenter.default.post(
+            name: .showNewTaskSheet,
+            object: DownloadDraft(
+                source: paths.joined(separator: "\n"),
+                sourceCount: paths.count,
+                prefersTorrentInput: true
+            )
+        )
+    }
+
+    private static func looksLikeTorrentSource(_ source: String) -> Bool {
+        SourceParser.extractSources(from: source).contains { candidate in
+            let kind = SourceParser.kind(for: candidate)
+            return kind == .torrentMagnet || kind == .torrentFile
         }
     }
 }

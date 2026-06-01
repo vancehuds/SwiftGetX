@@ -42,10 +42,12 @@
 *   **Dynamic Localization**: Full runtime language switching for System Default, English, and Simplified Chinese (`zh-Hans`). The interface updates instantly without requiring an app relaunch, powered by a customized `AppResources` asset manager for on-demand string and bundle discovery.
 *   **Smart Clipboard Capture**: Monitors the clipboard for download links and presents them inside a gorgeous, interactive liquid-glass float banner.
 *   **Sparkle Auto-Updates**: Seamless integration of the gold-standard [Sparkle](https://sparkle-project.org) framework. Supports automatic update checks on launch or manual check via menu items. Updates are cryptographically secured using EdDSA (Ed25519) signatures and published automatically through GitHub Actions.
+*   **SwiftData Startup Recovery (`StartupRecovery`)**: When the SwiftData `ModelContainer` is corrupted or schema-incompatible at launch, the app quarantines the affected `.store` / `.store-shm` / `.store-wal` files and presents a readable recovery panel that lets users either rebuild the store or quit, avoiding silent data loss.
 
 ### ⚡ Segmented HTTP/HTTPS Engine
 *   **Multi-Segment Parallelism**: Fast multi-threaded segmented downloads with robust HTTP Range-based chunk resume capability, with customizable per-task HTTP options.
 *   **Response Metadata Capture**: Automatically detects and records HTTP response metadata (including ETag, Last-Modified, and Server headers), rendering professional diagnostics in the inspector.
+*   **Checksum Verification**: First-class SHA-256 / SHA-1 / MD5 validation powered by `CryptoKit`. Paste an expected digest when creating a task, and the inspector surfaces a dedicated status card so you can immediately see whether the file matches the source publisher.
 *   **Scheduling & Resiliency**: Built-in robust download scheduler with global/queue concurrent task limits, automatic requeue on failure, and customizable retry limits.
 *   **Safe Assembly**: Keeps incomplete downloads under a temporary `.part` structure, merging and renaming them instantly upon successful integrity check.
 
@@ -53,6 +55,8 @@
 *   **Chrome Takeover (Manifest V3)**: Built-in Chrome extension. When a supported HTTP, HTTPS, magnet, or `.torrent` download is triggered in Chrome, the extension intercept-transports it via Native Messaging to SwiftGetX, cancelling the Chrome item after SwiftGetX accepts. If IPC fails, Chrome resumes the original download instantly.
 *   **Multi-Chromium Discovery**: Main App automatically scans local directory trees on startup or focus, auto-detecting extension installations in Chrome, Chrome Canary, Edge, Brave, Vivaldi, Arc, Chromium, and Atlas. Generates or repairs Native Messaging manifests (`com.swiftgetx.native.json`) instantly with zero manual ID copy-pasting.
 *   **Rich Handoff Context**: Securely passes download origins (source page URL, page title, and proposed filename) via deep links (`swiftgetx://download` and `swiftgetx://browser-setup`) with an integrated diagnostic status panel.
+*   **Browser Download Recovery Policy (`BrowserDownloadRecoveryPolicy`)**: Every browser-originated request is evaluated by a single recovery policy. Requests that require runtime credentials (Cookies, `Authorization`) or replay a non-simple HTTP method with a body are rejected with an explicit reason code, telling the extension to fall back to the browser's native downloader so SwiftGetX never mishandles authenticated or stateful requests.
+*   **Native Messaging Bridge (`BrowserBridge`)**: A unified bridge layer on top of `SwiftGetXCore` abstracts Chrome and Safari entry points and ack formats. Adding new protocol fields only requires updating the bridge; `DownloadCoordinator` and the UI stay source-agnostic.
 *   **Safari Feature-Parity Extension**: Bundled Safari Web Extension assets cover context menus, popup sends, selection sends, page download-link scanning, connection diagnostics, and the download takeover toggle. Signed distribution still requires an Xcode Safari App Extension target and Apple Developer signing.
 
 ### 🧬 Dual-Engine BitTorrent Architecture
@@ -60,8 +64,9 @@
 *   **Swift-Native Torrent Module**: A built-in, lightweight pure-Swift BT/DHT engine. Implements custom KRPC UDP search lookup, routing tables, Local Service Discovery (LSD), and Peer Exchange (PEX). Features zero C++ dependencies and compiles instantly.
 *   **Pure Swift Protocol Stack**: Custom-built Peer Wire Protocol binary framing engine (enforces maximum length limits to prevent buffer overflow attacks) with full BEP 9 / BEP 10 Magnet Extension support to query metadata directly from peers. Features integrated pure-Swift HTTP/UDP Tracker announcers.
 *   **Optional Reference BT Engine (libtorrent)**: Vendors a pinned source of `arvidn/libtorrent` v2.0.12 via a static `CSwiftGetXLibtorrent` C++ bridge. The default release and daily development path use SwiftTorrent; setting `SWIFTGETX_ENABLE_LIBTORRENT=1` enables the optional libtorrent reference adapter.
+*   **Magnet Preview & File Selection UI (`TorrentMetadataService` + `TorrentUXSupport`)**: Pasting a magnet link triggers an async metadata fetch that surfaces candidate files, trackers, web seeds, and exact length before the task is added. Users can pick or deselect individual files in the new-task sheet, matching the UX of mature BT clients. Timeouts gracefully fall back to a partial preview (display name, size hints, tracker list) so the task still enters background resolution.
 *   **Fine-Grained Runtime Control**: Toggle DHT, PEX, and LSD options individually with custom DHT bootstrap routers. Supports real-time upload/download speed limits, sequential download prioritization, concurrent connection and upload slot limits, and seeding ratio enforcement.
-*   **Deep Health Snapshot & Diagnostics**: Displays metadata fetching progress, complete Peer lists (up to 100 peers monitored in real time), interactive Tracker tables (add, remove, or force reannounce), DHT routing metrics, and resume-data dirty state tracking.
+*   **Deep Health Snapshot & Diagnostics**: Displays metadata fetching progress, complete Peer lists (up to 100 peers monitored in real time), interactive Tracker tables (add, remove, or force reannounce), DHT routing metrics, and resume-data dirty state tracking. The BT inspector additionally exposes upload speed, share ratio, and seeding time cards that go beyond the generic download metrics.
 
 ---
 
@@ -77,10 +82,13 @@ graph TD
     classDef engine fill:#FFF3E0,stroke:#FF8F00,stroke-width:2px;
     
     Chrome["Chromium Extension (Manifest V3)"]:::browser
+    Safari["Safari Web Extension"]:::browser
     NativeHost["SwiftGetXNativeHost (Lightweight C Bridge)"]:::browser
     MainApp["SwiftGetX Main App (SwiftUI View)"]:::main
     Models["SwiftData Persistent Models"]:::main
+    StartupRecovery["StartupRecovery (SwiftData Quarantine)"]:::main
     Coordinator["Services & Coordinator Layer"]:::main
+    BrowserBridge["BrowserBridge / BrowserDownloadRecoveryPolicy"]:::main
     Adapter["DownloadEngineAdapter Interface"]:::core
     HTTPEngine["HTTPDownloadEngine (Multi-segmented)"]:::engine
     TorrentAdapter["TorrentEngineAdapter BT Interface"]:::core
@@ -89,9 +97,12 @@ graph TD
     Libtorrent["arvidn/libtorrent Pinned Core"]:::engine
 
     Chrome <-->|"Native Messaging"| NativeHost
+    Safari <-->|"Native Messaging / Deep Link"| MainApp
     NativeHost -->|"Deep Link Scheme Dispatch"| MainApp
     MainApp --> Models
+    MainApp --> StartupRecovery
     MainApp --> Coordinator
+    MainApp --> BrowserBridge
     Coordinator --> Adapter
     Adapter --> HTTPEngine
     Adapter --> TorrentAdapter
@@ -100,16 +111,31 @@ graph TD
     LibtorrentWrapper --> Libtorrent
 ```
 
+> 📦 **Library Product**: `Sources/SwiftGetXTorrentCore` is exposed as a standalone `SwiftGetXTorrentCore` library product, letting third-party Swift projects consume the pure-Swift BT protocol stack without pulling in any UI code.
+
 ### 📂 Directory Structure
 
-*   `Sources/SwiftGetX/`：Primary macOS App code (SwiftUI layouts, persistences, services, and Chrome/Safari assets).
-*   `Sources/SwiftGetXCore/`：Shared communication layer. Contains deep link encoders, IPC frames, and messaging protocols.
-*   `Sources/SwiftGetXNativeHost/`：Ultra-light C bridge that reads stdin/stdout from browsers and dispatches deep-link URLs.
-*   `Sources/CSwiftGetXLibtorrent/`：C++ adapter wrapper, exposing libtorrent functions via C-compatible symbols to Swift.
-*   `Native/CSwiftGetXLibtorrent/`：CMake build workspace for compiling static libtorrent, OpenSSL, and Boost.
-*   `Vendor/libtorrent/`：Git submodule targeting upstream `arvidn/libtorrent`.
-*   `Tests/SwiftGetXTests/`：Comprehensive test suite (including a local HTTP Range mock server verifying segmented chunk downloads).
-*   `Scripts/`：Helper automation scripts (App packager, DMG assembler, manual extension installer, and native compiler).
+*   `Sources/SwiftGetX/`: Primary macOS application source code, split into:
+    *   `Models/` — SwiftData models and persistence configuration (download tasks, rules, settings, checksum entities, etc.).
+    *   `Services/` — Orchestration layer, including `DownloadCoordinator`, the multi-segment `HTTPDownloadEngine`, the BT `TorrentDownloadEngine`, `StartupRecovery`, `PersistenceArchive`, `SupportDiagnostics`, and more.
+    *   `Services/Browser/` — Browser integration sub-modules: Chrome/Safari extension discovery, `ChromeNativeHostRegistrar`, the `BrowserBridge` bridge layer, the `BrowserDownloadRecoveryPolicy` recovery policy, and Deep Link policies.
+    *   `UI/` — SwiftUI view layer (`ContentView`, `TaskListView`, `InspectorView`, `NewTaskSheet`, `SettingsView`, `SidebarView`, `StartupRecoveryView`, etc.), with `UI/Design/` housing the liquid-glass and responsive layout primitives.
+    *   `Utilities/` — Cross-cutting helpers plus feature tools such as `TorrentUXSupport`.
+    *   `Resources/` — Icons, Chrome / Safari Web Extension bundles, localized `en.lproj` / `zh-Hans.lproj`, `AppInfo.plist`, and `Acknowledgements.md`.
+*   `Sources/SwiftGetXCore/`: Shared protocol layer. Contains deep link encoders, IPC frames, and messaging protocols.
+*   `Sources/SwiftGetXNativeHost/`: Ultra-light C bridge that reads stdin/stdout from browsers and dispatches deep-link URLs.
+*   `Sources/SwiftGetXTorrentCore/`: Pure-Swift BT protocol stack and DHT/Tracker client, shipped as the standalone `SwiftGetXTorrentCore` library product.
+*   `Sources/CSwiftGetXLibtorrent/`: C++ bridge wrapper exposing libtorrent functions via C-compatible symbols to Swift. Compiled only when `SWIFTGETX_ENABLE_LIBTORRENT=1` is set.
+*   `Native/CSwiftGetXLibtorrent/`: CMake build workspace for compiling the static libtorrent, OpenSSL, and Boost dependencies.
+*   `Vendor/libtorrent/`: Git submodule targeting upstream `arvidn/libtorrent`.
+*   `Tests/SwiftGetXTests/`: Comprehensive test suite, including a local HTTP Range mock server, persistence archive fixtures, and startup-recovery containers.
+*   `Scripts/`: Helper automation scripts, including:
+    *   `local-build.sh` — one-command local build / test / package entrypoint;
+    *   `package-dmg.sh` — App / DMG packager and Ad-hoc signer;
+    *   `package-chrome-extension.sh` — Chrome extension packager;
+    *   `validate-release.sh` — pre-release environment, App, DMG, and Sparkle appcast safety checks;
+    *   `generate-appcast.sh` — generates `appcast.xml` from the produced DMG using the Sparkle EdDSA private key;
+    *   `build-libtorrent.sh` / `install-native-host.sh` / `find-chrome-extension-id.mjs` / `make-crx.mjs` — libtorrent build, Native Host installer, and extension packaging helpers.
 
 ---
 
@@ -164,6 +190,9 @@ Scripts/local-build.sh --skip-tests
 # Release build
 Scripts/local-build.sh --release
 
+# Clean SwiftPM caches before building
+Scripts/local-build.sh --clean
+
 # Install optional native libtorrent reference dependencies (cmake, boost, openssl)
 Scripts/local-build.sh --install-deps
 
@@ -174,10 +203,13 @@ Scripts/local-build.sh --native-libtorrent
 Scripts/local-build.sh --release --dmg
 
 # Package only the Chrome extension under dist/chrome/*.crx and *.zip
-Scripts/local-build.sh --chrome-extension
+Scripts/local-build.sh --chrome
 
 # Install the Chrome Native Messaging host after build (with automatic extension discovery)
 Scripts/local-build.sh --install-native-host <your-extension-id>
+
+# Build, test, package, and then launch SwiftGetX
+Scripts/local-build.sh --run
 ```
 
 ### 1. Default Compilation (SwiftTorrent)
@@ -253,10 +285,21 @@ Scripts/package-dmg.sh debug dist
 Scripts/package-dmg.sh release dist --dmg
 ```
 
+### Pre-Release Safety Checks
+`Scripts/validate-release.sh` is the single source of truth for pre-release safety checks. Run any subcommand locally or in CI:
+
+```sh
+Scripts/validate-release.sh environment  # Verify Apple / Sparkle / Chrome extension secrets and SUFeedURL
+Scripts/validate-release.sh sparkle      # Verify the Sparkle public key embedded in AppInfo.plist
+Scripts/validate-release.sh app dist/SwiftGetX.app    # Verify .app signature, Sparkle.framework, and Native Host
+Scripts/validate-release.sh dmg dist/SwiftGetX.dmg    # Verify DMG signature / notarization / stapling
+Scripts/validate-release.sh appcast dist/appcast/appcast.xml  # Validate the Sparkle appcast fields
+```
+
 ### GitHub Actions Workflows
 Two automated workflows are supplied in `.github/workflows/`:
-*   `build.yml`: Compiles, tests, and builds a downloadable DMG artifact for every branch push or pull request.
-*   `release.yml`: Runs when a version tag (`v*`) is pushed. Automatically compiles the release build, signs files, builds the DMG, and drafts a GitHub Release containing the final DMG, extension distribution ZIP/CRX files, and `SwiftGetX-Chrome.release.json` metadata.
+*   `build.yml`: Runs `Scripts/validate-release.sh sparkle` on every push or pull request, executes `swift test`, packages `dist/SwiftX.dmg` and `dist/chrome/*`, then uploads them as workflow artifacts.
+*   `release.yml`: Triggered when a version tag (`v*`) is pushed. It runs `validate-release.sh environment` → unit tests → Developer ID certificate import (only when Apple secrets are configured) → `package-dmg.sh` → `validate-release.sh app/dmg` → Chrome extension packaging → `generate-appcast.sh` → appcast validation → publishing to the `gh-pages` branch and creating a GitHub Release via `softprops/action-gh-release`. When no Apple Developer secrets are configured, the workflow emits a `::warning` and falls back to an Ad-hoc signed build, keeping the release path accessible to open-source contributors without a paid Apple Developer account.
 
 ---
 
@@ -264,8 +307,8 @@ Two automated workflows are supplied in `.github/workflows/`:
 
 We use Apple's modern **Swift Testing** framework (`@Suite`, `@Test`, and `#expect`):
 
-*   **Test Cases**: Validates color-scheme preferences, clipboard links parser, native messaging framing, chunk planners, name collision resolution, and HTTP range downloads using a local segmented chunk server.
-*   Commands: `swift test` (or `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test`).
+*   **Coverage**: color-scheme adapters, clipboard link filtering, native messaging framing, multi-segment planners, file-name collision resolution, HTTP checksum verification, real-world HTTP range chunk downloads, SwiftData persistence archive and startup recovery, the BT protocol stack (Peer Wire, DHT, Tracker, extension protocol), magnet metadata preview, menu bar snapshots, extension discovery and native host registration, and the `validate-release.sh` release-validation script.
+*   Commands: `swift test` (or `SWIFTGETX_ENABLE_LIBTORRENT=1 swift test` for the optional native BT adapter).
 
 ---
 
@@ -274,11 +317,12 @@ We use Apple's modern **Swift Testing** framework (`@Suite`, `@Test`, and `#expe
 Before distributing your custom build of SwiftGetX, note these critical macOS platform guidelines:
 
 1.  **Gatekeeper Codesigning & Notarization**:
-    *   To prevent Gatekeeper warnings on other machines, you should sign the binaries using an active Apple Developer account's `Developer ID Application` certificate and notarize the output via `xcrun notarytool`. Without a paid account, you can still publish an unnotarized DMG, but users will usually need to allow the app manually on first launch.
+    *   To prevent Gatekeeper warnings on other machines, sign the binaries using an active Apple Developer account's `Developer ID Application` certificate and notarize the output via `xcrun notarytool`. When `release.yml` detects the full set of `APPLE_DEVELOPER_ID_*` and `APPLE_NOTARY_*` secrets, it enables `SWIFTGETX_RELEASE_STRICT=1` and enforces `spctl --assess` and `xcrun stapler validate` checks.
+    *   If you do not have a paid Apple Developer account, the repository also supports an **unsigned release path**: `release.yml` emits a `::warning` and produces an Ad-hoc signed app bundle with an unsigned, unnotarized DMG. `validate-release.sh` skips the strict signing checks when `SWIFTGETX_RELEASE_STRICT=0` while still verifying the Sparkle public key, `SUFeedURL`, and (when provided) the Chrome extension signing material, so you never ship a release whose appcast fails basic validation.
 2.  **App Sandbox Restrictions**:
     *   Sandboxed apps are forbidden from launching arbitrary helper binaries (like `SwiftGetXNativeHost`) unless they share a matching App Group container, or operate in a privileged non-sandboxed environment.
 3.  **Secret Management**:
-    *   Do not commit private `.pem` browser extension signing keys or Apple App Store API credentials to the Git repository.
+    *   Do not commit private `.pem` files, the Sparkle EdDSA private key, or the Chrome extension `.pem` signing key to the Git repository. Run `Scripts/validate-release.sh environment` locally before pushing a tag to catch missing secrets early.
 
 ---
 

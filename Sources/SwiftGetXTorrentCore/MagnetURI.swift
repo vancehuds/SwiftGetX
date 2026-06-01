@@ -5,6 +5,9 @@ public struct MagnetURI: Equatable, Sendable {
     public var infoHashV1: Data
     public var displayName: String?
     public var trackers: [String]
+    public var webSeeds: [String]
+    public var acceptableSources: [String]
+    public var exactSources: [String]
     public var exactLength: Int64?
 
     public var infoHashV1Hex: String {
@@ -19,21 +22,24 @@ public struct MagnetURI: Equatable, Sendable {
         }
 
         let items = components.queryItems ?? []
-        guard let xt = items
-            .filter({ $0.name == "xt" })
+        let topics = items
+            .filter { $0.name.caseInsensitiveCompare("xt") == .orderedSame }
             .compactMap(\.value)
-            .first(where: { $0.lowercased().hasPrefix("urn:btih:") })
-        else {
+        guard let xt = topics.first(where: { $0.lowercased().hasPrefix("urn:btih:") }) else {
+            if topics.contains(where: { $0.lowercased().hasPrefix("urn:btmh:") }) {
+                throw TorrentCoreError.invalidMagnet("BitTorrent v2 magnet is not supported by the Swift engine yet.")
+            }
             throw TorrentCoreError.invalidMagnet("Magnet URI is missing a btih topic.")
         }
 
         let rawHash = String(xt.dropFirst("urn:btih:".count))
         let infoHash = try parseInfoHash(rawHash)
-        let displayName = items.first(where: { $0.name == "dn" })?.value?.trimmedNonEmpty
-        let trackers = items
-            .filter { $0.name == "tr" }
-            .compactMap { $0.value?.trimmedNonEmpty }
-        let exactLength = try exactLength(from: items.first(where: { $0.name == "xl" })?.value)
+        let displayName = firstValue(named: "dn", in: items)
+        let trackers = values(named: "tr", in: items)
+        let webSeeds = values(named: "ws", in: items)
+        let acceptableSources = values(named: "as", in: items)
+        let exactSources = values(named: "xs", in: items)
+        let exactLength = try exactLength(from: items.first(where: { $0.name.caseInsensitiveCompare("xl") == .orderedSame })?.value)
         if let exactLength, exactLength < 0 {
             throw TorrentCoreError.invalidMagnet("Magnet exact length cannot be negative.")
         }
@@ -43,6 +49,9 @@ public struct MagnetURI: Equatable, Sendable {
             infoHashV1: infoHash,
             displayName: displayName,
             trackers: trackers,
+            webSeeds: webSeeds,
+            acceptableSources: acceptableSources,
+            exactSources: exactSources,
             exactLength: exactLength
         )
     }
@@ -53,8 +62,25 @@ public struct MagnetURI: Equatable, Sendable {
         else {
             return []
         }
-        return (components.queryItems ?? [])
-            .filter { $0.name == "tr" }
+        return values(named: "tr", in: components.queryItems ?? [])
+    }
+
+    public static func parseWebSeeds(from rawValue: String) -> [String] {
+        guard let components = URLComponents(string: rawValue),
+              components.scheme?.localizedCaseInsensitiveCompare("magnet") == .orderedSame
+        else {
+            return []
+        }
+        return values(named: "ws", in: components.queryItems ?? [])
+    }
+
+    private static func firstValue(named name: String, in items: [URLQueryItem]) -> String? {
+        items.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }?.value?.trimmedNonEmpty
+    }
+
+    private static func values(named name: String, in items: [URLQueryItem]) -> [String] {
+        items
+            .filter { $0.name.caseInsensitiveCompare(name) == .orderedSame }
             .compactMap { $0.value?.trimmedNonEmpty }
     }
 
