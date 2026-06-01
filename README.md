@@ -22,14 +22,14 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/UI-AppKit-0A84FF.svg?style=flat&logo=apple" alt="UI: AppKit">
+  <img src="https://img.shields.io/badge/UI-AppKit%20Liquid%20Glass-0A84FF.svg?style=flat&logo=apple" alt="UI: AppKit Liquid Glass">
   <img src="https://img.shields.io/badge/Database-SwiftData-E34F26.svg?style=flat" alt="Database: SwiftData">
   <img src="https://img.shields.io/badge/Engine-HTTP%20%2F%20SwiftTorrent-darkviolet.svg?style=flat" alt="Engine: HTTP / SwiftTorrent">
   <img src="https://img.shields.io/badge/Extensions-Chrome%20%2F%20Safari-8A2BE2.svg?style=flat&logo=googlechrome" alt="Extensions: Chrome / Safari">
 </p>
 
 
-**SwiftGetX** 是一个面向 macOS 14+ 的轻量原生下载管理器原型，采用 **AppKit**、**SwiftData** 和 **Swift Package Manager** 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及默认纯 Swift 的 BT 下载能力。
+**SwiftGetX** 是一个面向 macOS 14+ 的轻量原生下载管理器原型，采用 **AppKit Liquid Glass**、**SwiftData** 和 **Swift Package Manager** 构建。项目目标是在保持轻量原生体验的同时，提供 HTTP/HTTPS 下载、浏览器显式交接、剪贴板链接捕获，以及默认纯 Swift 的 BT 下载能力。
 
 <img width="1036" height="634" alt="image" src="https://github.com/user-attachments/assets/5ace1e8d-6590-47ae-a6a3-b17ef1088f6a" />
 
@@ -37,11 +37,11 @@
 
 ## ✨ 核心特性
 
-### 🎨 现代原生 UI & 维护
-*   **原生 AppKit 设计**：采用符合 macOS 设计规范的三栏式交互界面，支持深色模式与精致的微交互。
+### 🎨 AppKit Liquid Glass UI & 维护
+*   **液态玻璃 AppKit 设计**：采用符合 macOS 设计规范的三栏式交互界面，使用 Liquid Glass 表面与旧系统材质降级，支持深色模式与精致的微交互。
 *   **交互细节**：包含任务列表、右侧属性检查器、工具栏、偏好设置窗口及常驻系统菜单栏（Menu Bar）图标。
 *   **多语言动态本地化**：支持系统默认、英文、简体中文的运行时动态切换。切换时 UI 即时刷新，无需重启 App，配合自主研发的 `AppResources` 实现资源与本地化文件的智能发现与按需加载。
-*   **智能剪贴板**：自动检测剪贴板链接，并在主界面弹出原生交互式下载建议条。
+*   **智能剪贴板**：自动检测剪贴板链接，并在主界面弹出 Liquid Glass 浮动下载建议条。
 *   **Sparkle 自动更新**：集成 macOS 黄金标准 [Sparkle](https://sparkle-project.org) 框架，支持启动时自动检查更新及菜单栏“检查更新…”手动触发。更新包基于 EdDSA (Ed25519) 密钥签名验证完整性，配合 GitHub Actions 自动化流水线签名并分发 `appcast.xml`。
 *   **SwiftData 启动恢复 (`StartupRecovery`)**：启动时若 SwiftData `ModelContainer` 损坏或版本不兼容，会自动隔离受影响的 `.store` 与 `.store-shm`/`.store-wal` 文件，弹出可阅读的恢复面板供用户选择“重建库”或“退出”，避免一次性静默丢失任务历史。
 
@@ -86,7 +86,7 @@ graph TD
     Chrome["Chromium 浏览器扩展 (Manifest V3)"]:::browser
     Safari["Safari Web Extension"]:::browser
     NativeHost["SwiftGetXNativeHost (轻量 C 交接程序)"]:::browser
-    MainApp["SwiftGetX 主程序 (AppKit 界面)"]:::main
+    MainApp["SwiftGetX 主程序 (AppKit Liquid Glass 界面)"]:::main
     Models["SwiftData 数据持久化模型"]:::main
     StartupRecovery["StartupRecovery (启动恢复)"]:::main
     Coordinator["Services & Coordinator 协调器"]:::main
@@ -121,7 +121,7 @@ graph TD
     *   `Models/` — SwiftData 模型与持久化配置（任务、规则、设置、校验和模型等）；
     *   `Services/` — 业务协调层，含 `DownloadCoordinator` 调度器、`HTTPDownloadEngine` 多线程引擎、`TorrentDownloadEngine` BT 引擎、`StartupRecovery` 启动恢复、`PersistenceArchive` 持久化归档、`SupportDiagnostics` 诊断支持等；
     *   `Services/Browser/` — 浏览器集成子模块：Chrome/Safari 扩展发现、`ChromeNativeHostRegistrar`、`BrowserBridge` 桥接层、`BrowserDownloadRecoveryPolicy` 恢复策略与 Deep Link 策略；
-    *   `UI/` — AppKit 控制器与视图层，覆盖主分栏窗口、侧边栏大纲、任务表格、检查器标签页、新建任务面板、设置窗口、启动恢复窗口与拖放源加载；
+    *   `UI/` — AppKit Liquid Glass 控制器与视图层，覆盖主分栏窗口、侧边栏大纲、任务表格、检查器标签页、新建任务面板、设置窗口、启动恢复窗口与拖放源加载；
     *   `Utilities/` — 通用工具与 `TorrentUXSupport` 等特性工具；
     *   `Resources/` — 图标、Chrome / Safari 扩展资源包、本地化 `en.lproj` / `zh-Hans.lproj`、`AppInfo.plist` 与 `Acknowledgements.md`。
 *   `Sources/SwiftGetXCore/`：共享协议模块。包含浏览器通讯协议、Deep Link 模型和 Native Messaging 的消息 Framing。

@@ -4,6 +4,173 @@ import SwiftGetXCore
 import UniformTypeIdentifiers
 
 @MainActor
+private enum LiquidGlass {
+    enum Role {
+        case windowBackground
+        case sidebar
+        case inspector
+        case floating
+        case toolbar
+        case sheet
+        case settings
+        case recovery
+
+        var fallbackMaterial: NSVisualEffectView.Material {
+            switch self {
+            case .windowBackground:
+                return .underWindowBackground
+            case .sidebar:
+                return .sidebar
+            case .inspector:
+                return .hudWindow
+            case .floating, .toolbar:
+                return .popover
+            case .sheet, .settings, .recovery:
+                return .sheet
+            }
+        }
+
+        var blendingMode: NSVisualEffectView.BlendingMode {
+            switch self {
+            case .windowBackground:
+                return .behindWindow
+            case .sidebar, .inspector, .floating, .toolbar, .sheet, .settings, .recovery:
+                return .withinWindow
+            }
+        }
+
+        var tintColor: NSColor? {
+            switch self {
+            case .floating:
+                return NSColor.controlAccentColor.withAlphaComponent(0.12)
+            case .toolbar:
+                return NSColor.controlAccentColor.withAlphaComponent(0.08)
+            default:
+                return nil
+            }
+        }
+    }
+
+    static func configureWindow(_ window: NSWindow, role: Role = .windowBackground) {
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = .clear
+        window.toolbarStyle = .unified
+        if let contentView = window.contentView {
+            contentView.wantsLayer = true
+            contentView.layer?.backgroundColor = NSColor.clear.cgColor
+        }
+    }
+
+    static func materialBackground(role: Role) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = role.fallbackMaterial
+        view.blendingMode = role.blendingMode
+        view.state = .followsWindowActiveState
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }
+
+    static func pin(_ child: NSView, to parent: NSView, inset: CGFloat = 0) {
+        child.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            child.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: inset),
+            child.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -inset),
+            child.topAnchor.constraint(equalTo: parent.topAnchor, constant: inset),
+            child.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -inset)
+        ])
+    }
+
+    static func runtimeGlassView(content: NSView, role: Role, cornerRadius: CGFloat) -> NSView? {
+        let minimumGlassOS = OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+        guard ProcessInfo.processInfo.isOperatingSystemAtLeast(minimumGlassOS),
+              let glassClass = NSClassFromString("NSGlassEffectView") as? NSView.Type
+        else {
+            return nil
+        }
+
+        let glassView = glassClass.init(frame: .zero)
+        glassView.setValue(content, forKey: "contentView")
+        glassView.setValue(cornerRadius, forKey: "cornerRadius")
+        glassView.setValue(0, forKey: "style")
+        if let tintColor = role.tintColor {
+            glassView.setValue(tintColor, forKey: "tintColor")
+        }
+        return glassView
+    }
+}
+
+@MainActor
+private final class LiquidGlassBackgroundView: NSView {
+    init(role: LiquidGlass.Role = .windowBackground) {
+        super.init(frame: .zero)
+        let material = LiquidGlass.materialBackground(role: role)
+        addSubview(material)
+        LiquidGlass.pin(material, to: self)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+@MainActor
+private final class LiquidGlassSurfaceView: NSView {
+    private let hostedContent: NSView
+
+    init(
+        content: NSView,
+        role: LiquidGlass.Role,
+        cornerRadius: CGFloat = 18,
+        contentInsets: NSEdgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    ) {
+        let contentContainer = NSView()
+        contentContainer.addSubview(content)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: contentContainer.leadingAnchor, constant: contentInsets.left),
+            content.trailingAnchor.constraint(equalTo: contentContainer.trailingAnchor, constant: -contentInsets.right),
+            content.topAnchor.constraint(equalTo: contentContainer.topAnchor, constant: contentInsets.top),
+            content.bottomAnchor.constraint(equalTo: contentContainer.bottomAnchor, constant: -contentInsets.bottom)
+        ])
+
+        hostedContent = contentContainer
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = cornerRadius
+        layer?.cornerCurve = .continuous
+
+        let effectView = LiquidGlass.runtimeGlassView(content: contentContainer, role: role, cornerRadius: cornerRadius)
+            ?? Self.fallbackEffectView(content: contentContainer, role: role, cornerRadius: cornerRadius)
+        addSubview(effectView)
+        LiquidGlass.pin(effectView, to: self)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        hostedContent.fittingSize
+    }
+
+    private static func fallbackEffectView(
+        content: NSView,
+        role: LiquidGlass.Role,
+        cornerRadius: CGFloat
+    ) -> NSVisualEffectView {
+        let effect = LiquidGlass.materialBackground(role: role)
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = cornerRadius
+        effect.layer?.cornerCurve = .continuous
+        effect.layer?.masksToBounds = true
+        effect.addSubview(content)
+        LiquidGlass.pin(content, to: effect)
+        return effect
+    }
+}
+
+@MainActor
 final class MainWindowController: NSWindowController, NSToolbarDelegate {
     private enum ToolbarItemID {
         static let add = NSToolbarItem.Identifier("SwiftGetX.toolbar.add")
@@ -113,6 +280,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
 
     private func configureSplitView() {
         splitViewController.splitView.isVertical = true
+        splitViewController.splitView.dividerStyle = .thin
 
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarController)
         sidebarItem.minimumThickness = 170
@@ -139,7 +307,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         }
 
         let contentView = NSView()
+        let backgroundView = LiquidGlassBackgroundView(role: .windowBackground)
+        contentView.addSubview(backgroundView)
         contentView.addSubview(rootView)
+        LiquidGlass.pin(backgroundView, to: contentView)
         addChildRootView(splitViewController.view, to: rootView)
 
         window?.contentView = contentView
@@ -151,6 +322,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         ])
 
         WindowConfigurator.configure(window!)
+        if let window {
+            LiquidGlass.configureWindow(window)
+        }
     }
 
     private func addChildRootView(_ childView: NSView, to container: NSView) {
@@ -199,14 +373,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
             return
         }
 
-        let container = NSVisualEffectView()
-        container.material = .popover
-        container.state = .active
-        container.blendingMode = .withinWindow
-        container.wantsLayer = true
-        container.layer?.cornerRadius = 8
-        container.translatesAutoresizingMaskIntoConstraints = false
-
         let label = NSTextField(labelWithString: "\(L10n.string("clipboard_detected_link"))  \(source)")
         label.lineBreakMode = .byTruncatingMiddle
         let ignore = NSButton(title: L10n.string("action_ignore"), target: self, action: #selector(ignoreClipboardSuggestion))
@@ -217,19 +383,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         stack.orientation = .horizontal
         stack.alignment = .centerY
         stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(stack)
+        let container = LiquidGlassSurfaceView(
+            content: stack,
+            role: .floating,
+            cornerRadius: 18,
+            contentInsets: NSEdgeInsets(top: 9, left: 14, bottom: 9, right: 14)
+        )
+        container.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(container)
 
         NSLayoutConstraint.activate([
             container.topAnchor.constraint(equalTo: contentView.safeAreaLayoutGuide.topAnchor, constant: 10),
             container.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             container.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.72),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: container.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             label.widthAnchor.constraint(greaterThanOrEqualToConstant: 240)
         ])
 
@@ -302,6 +468,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         item.target = self
         item.action = action
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        if identifier == ToolbarItemID.add {
+            item.isBordered = true
+            if ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)) {
+                item.setValue(1, forKey: "style")
+                item.setValue(NSColor.controlAccentColor, forKey: "backgroundTintColor")
+            }
+        }
         return item
     }
 
@@ -381,9 +554,13 @@ private final class SidebarViewController: NSViewController, NSOutlineViewDataSo
     }
 
     override func loadView() {
+        let root = NSView()
+        let background = LiquidGlassBackgroundView(role: .sidebar)
         let scrollView = NSScrollView()
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("sidebar"))
         outlineView.addTableColumn(column)
@@ -393,8 +570,14 @@ private final class SidebarViewController: NSViewController, NSOutlineViewDataSo
         outlineView.dataSource = self
         outlineView.delegate = self
         outlineView.style = .sourceList
+        outlineView.backgroundColor = .clear
         scrollView.documentView = outlineView
-        view = scrollView
+
+        root.addSubview(background)
+        root.addSubview(scrollView)
+        LiquidGlass.pin(background, to: root)
+        LiquidGlass.pin(scrollView, to: root)
+        view = root
     }
 
     override func viewDidAppear() {
@@ -557,14 +740,53 @@ final class TaskListDataSource: NSObject, NSTableViewDataSource, NSTableViewDele
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < tasks.count, let identifier = tableColumn?.identifier else { return nil }
         let task = tasks[row]
+
+        if identifier.rawValue == "name" {
+            let icon = NSImageView(image: NSImage(systemSymbolName: task.kind.symbolName, accessibilityDescription: task.kind.title) ?? NSImage())
+            icon.symbolConfiguration = .init(pointSize: 14, weight: .semibold)
+            icon.contentTintColor = statusColor(for: task.status)
+            let label = textLabel(task.name, weight: .semibold)
+            return cell(with: NSStackView(views: [icon, label]), leading: 8, trailing: 8) { stack in
+                stack.orientation = .horizontal
+                stack.alignment = .centerY
+                stack.spacing = 8
+                icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
+            }
+        }
+
+        if identifier.rawValue == "status" {
+            let icon = NSImageView(image: NSImage(systemSymbolName: task.status.symbolName, accessibilityDescription: task.status.title) ?? NSImage())
+            icon.symbolConfiguration = .init(pointSize: 13, weight: .semibold)
+            icon.contentTintColor = statusColor(for: task.status)
+            let label = textLabel(task.status.title)
+            label.textColor = statusColor(for: task.status)
+            return cell(with: NSStackView(views: [icon, label]), leading: 8, trailing: 8) { stack in
+                stack.orientation = .horizontal
+                stack.alignment = .centerY
+                stack.spacing = 6
+                icon.widthAnchor.constraint(equalToConstant: 17).isActive = true
+            }
+        }
+
+        if identifier.rawValue == "progress" {
+            let indicator = NSProgressIndicator()
+            indicator.isIndeterminate = false
+            indicator.minValue = 0
+            indicator.maxValue = 1
+            indicator.doubleValue = task.progress
+            indicator.controlSize = .small
+            indicator.widthAnchor.constraint(equalToConstant: 58).isActive = true
+            let label = textLabel(task.progress.formatted(.percent.precision(.fractionLength(0))))
+            label.alignment = .right
+            return cell(with: NSStackView(views: [indicator, label]), leading: 6, trailing: 6) { stack in
+                stack.orientation = .horizontal
+                stack.alignment = .centerY
+                stack.spacing = 6
+            }
+        }
+
         let text: String
         switch identifier.rawValue {
-        case "name":
-            text = task.name
-        case "status":
-            text = task.status.title
-        case "progress":
-            text = task.progress.formatted(.percent.precision(.fractionLength(1)))
         case "speed":
             if task.status == .running || task.status == .fetchingMetadata || task.status == .fetchingPeers || task.status == .connectingPeers {
                 text = ByteCountFormatter.downloadFormatter.string(fromByteCount: task.speedBytesPerSecond) + "/s"
@@ -581,17 +803,50 @@ final class TaskListDataSource: NSObject, NSTableViewDataSource, NSTableViewDele
             text = task.displaySource
         }
 
-        let cell = NSTableCellView()
-        let label = NSTextField(labelWithString: text)
+        let label = textLabel(text)
         label.lineBreakMode = identifier.rawValue == "source" ? .byTruncatingMiddle : .byTruncatingTail
-        label.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(label)
+        return cell(with: label, leading: 8, trailing: 8)
+    }
+
+    private func textLabel(_ text: String, weight: NSFont.Weight = .regular) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 12, weight: weight)
+        return label
+    }
+
+    private func cell<T: NSView>(
+        with view: T,
+        leading: CGFloat,
+        trailing: CGFloat,
+        configure: ((T) -> Void)? = nil
+    ) -> NSTableCellView {
+        let cell = NSTableCellView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        configure?(view)
+        cell.addSubview(view)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 6),
-            label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+            view.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: leading),
+            view.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -trailing),
+            view.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
         ])
         return cell
+    }
+
+    private func statusColor(for status: DownloadStatus) -> NSColor {
+        switch status {
+        case .running, .fetchingMetadata, .fetchingPeers, .connectingPeers:
+            return .controlAccentColor
+        case .seeding, .completed:
+            return .systemGreen
+        case .verifying:
+            return .systemPurple
+        case .failed:
+            return .systemRed
+        case .cancelled:
+            return .systemOrange
+        case .queued, .paused:
+            return .secondaryLabelColor
+        }
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -626,25 +881,30 @@ private final class TaskListViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+        let background = LiquidGlassBackgroundView(role: .windowBackground)
         let toolbar = makeListToolbar()
         let scrollView = NSScrollView()
+        scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
+        scrollView.drawsBackground = false
         scrollView.documentView = tableView
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         configureTable()
+        root.addSubview(background)
         root.addSubview(toolbar)
         root.addSubview(scrollView)
+        LiquidGlass.pin(background, to: root)
         NSLayoutConstraint.activate([
-            toolbar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbar.topAnchor.constraint(equalTo: root.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            toolbar.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            toolbar.topAnchor.constraint(equalTo: root.topAnchor, constant: 12),
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            scrollView.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 8),
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -8)
         ])
         view = root
     }
@@ -667,8 +927,11 @@ private final class TaskListViewController: NSViewController {
         tableView.dataSource = dataSource
         tableView.delegate = dataSource
         tableView.allowsMultipleSelection = true
-        tableView.usesAlternatingRowBackgroundColors = true
-        tableView.rowHeight = 28
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.backgroundColor = .clear
+        tableView.selectionHighlightStyle = .regular
+        tableView.gridStyleMask = []
+        tableView.rowHeight = 34
         tableView.doubleAction = #selector(toggleSelected)
         tableView.target = self
 
@@ -709,9 +972,13 @@ private final class TaskListViewController: NSViewController {
         stack.alignment = .centerY
         stack.distribution = .fill
         stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
         stack.views[1].setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return stack
+        return LiquidGlassSurfaceView(
+            content: stack,
+            role: .toolbar,
+            cornerRadius: 18,
+            contentInsets: NSEdgeInsets(top: 9, left: 14, bottom: 9, right: 12)
+        )
     }
 
     private func makeContextMenu() -> NSMenu {
@@ -814,9 +1081,11 @@ private final class InspectorViewController: NSViewController {
 
     override func loadView() {
         let root = NSView()
+        let background = LiquidGlassBackgroundView(role: .inspector)
         segmentedControl.target = self
         segmentedControl.action = #selector(tabChanged)
         segmentedControl.translatesAutoresizingMaskIntoConstraints = false
+        segmentedControl.controlSize = .small
 
         stackView.orientation = .vertical
         stackView.alignment = .leading
@@ -828,10 +1097,14 @@ private final class InspectorViewController: NSViewController {
         documentView.addSubview(stackView)
         scrollView.documentView = documentView
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        root.addSubview(background)
         root.addSubview(segmentedControl)
         root.addSubview(scrollView)
+        LiquidGlass.pin(background, to: root)
         NSLayoutConstraint.activate([
             segmentedControl.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 12),
             segmentedControl.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -12),
@@ -1070,6 +1343,7 @@ final class NewTaskWindowController: NSWindowController {
     private func configureContent() {
         guard let window else { return }
         let root = NSView()
+        let background = LiquidGlassBackgroundView(role: .sheet)
         let scrollView = NSScrollView()
         let documentView = NSView()
         let stack = NSStackView()
@@ -1162,13 +1436,18 @@ final class NewTaskWindowController: NSWindowController {
         documentView.addSubview(stack)
         scrollView.documentView = documentView
         scrollView.hasVerticalScroller = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        root.addSubview(scrollView)
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        let card = LiquidGlassSurfaceView(content: scrollView, role: .sheet, cornerRadius: 24)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(background)
+        root.addSubview(card)
+        LiquidGlass.pin(background, to: root)
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: root.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
+            card.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
+            card.topAnchor.constraint(equalTo: root.topAnchor, constant: 18),
+            card.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -18),
             stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor),
             stack.topAnchor.constraint(equalTo: documentView.topAnchor),
@@ -1176,6 +1455,7 @@ final class NewTaskWindowController: NSWindowController {
             documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor)
         ])
         window.contentView = root
+        LiquidGlass.configureWindow(window)
         updateOptionLabels()
         updateDirectoryLabel()
     }
@@ -1412,17 +1692,27 @@ final class SettingsWindowController: NSWindowController {
     }
 
     private func configureContent() {
-        tabView.translatesAutoresizingMaskIntoConstraints = false
-        window?.contentView = NSView()
-        window?.contentView?.addSubview(tabView)
-        if let contentView = window?.contentView {
-            NSLayoutConstraint.activate([
-                tabView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-                tabView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-                tabView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-                tabView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)
-            ])
-        }
+        guard let window else { return }
+        let root = NSView()
+        let background = LiquidGlassBackgroundView(role: .settings)
+        let card = LiquidGlassSurfaceView(
+            content: tabView,
+            role: .settings,
+            cornerRadius: 22,
+            contentInsets: NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        )
+        card.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(background)
+        root.addSubview(card)
+        LiquidGlass.pin(background, to: root)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 14),
+            card.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -14),
+            card.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+            card.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -14)
+        ])
+        window.contentView = root
+        LiquidGlass.configureWindow(window)
         rebuildTabs()
     }
 
@@ -1445,6 +1735,8 @@ final class SettingsWindowController: NSWindowController {
     private func scrollable(_ content: NSView) -> NSScrollView {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
         scroll.documentView = content
         content.translatesAutoresizingMaskIntoConstraints = false
         content.widthAnchor.constraint(equalToConstant: 500).isActive = true
@@ -1736,6 +2028,9 @@ final class StartupRecoveryWindowController: NSWindowController {
     }
 
     private func configureContent() {
+        guard let window else { return }
+        let root = NSView()
+        let background = LiquidGlassBackgroundView(role: .recovery)
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -1768,7 +2063,19 @@ final class StartupRecoveryWindowController: NSWindowController {
         secondRow.addArrangedSubview(reset)
         stack.addArrangedSubview(secondRow)
 
-        window?.contentView = stack
+        let card = LiquidGlassSurfaceView(content: stack, role: .recovery, cornerRadius: 24)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(background)
+        root.addSubview(card)
+        LiquidGlass.pin(background, to: root)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
+            card.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
+            card.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
+            card.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20)
+        ])
+        window.contentView = root
+        LiquidGlass.configureWindow(window)
     }
 
     private func addWrappedText(_ text: String, to stack: NSStackView) {

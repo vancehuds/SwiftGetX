@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/UI-AppKit-0A84FF.svg?style=flat&logo=apple" alt="UI: AppKit">
+  <img src="https://img.shields.io/badge/UI-AppKit%20Liquid%20Glass-0A84FF.svg?style=flat&logo=apple" alt="UI: AppKit Liquid Glass">
   <img src="https://img.shields.io/badge/Database-SwiftData-E34F26.svg?style=flat" alt="Database: SwiftData">
   <img src="https://img.shields.io/badge/Engine-HTTP%20%2F%20SwiftTorrent-darkviolet.svg?style=flat" alt="Engine: HTTP / SwiftTorrent">
   <img src="https://img.shields.io/badge/Extensions-Chrome%20%2F%20Safari-8A2BE2.svg?style=flat&logo=googlechrome" alt="Extensions: Chrome / Safari">
@@ -30,17 +30,17 @@
 
 
 
-**SwiftGetX** is a lightweight, high-performance native download manager prototype designed for macOS 14+, built using **AppKit**, **SwiftData**, and **Swift Package Manager**. It delivers a premium native macOS feel, frictionless browser takeover integration, and a highly pluggable BitTorrent engine abstraction.
+**SwiftGetX** is a lightweight, high-performance native download manager prototype designed for macOS 14+, built using **AppKit Liquid Glass**, **SwiftData**, and **Swift Package Manager**. It delivers a premium native macOS feel, frictionless browser takeover integration, and a highly pluggable BitTorrent engine abstraction.
 
 ---
 
 ## ✨ Features
 
-### 🎨 Native AppKit UI & Maintenance
-*   **macOS Premium Aesthetics**: Sleek three-pane interface conforming to macOS human interface guidelines with full support for Light & Dark mode and polished micro-interactions.
+### 🎨 AppKit Liquid Glass UI & Maintenance
+*   **macOS Premium Aesthetics**: Sleek three-pane AppKit interface with Liquid Glass surfaces, system-material fallbacks for older macOS releases, full Light & Dark mode support, and polished micro-interactions.
 *   **Polished Micro-Interactions**: Real-time inspector view, adjustable toolbar commands, user settings window, and a persistent Menu Bar status tray item.
 *   **Dynamic Localization**: Full runtime language switching for System Default, English, and Simplified Chinese (`zh-Hans`). The interface updates instantly without requiring an app relaunch, powered by a customized `AppResources` asset manager for on-demand string and bundle discovery.
-*   **Smart Clipboard Capture**: Monitors the clipboard for download links and presents them inside a native interactive suggestion banner.
+*   **Smart Clipboard Capture**: Monitors the clipboard for download links and presents them inside a floating Liquid Glass suggestion banner.
 *   **Sparkle Auto-Updates**: Seamless integration of the gold-standard [Sparkle](https://sparkle-project.org) framework. Supports automatic update checks on launch or manual check via menu items. Updates are cryptographically secured using EdDSA (Ed25519) signatures and published automatically through GitHub Actions.
 *   **SwiftData Startup Recovery (`StartupRecovery`)**: When the SwiftData `ModelContainer` is corrupted or schema-incompatible at launch, the app quarantines the affected `.store` / `.store-shm` / `.store-wal` files and presents a readable recovery panel that lets users either rebuild the store or quit, avoiding silent data loss.
 
@@ -84,7 +84,7 @@ graph TD
     Chrome["Chromium Extension (Manifest V3)"]:::browser
     Safari["Safari Web Extension"]:::browser
     NativeHost["SwiftGetXNativeHost (Lightweight C Bridge)"]:::browser
-    MainApp["SwiftGetX Main App (AppKit UI)"]:::main
+    MainApp["SwiftGetX Main App (AppKit Liquid Glass UI)"]:::main
     Models["SwiftData Persistent Models"]:::main
     StartupRecovery["StartupRecovery (SwiftData Quarantine)"]:::main
     Coordinator["Services & Coordinator Layer"]:::main
@@ -119,7 +119,7 @@ graph TD
     *   `Models/` — SwiftData models and persistence configuration (download tasks, rules, settings, checksum entities, etc.).
     *   `Services/` — Orchestration layer, including `DownloadCoordinator`, the multi-segment `HTTPDownloadEngine`, the BT `TorrentDownloadEngine`, `StartupRecovery`, `PersistenceArchive`, `SupportDiagnostics`, and more.
     *   `Services/Browser/` — Browser integration sub-modules: Chrome/Safari extension discovery, `ChromeNativeHostRegistrar`, the `BrowserBridge` bridge layer, the `BrowserDownloadRecoveryPolicy` recovery policy, and Deep Link policies.
-    *   `UI/` — AppKit controllers and views for the main split window, sidebar outline, task table, inspector tabs, new-task sheet, settings window, startup recovery window, and drag/drop source loading.
+    *   `UI/` — AppKit Liquid Glass controllers and views for the main split window, sidebar outline, task table, inspector tabs, new-task sheet, settings window, startup recovery window, and drag/drop source loading.
     *   `Utilities/` — Cross-cutting helpers plus feature tools such as `TorrentUXSupport`.
     *   `Resources/` — Icons, Chrome / Safari Web Extension bundles, localized `en.lproj` / `zh-Hans.lproj`, `AppInfo.plist`, and `Acknowledgements.md`.
 *   `Sources/SwiftGetXCore/`: Shared protocol layer. Contains deep link encoders, IPC frames, and messaging protocols.
@@ -328,7 +328,7 @@ Before distributing your custom build of SwiftGetX, note these critical macOS pl
 
 ## 🤝 Contributing
 
-We welcome all contributions, whether it is fixing micro-bugs, updating AppKit UI components, or improving SwiftTorrent behavior:
+We welcome all contributions, whether it is fixing micro-bugs, updating AppKit Liquid Glass UI components, or improving SwiftTorrent behavior:
 
 1.  Keep indentation at **4 spaces** conforming to idiomatic Swift patterns.
 2.  Annotate persistent models or views interacting with SwiftData or observable states with `@MainActor`.
