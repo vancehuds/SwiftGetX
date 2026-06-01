@@ -1,160 +1,491 @@
 import AppKit
 import SwiftData
-import SwiftUI
 import SwiftGetXCore
 import UniformTypeIdentifiers
 import UserNotifications
 
 @main
-struct SwiftGetXApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var softwareUpdater = SoftwareUpdater()
+enum SwiftGetXApp {
+    @MainActor private static var appDelegate: AppDelegate?
 
+    @MainActor
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = AppDelegate()
+        appDelegate = delegate
+        application.delegate = delegate
+        application.setActivationPolicy(.regular)
+        application.run()
+    }
+}
+
+@MainActor
+final class AppController: NSObject, NSMenuItemValidation {
+    private weak var appDelegate: AppDelegate?
     private let chromeNativeHostRegistrar = ChromeNativeHostRegistrar()
-    @State private var startupState: StartupModelContainerState
-    @State private var coordinator = DownloadCoordinator()
-    @State private var browserBridge = BrowserBridge()
-    @State private var clipboardMonitor = ClipboardMonitor()
-    @State private var appSettings = AppSettings()
-    @State private var configuredModelContainerID: ObjectIdentifier?
+    private let softwareUpdater = SoftwareUpdater()
+    private let coordinator = DownloadCoordinator()
+    private let browserBridge = BrowserBridge()
+    private let clipboardMonitor = ClipboardMonitor()
+    private let appSettings = AppSettings()
 
-    init() {
-        _startupState = State(initialValue: StartupRecoveryService.openPersistentContainer())
+    private var startupState: StartupModelContainerState
+    private var modelContainer: ModelContainer?
+    private var mainWindowController: MainWindowController?
+    private var settingsWindowController: SettingsWindowController?
+    private var newTaskWindowController: NewTaskWindowController?
+    private var startupRecoveryWindowController: StartupRecoveryWindowController?
+    private var observers = [NSObjectProtocol]()
 
+    init(appDelegate: AppDelegate) {
+        self.appDelegate = appDelegate
+        startupState = StartupRecoveryService.openPersistentContainer()
+        super.init()
+    }
+
+    func start() {
         NotificationManager.requestAuthorization()
-        WindowConfigurator.configureDefaultAppearance()
+        buildMainMenu()
+        installNotificationObservers()
+
+        switch startupState {
+        case .ready(let container):
+            configureApp(with: container)
+            showMainWindow()
+        case .failed(let issue):
+            showStartupRecovery(issue)
+        }
     }
 
-    var body: some Scene {
-        Window("SwiftGetX", id: "main") {
-            mainWindowContent
+    func applicationShouldTerminateAfterLastWindowClosed() -> Bool {
+        appSettings.keepRunningInMenuBar == false
+    }
+
+    func applicationShouldTerminate() -> NSApplication.TerminateReply {
+        guard appSettings.promptBeforeQuittingWithActiveTasks,
+              coordinator.hasActiveDownloadsForSystemPolicy
+        else {
+            return .terminateNow
         }
-        .windowStyle(.hiddenTitleBar)
-        .commands {
-            AppCommands(
-                language: appSettings.language,
+
+        let alert = NSAlert()
+        alert.messageText = L10n.string("quit_active_downloads_title")
+        alert.informativeText = L10n.string("quit_active_downloads_message")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: L10n.string("quit_pause_and_quit"))
+        alert.addButton(withTitle: L10n.string("quit_keep_running"))
+        alert.addButton(withTitle: L10n.string("quit_confirm_quit"))
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            coordinator.pauseActiveTasksForQuit()
+            return .terminateNow
+        case .alertSecondButtonReturn:
+            return .terminateCancel
+        default:
+            return .terminateNow
+        }
+    }
+
+    func handle(open urls: [URL]) {
+        NSApp.activate(ignoringOtherApps: true)
+        if urls.count > 1, let draft = DownloadInputSourceCollector.draft(urls: urls) {
+            handleDownloadDraft(draft)
+            return
+        }
+
+        for url in urls {
+            handleOpenURL(url)
+        }
+    }
+
+    func addDownloadFromService(
+        _ pasteboard: NSPasteboard,
+        userData: String?,
+        error: AutoreleasingUnsafeMutablePointer<NSString?>
+    ) {
+        guard let draft = DownloadInputSourceCollector.draft(from: pasteboard) else {
+            error.pointee = L10n.string("service_no_downloadable_input") as NSString
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        handleDownloadDraft(draft)
+    }
+
+    func focusTaskFromNotification(identifier: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let id = UUID(uuidString: identifier) else { return }
+        coordinator.selectedTaskID = id
+        coordinator.selectedTaskIDs = [id]
+        showMainWindow()
+        mainWindowController?.reload()
+        mainWindowController?.focusSelectedTask()
+    }
+
+    // MARK: - Menu
+
+    private func buildMainMenu() {
+        let mainMenu = NSMenu(title: "SwiftGetX")
+
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu(title: "SwiftGetX")
+        appMenu.addItem(withTitle: L10n.string("command_check_for_updates"), action: #selector(checkForUpdates), keyEquivalent: "")
+            .target = self
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: L10n.string("menu_settings_plain"), action: #selector(showSettings), keyEquivalent: ",")
+            .target = self
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(NSMenuItem(title: L10n.string("menu_quit_app"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        let fileMenuItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        addMenuItem(fileMenu, title: L10n.string("command_new_download"), action: #selector(showNewTask), key: "n")
+        addMenuItem(fileMenu, title: L10n.string("command_add_magnet"), action: #selector(showMagnetTask), key: "m", modifiers: [.command, .option])
+        addMenuItem(fileMenu, title: L10n.string("command_open_torrent_file"), action: #selector(openTorrentFiles), key: "t", modifiers: [.command, .option])
+        addMenuItem(fileMenu, title: L10n.string("command_paste_source"), action: #selector(pasteSourceDraft), key: "v", modifiers: [.command, .option])
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
+
+        let taskMenuItem = NSMenuItem()
+        let taskMenu = NSMenu(title: L10n.string("sidebar_tasks"))
+        addMenuItem(taskMenu, title: L10n.string("command_pause_all"), action: #selector(pauseAll), key: "p", modifiers: [.command, .shift])
+        addMenuItem(taskMenu, title: L10n.string("command_resume_all"), action: #selector(resumeAll), key: "r", modifiers: [.command, .shift])
+        taskMenu.addItem(NSMenuItem.separator())
+        addMenuItem(taskMenu, title: L10n.string("command_toggle_selected"), action: #selector(toggleSelected), key: "\r")
+        addMenuItem(taskMenu, title: L10n.string("command_retry_selected"), action: #selector(retrySelected), key: "r", modifiers: [.command, .option])
+        addMenuItem(taskMenu, title: L10n.string("command_recheck_selected"), action: #selector(recheckSelected), key: "k", modifiers: [.command, .option])
+        addMenuItem(taskMenu, title: L10n.string("command_reveal_selected"), action: #selector(revealSelected), key: "o", modifiers: [.command, .option])
+        addMenuItem(taskMenu, title: L10n.string("command_delete_selected"), action: #selector(confirmSelectedTaskRemoval), key: "\u{8}", modifiers: [])
+        taskMenu.addItem(NSMenuItem.separator())
+        addMenuItem(taskMenu, title: L10n.string("command_focus_search"), action: #selector(focusSearch), key: "f")
+        taskMenuItem.submenu = taskMenu
+        mainMenu.addItem(taskMenuItem)
+
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: L10n.string("menu_open_app"), action: #selector(showMainWindowFromMenu), keyEquivalent: "0")
+            .target = self
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
+
+        NSApp.mainMenu = mainMenu
+    }
+
+    private func addMenuItem(
+        _ menu: NSMenu,
+        title: String,
+        action: Selector,
+        key: String,
+        modifiers: NSEvent.ModifierFlags = [.command]
+    ) {
+        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
+        item.target = self
+        item.keyEquivalentModifierMask = modifiers
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(checkForUpdates):
+            return softwareUpdater.canCheckForUpdates
+        case #selector(toggleSelected), #selector(retrySelected), #selector(recheckSelected),
+             #selector(revealSelected), #selector(confirmSelectedTaskRemoval):
+            return !coordinator.selectedTasks.isEmpty
+        case #selector(pauseAll):
+            return coordinator.hasActiveDownloadsForSystemPolicy
+        default:
+            return true
+        }
+    }
+
+    @objc private func showMainWindowFromMenu() {
+        showMainWindow()
+    }
+
+    @objc private func checkForUpdates() {
+        softwareUpdater.checkForUpdates()
+    }
+
+    @objc private func showNewTask() {
+        presentNewTask(draft: nil)
+    }
+
+    @objc private func showMagnetTask() {
+        presentNewTask(draft: DownloadDraft(source: "", sourceCount: 0, prefersTorrentInput: true))
+    }
+
+    @objc private func openTorrentFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [UTType(filenameExtension: "torrent") ?? .data]
+        guard panel.runModal() == .OK else { return }
+        let paths = panel.urls.map(\.path)
+        guard !paths.isEmpty else { return }
+        presentNewTask(
+            draft: DownloadDraft(
+                source: paths.joined(separator: "\n"),
+                sourceCount: paths.count,
+                prefersTorrentInput: true
+            )
+        )
+    }
+
+    @objc private func pasteSourceDraft() {
+        guard let source = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !source.isEmpty
+        else {
+            presentNewTask(draft: nil)
+            return
+        }
+
+        presentNewTask(
+            draft: DownloadDraft(
+                source: source,
+                sourceCount: SourceParser.extractSources(from: source).count,
+                prefersTorrentInput: Self.looksLikeTorrentSource(source)
+            )
+        )
+    }
+
+    @objc private func pauseAll() {
+        coordinator.pauseAll()
+        mainWindowController?.reload()
+    }
+
+    @objc private func resumeAll() {
+        coordinator.resumeAll()
+        mainWindowController?.reload()
+    }
+
+    @objc private func toggleSelected() {
+        if coordinator.selectedTasks.contains(where: { $0.usesActiveDownloadSlot || $0.status == .seeding }) {
+            coordinator.pauseSelected()
+        } else {
+            coordinator.resumeSelected()
+        }
+        mainWindowController?.reload()
+    }
+
+    @objc private func retrySelected() {
+        coordinator.retrySelected()
+        mainWindowController?.reload()
+    }
+
+    @objc private func recheckSelected() {
+        coordinator.recheckSelected()
+        mainWindowController?.reload()
+    }
+
+    @objc private func revealSelected() {
+        coordinator.revealSelectedInFinder()
+    }
+
+    @objc private func confirmSelectedTaskRemoval() {
+        mainWindowController?.confirmSelectedTaskRemoval()
+    }
+
+    @objc private func focusSearch() {
+        showMainWindow()
+        mainWindowController?.focusSearch()
+    }
+
+    @objc private func showSettings() {
+        presentSettings()
+    }
+
+    // MARK: - Windows
+
+    private func showMainWindow() {
+        guard case .ready = startupState else { return }
+        if mainWindowController == nil {
+            mainWindowController = MainWindowController(
                 coordinator: coordinator,
-                updater: softwareUpdater
+                settings: appSettings,
+                clipboardMonitor: clipboardMonitor,
+                onNewTask: { [weak self] draft in self?.presentNewTask(draft: draft) },
+                onSettings: { [weak self] in self?.presentSettings() }
             )
         }
-
-        Settings {
-            settingsContent
-        }
+        mainWindowController?.showWindow(nil)
+        mainWindowController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
-    @MainActor
-    @ViewBuilder
-    private var mainWindowContent: some View {
-        switch startupState {
-        case .ready(let modelContainer):
-            ContentView()
-                .environment(coordinator)
-                .environment(browserBridge)
-                .environment(clipboardMonitor)
-                .environment(appSettings)
-                .modelContainer(modelContainer)
-                .task {
-                    configureApp(with: modelContainer)
-                }
-                .onOpenURL { url in
-                    handleOpenURL(url)
-                }
-        case .failed(let issue):
-            StartupRecoveryView(
-                issue: issue,
-                onRetry: retryStartup,
-                onUseTemporaryStore: useTemporaryStore,
-                onBackupAndReset: backupAndResetPersistentStore
+    private func showStartupRecovery(_ issue: StartupRecoveryIssue) {
+        startupRecoveryWindowController = StartupRecoveryWindowController(
+            issue: issue,
+            onRetry: { [weak self] in self?.retryStartup() },
+            onUseTemporaryStore: { [weak self] in self?.useTemporaryStore() },
+            onBackupAndReset: { [weak self] in self?.backupAndResetPersistentStore() }
+        )
+        startupRecoveryWindowController?.showWindow(nil)
+        startupRecoveryWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    private func presentSettings() {
+        guard let modelContainer else { return }
+        if settingsWindowController == nil {
+            settingsWindowController = SettingsWindowController(
+                settings: appSettings,
+                coordinator: coordinator,
+                updater: softwareUpdater,
+                modelContext: modelContainer.mainContext
             )
-            .onOpenURL { url in
-                handleOpenURLWhenPersistenceUnavailable(url)
+        }
+        settingsWindowController?.showWindow(nil)
+        settingsWindowController?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func presentNewTask(draft: DownloadDraft?) {
+        guard case .ready = startupState else {
+            if let draft {
+                handleOpenURLWhenPersistenceUnavailable(URL(string: draft.source) ?? URL(fileURLWithPath: draft.source))
             }
+            return
+        }
+
+        PendingNativeHandoffPolicy.rejectIfReplaced(
+            current: newTaskWindowController?.draft,
+            incoming: draft
+        )
+
+        let controller = NewTaskWindowController(
+            draft: draft,
+            settings: appSettings,
+            coordinator: coordinator,
+            onComplete: { [weak self] in
+                self?.newTaskWindowController = nil
+                self?.mainWindowController?.reload()
+            }
+        )
+        newTaskWindowController = controller
+
+        if let mainWindow = mainWindowController?.window {
+            mainWindow.beginSheet(controller.window!) { [weak self] _ in
+                self?.newTaskWindowController = nil
+                self?.mainWindowController?.reload()
+            }
+        } else {
+            controller.showWindow(nil)
+            controller.window?.makeKeyAndOrderFront(nil)
         }
     }
 
-    @MainActor
-    @ViewBuilder
-    private var settingsContent: some View {
-        switch startupState {
-        case .ready(let modelContainer):
-            SettingsView(updater: softwareUpdater)
-                .environment(appSettings)
-                .environment(coordinator)
-                .modelContainer(modelContainer)
-                .frame(minWidth: 420, idealWidth: 520, minHeight: 390, idealHeight: 480)
-                .id(appSettings.language)
-        case .failed(let issue):
-            StartupRecoveryView(
-                issue: issue,
-                onRetry: retryStartup,
-                onUseTemporaryStore: useTemporaryStore,
-                onBackupAndReset: backupAndResetPersistentStore
-            )
-            .frame(minWidth: 420, idealWidth: 520, minHeight: 390, idealHeight: 480)
-        }
-    }
+    // MARK: - Startup
 
-    @MainActor
     private func configureApp(with modelContainer: ModelContainer) {
-        let modelContainerID = ObjectIdentifier(modelContainer)
-        guard configuredModelContainerID != modelContainerID else { return }
-        configuredModelContainerID = modelContainerID
-
+        self.modelContainer = modelContainer
         loadSettings(modelContainer: modelContainer)
         coordinator.attach(modelContext: modelContainer.mainContext, settings: appSettings)
-        appDelegate.attachMenuBar(coordinator: coordinator, settings: appSettings)
+        appDelegate?.attachMenuBar(coordinator: coordinator, settings: appSettings)
         browserBridge.attach(coordinator: coordinator)
         clipboardMonitor.attach(coordinator: coordinator, settings: appSettings)
         coordinator.restoreIncompleteTasks()
         registerChromeNativeHost()
     }
 
-    @MainActor
     private func retryStartup() {
         startupState = StartupRecoveryService.openPersistentContainer()
-    }
+        startupRecoveryWindowController?.close()
+        startupRecoveryWindowController = nil
 
-    @MainActor
-    private func useTemporaryStore() {
-        do {
-            startupState = .ready(try StartupRecoveryService.makeTemporaryContainer())
-        } catch {
-            startupState = .failed(StartupRecoveryService.issue(for: error))
+        switch startupState {
+        case .ready(let container):
+            configureApp(with: container)
+            showMainWindow()
+        case .failed(let issue):
+            showStartupRecovery(issue)
         }
     }
 
-    @MainActor
+    private func useTemporaryStore() {
+        do {
+            startupState = .ready(try StartupRecoveryService.makeTemporaryContainer())
+            startupRecoveryWindowController?.close()
+            startupRecoveryWindowController = nil
+            if case .ready(let container) = startupState {
+                configureApp(with: container)
+            }
+            showMainWindow()
+        } catch {
+            startupState = .failed(StartupRecoveryService.issue(for: error))
+            if case .failed(let issue) = startupState {
+                showStartupRecovery(issue)
+            }
+        }
+    }
+
     private func backupAndResetPersistentStore() {
         do {
             _ = try StartupRecoveryService.backupAndResetPersistentStore()
             retryStartup()
         } catch {
             startupState = .failed(StartupRecoveryService.issue(for: error))
+            if case .failed(let issue) = startupState {
+                showStartupRecovery(issue)
+            }
         }
     }
 
-    @MainActor
+    // MARK: - Notifications
+
+    private func installNotificationObservers() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: .showNewTaskSheet, object: nil, queue: .main) { [weak self] notification in
+            let draft = notification.object as? DownloadDraft
+            Task { @MainActor in self?.presentNewTask(draft: draft) }
+        })
+        observers.append(center.addObserver(forName: .pauseAllDownloads, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.pauseAll() }
+        })
+        observers.append(center.addObserver(forName: .resumeAllDownloads, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.resumeAll() }
+        })
+        observers.append(center.addObserver(forName: .openSwiftGetXSettings, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.presentSettings() }
+        })
+        observers.append(center.addObserver(forName: .focusTaskSearch, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.focusSearch() }
+        })
+        observers.append(center.addObserver(forName: .confirmSelectedTaskRemoval, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.confirmSelectedTaskRemoval() }
+        })
+        observers.append(center.addObserver(forName: .focusTaskFromNotification, object: nil, queue: .main) { [weak self] notification in
+            guard let identifier = notification.object as? String else { return }
+            Task { @MainActor in self?.focusTaskFromNotification(identifier: identifier) }
+        })
+    }
+
+    // MARK: - URL handling
+
     private func handleOpenURL(_ url: URL) {
-        NSApp.activate(ignoringOtherApps: true)
-        if let draft = DeepLinkParser.downloadDraft(from: url) {
-            handleDownloadDraft(draft)
-        } else if DeepLinkParser.isDownloadURL(url) {
-            return
-        } else if let setupRequest = DeepLinkParser.browserSetupRequest(from: url) {
-            handleBrowserSetupRequest(setupRequest)
-        } else if DeepLinkParser.isBrowserSetupURL(url) {
-            return
-        } else if let draft = DownloadInputSourceCollector.draft(urls: [url]) {
-            handleDownloadDraft(draft)
-        } else {
-            coordinator.add(source: url.absoluteString)
+        switch startupState {
+        case .failed:
+            handleOpenURLWhenPersistenceUnavailable(url)
+        case .ready:
+            if let draft = DeepLinkParser.downloadDraft(from: url) {
+                handleDownloadDraft(draft)
+            } else if DeepLinkParser.isDownloadURL(url) {
+                return
+            } else if let setupRequest = DeepLinkParser.browserSetupRequest(from: url) {
+                handleBrowserSetupRequest(setupRequest)
+            } else if DeepLinkParser.isBrowserSetupURL(url) {
+                return
+            } else if let draft = DownloadInputSourceCollector.draft(urls: [url]) {
+                handleDownloadDraft(draft)
+            } else {
+                coordinator.add(source: url.absoluteString)
+                mainWindowController?.reload()
+            }
         }
     }
 
-    @MainActor
     private func handleOpenURLWhenPersistenceUnavailable(_ url: URL) {
-        NSApp.activate(ignoringOtherApps: true)
         guard let draft = DeepLinkParser.downloadDraft(from: url) else { return }
         acknowledgeNativeHandoff(
             draft,
@@ -166,7 +497,6 @@ struct SwiftGetXApp: App {
         )
     }
 
-    @MainActor
     private func handleDownloadDraft(_ draft: DownloadDraft) {
         if let resolution = PendingNativeHandoffPolicy.expirationResolution(draft: draft) {
             PendingNativeHandoffPolicy.acknowledge(resolution)
@@ -213,7 +543,6 @@ struct SwiftGetXApp: App {
         handleDownloadDraftWithContext(draft)
     }
 
-    @MainActor
     private func handleDownloadDraftWithContext(_ draft: DownloadDraft) {
         if let resolution = PendingNativeHandoffPolicy.expirationResolution(draft: draft) {
             PendingNativeHandoffPolicy.acknowledge(resolution)
@@ -233,7 +562,7 @@ struct SwiftGetXApp: App {
         if draft.requiresUserConfirmation
             || (draft.isTrustedNativeHandoff && draft.isBrowserTakeover && appSettings.confirmBrowserTakeoverDownloads)
         {
-            NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
+            presentNewTask(draft: draft)
         } else {
             let tasks = coordinator.add(
                 source: draft.source,
@@ -247,6 +576,7 @@ struct SwiftGetXApp: App {
                     requiresUserConfirmation: false
                 )
             )
+            mainWindowController?.reload()
         }
     }
 
@@ -298,7 +628,6 @@ struct SwiftGetXApp: App {
         return true
     }
 
-    @MainActor
     private func handleBrowserSetupRequest(_ request: BrowserSetupRequest) {
         guard chromeNativeHostRegistrar.isSupportedBrowserName(request.browser) else { return }
         let compatibility = BrowserIntegrationCompatibility.extensionCompatibility(
@@ -328,12 +657,10 @@ struct SwiftGetXApp: App {
         _ = chromeNativeHostRegistrar.pairAndRegister(extensionID: request.extensionID)
     }
 
-    @MainActor
     private func registerChromeNativeHost() {
         _ = chromeNativeHostRegistrar.register()
     }
 
-    @MainActor
     private func loadSettings(modelContainer: ModelContainer) {
         let context = modelContainer.mainContext
         let descriptor = FetchDescriptor<AppSettingsRecord>(
@@ -348,7 +675,6 @@ struct SwiftGetXApp: App {
         }
     }
 
-    @MainActor
     private func confirmChromePairing(_ request: BrowserSetupRequest) -> Bool {
         let alert = NSAlert()
         alert.messageText = L10n.string("alert_allow_browser_pairing_title", request.browser)
@@ -359,7 +685,6 @@ struct SwiftGetXApp: App {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
-    @MainActor
     private func showChromePairingRejectedAlert(extensionID: String) {
         let alert = NSAlert()
         alert.messageText = L10n.string("alert_browser_pairing_rejected_title")
@@ -369,7 +694,6 @@ struct SwiftGetXApp: App {
         alert.runModal()
     }
 
-    @MainActor
     private func showBrowserCompatibilityRejectedAlert(message: String) {
         let alert = NSAlert()
         alert.messageText = L10n.string("alert_browser_pairing_incompatible_title")
@@ -378,137 +702,73 @@ struct SwiftGetXApp: App {
         alert.addButton(withTitle: L10n.string("action_ok"))
         alert.runModal()
     }
-}
-
-struct AppCommands: Commands {
-    let language: AppLanguage
-    let coordinator: DownloadCoordinator
-    let updater: SoftwareUpdater
-
-    var body: some Commands {
-        CommandGroup(after: .appInfo) {
-            CheckForUpdatesView(updater: updater)
-                .id(language)
-        }
-        CommandGroup(after: .newItem) {
-            Button(L10n.string("command_new_download")) {
-                NotificationCenter.default.post(name: .showNewTaskSheet, object: nil)
-            }
-            .keyboardShortcut("n")
-
-            Button(L10n.string("command_add_magnet")) {
-                presentTorrentInput()
-            }
-            .keyboardShortcut("m", modifiers: [.command, .option])
-
-            Button(L10n.string("command_open_torrent_file")) {
-                openTorrentFiles()
-            }
-            .keyboardShortcut("t", modifiers: [.command, .option])
-
-            Button(L10n.string("command_paste_source")) {
-                pasteSourceDraft()
-            }
-            .keyboardShortcut("v", modifiers: [.command, .option])
-
-            Button(L10n.string("command_pause_all")) {
-                coordinator.pauseAll()
-            }
-            .keyboardShortcut("p", modifiers: [.command, .shift])
-
-            Button(L10n.string("command_resume_all")) {
-                coordinator.resumeAll()
-            }
-            .keyboardShortcut("r", modifiers: [.command, .shift])
-
-            Divider()
-
-            Button(L10n.string("command_toggle_selected")) {
-                if coordinator.selectedTasks.contains(where: { $0.usesActiveDownloadSlot || $0.status == .seeding }) {
-                    coordinator.pauseSelected()
-                } else {
-                    coordinator.resumeSelected()
-                }
-            }
-            .keyboardShortcut(.return, modifiers: [.command])
-
-            Button(L10n.string("command_retry_selected")) {
-                coordinator.retrySelected()
-            }
-            .keyboardShortcut("r", modifiers: [.command, .option])
-
-            Button(L10n.string("command_recheck_selected")) {
-                coordinator.recheckSelected()
-            }
-            .keyboardShortcut("k", modifiers: [.command, .option])
-
-            Button(L10n.string("command_reveal_selected")) {
-                coordinator.revealSelectedInFinder()
-            }
-            .keyboardShortcut("o", modifiers: [.command, .option])
-
-            Button(L10n.string("command_delete_selected")) {
-                NotificationCenter.default.post(name: .confirmSelectedTaskRemoval, object: nil)
-            }
-            .keyboardShortcut(.delete, modifiers: [])
-
-            Button(L10n.string("command_focus_search")) {
-                NotificationCenter.default.post(name: .focusTaskSearch, object: nil)
-            }
-            .keyboardShortcut("f")
-        }
-    }
-
-    private func presentTorrentInput() {
-        NotificationCenter.default.post(
-            name: .showNewTaskSheet,
-            object: DownloadDraft(source: "", sourceCount: 0, prefersTorrentInput: true)
-        )
-    }
-
-    private func pasteSourceDraft() {
-        guard let source = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !source.isEmpty
-        else {
-            NotificationCenter.default.post(name: .showNewTaskSheet, object: nil)
-            return
-        }
-
-        NotificationCenter.default.post(
-            name: .showNewTaskSheet,
-            object: DownloadDraft(
-                source: source,
-                sourceCount: SourceParser.extractSources(from: source).count,
-                prefersTorrentInput: Self.looksLikeTorrentSource(source)
-            )
-        )
-    }
-
-    private func openTorrentFiles() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [UTType(filenameExtension: "torrent") ?? .data]
-        guard panel.runModal() == .OK else { return }
-
-        let paths = panel.urls.map(\.path)
-        guard !paths.isEmpty else { return }
-
-        NotificationCenter.default.post(
-            name: .showNewTaskSheet,
-            object: DownloadDraft(
-                source: paths.joined(separator: "\n"),
-                sourceCount: paths.count,
-                prefersTorrentInput: true
-            )
-        )
-    }
 
     private static func looksLikeTorrentSource(_ source: String) -> Bool {
         SourceParser.extractSources(from: source).contains { candidate in
             let kind = SourceParser.kind(for: candidate)
             return kind == .torrentMagnet || kind == .torrentFile
+        }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotificationCenterDelegate {
+    private var appController: AppController?
+    private var menuBarController: MenuBarController?
+    private var coordinator: DownloadCoordinator?
+    private var settings: AppSettings?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationManager.setDelegate(self)
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
+        let controller = AppController(appDelegate: self)
+        appController = controller
+        controller.start()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Native Messaging host registration also happens during app setup and
+        // browser pairing. Keeping this event quiet avoids duplicate repair work.
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        appController?.handle(open: urls)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        appController?.applicationShouldTerminateAfterLastWindowClosed() ?? true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        appController?.applicationShouldTerminate() ?? .terminateNow
+    }
+
+    @objc(addDownloadFromService:userData:error:)
+    func addDownloadFromService(
+        _ pasteboard: NSPasteboard,
+        userData: String?,
+        error: AutoreleasingUnsafeMutablePointer<NSString?>
+    ) {
+        appController?.addDownloadFromService(pasteboard, userData: userData, error: error)
+    }
+
+    func attachMenuBar(coordinator: DownloadCoordinator, settings: AppSettings) {
+        self.coordinator = coordinator
+        self.settings = settings
+        if menuBarController == nil {
+            menuBarController = MenuBarController()
+        }
+        menuBarController?.attach(coordinator: coordinator, settings: settings)
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let identifier = response.notification.request.identifier
+        await MainActor.run {
+            appController?.focusTaskFromNotification(identifier: identifier)
         }
     }
 }
@@ -664,111 +924,9 @@ struct BrowserSetupRequest: Equatable {
     var minimumNativeHostVersion: String?
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    private var menuBarController: MenuBarController?
-    private let chromeNativeHostRegistrar = ChromeNativeHostRegistrar()
-    private var coordinator: DownloadCoordinator?
-    private var settings: AppSettings?
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NotificationManager.setDelegate(self)
-        menuBarController = MenuBarController()
-        NSApp.servicesProvider = self
-        NSUpdateDynamicServices()
-        registerChromeNativeHost()
-    }
-
-    func applicationDidBecomeActive(_ notification: Notification) {
-        registerChromeNativeHost()
-    }
-
-    func application(_ application: NSApplication, open urls: [URL]) {
-        guard let draft = DownloadInputSourceCollector.draft(urls: urls) else { return }
-        postDownloadDraft(draft)
-    }
-
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        settings?.keepRunningInMenuBar == false
-    }
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard settings?.promptBeforeQuittingWithActiveTasks ?? true,
-              let coordinator,
-              coordinator.hasActiveDownloadsForSystemPolicy
-        else {
-            return .terminateNow
-        }
-
-        let alert = NSAlert()
-        alert.messageText = L10n.string("quit_active_downloads_title")
-        alert.informativeText = L10n.string("quit_active_downloads_message")
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: L10n.string("quit_pause_and_quit"))
-        alert.addButton(withTitle: L10n.string("quit_keep_running"))
-        alert.addButton(withTitle: L10n.string("quit_confirm_quit"))
-
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            coordinator.pauseActiveTasksForQuit()
-            return .terminateNow
-        case .alertSecondButtonReturn:
-            return .terminateCancel
-        default:
-            return .terminateNow
-        }
-    }
-
-    @objc(addDownloadFromService:userData:error:)
-    func addDownloadFromService(
-        _ pasteboard: NSPasteboard,
-        userData: String?,
-        error: AutoreleasingUnsafeMutablePointer<NSString?>
-    ) {
-        guard let draft = DownloadInputSourceCollector.draft(from: pasteboard) else {
-            error.pointee = L10n.string("service_no_downloadable_input") as NSString
-            return
-        }
-        postDownloadDraft(draft)
-    }
-
-    @MainActor
-    func attachMenuBar(coordinator: DownloadCoordinator, settings: AppSettings) {
-        self.coordinator = coordinator
-        self.settings = settings
-        if menuBarController == nil {
-            menuBarController = MenuBarController()
-        }
-        menuBarController?.attach(coordinator: coordinator, settings: settings)
-    }
-
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
-        let identifier = response.notification.request.identifier
-        await MainActor.run {
-            NSApp.activate(ignoringOtherApps: true)
-            NotificationCenter.default.post(
-                name: .focusTaskFromNotification,
-                object: identifier
-            )
-        }
-    }
-
-    private func registerChromeNativeHost() {
-        _ = chromeNativeHostRegistrar.register()
-    }
-
-    private func postDownloadDraft(_ draft: DownloadDraft) {
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-            NotificationCenter.default.post(name: .showNewTaskSheet, object: draft)
-        }
-    }
-}
-
 extension Notification.Name {
     static let showNewTaskSheet = Notification.Name("SwiftGetX.showNewTaskSheet")
     static let focusTaskFromNotification = Notification.Name("SwiftGetX.focusTaskFromNotification")
     static let focusTaskSearch = Notification.Name("SwiftGetX.focusTaskSearch")
+    static let confirmSelectedTaskRemoval = Notification.Name("SwiftGetX.confirmSelectedTaskRemoval")
 }

@@ -1,5 +1,4 @@
 import Combine
-import SwiftUI
 import Sparkle
 
 enum SoftwareUpdateManualCheckStatus: Equatable {
@@ -11,8 +10,8 @@ enum SoftwareUpdateManualCheckStatus: Equatable {
     case failed(String)
 }
 
-/// Wraps Sparkle's `SPUStandardUpdaterController` for SwiftUI, publishing
-/// updater state so menus and settings can reactively enable/disable controls.
+/// Wraps Sparkle's `SPUStandardUpdaterController`, publishing updater state so
+/// menus and settings can reactively enable/disable controls.
 @MainActor
 final class SoftwareUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     private var updaterController: SPUStandardUpdaterController!
@@ -155,19 +154,5 @@ final class SoftwareUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         if case .requested = manualCheckStatus {
             manualCheckStatus = .upToDate(Date())
         }
-    }
-}
-
-/// A SwiftUI view that triggers a user-initiated update check.
-/// Intended for use inside a `CommandGroup`.
-struct CheckForUpdatesView: View {
-    @ObservedObject var updater: SoftwareUpdater
-
-    var body: some View {
-        Button(L10n.string("command_check_for_updates")) {
-            updater.checkForUpdates()
-        }
-        .disabled(!updater.canCheckForUpdates)
-        .help(updater.manualCheckStatusText)
     }
 }
